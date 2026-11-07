@@ -38,15 +38,10 @@ def main():
     env['CARGO_CFG_TARGET_OS']='windows';env['CARGO_CFG_TARGET_ARCH']='x86_64';env['TARGET']='x86_64-pc-windows-msvc'
     env['OPT_LEVEL']='0';env.pop('SLINT_LIVE_PREVIEW',None)
     deps=args.deps_root/'deps'
+    from updater_cached_deps import Cache
+    cache=Cache(args.deps_root)
     def lib(name):
-        files=sorted(deps.glob(f'lib{name}-*.rlib'),key=lambda x:x.stat().st_mtime,reverse=True)
-        if not files:raise RuntimeError(f'missing cached {name}')
-        if name=='serde':
-            json_lib=lib('serde_json')
-            fp=json.loads((args.deps_root/'.fingerprint'/json_lib.stem.removeprefix('lib')/'lib-serde_json.json').read_text())
-            wanted=next(d[3] for d in fp['deps'] if d[1]=='serde_core')
-            files=[f for f in files if next(d[3] for d in json.loads((args.deps_root/'.fingerprint'/f.stem.removeprefix('lib')/'lib-serde.json').read_text())['deps'] if d[1]=='serde_core')==wanted]
-        return files[0]
+        return cache.lib(name, '0.10.' if name=='sha2' else '1.' if name=='semver' else None)
     compiler=out/'compile_ui.rs'
     compiler.write_text('fn main() { slint_build::compile_with_config(std::env::args().nth(1).unwrap(), slint_build::CompilerConfiguration::new().with_style("fluent".into())).unwrap(); }')
     compiler_exe=out/'compile-ui.exe'
@@ -111,5 +106,16 @@ fn bind_callbacks(window:&YapfastWindow,adapter:&Rc<RefCell<Adapter>>) { updater
     for folder in sorted({f.parent for f in (args.deps_root/'build').rglob('*.lib')}):command+=['-L',f'native={folder}']
     for folder in (Path.home()/'.cargo/registry/src').glob('*/windows_x86_64_msvc-*/lib'):command+=['-L',f'native={folder}']
     subprocess.run(command,env=env,cwd=root,check=True,creationflags=priority)
-    return subprocess.run([str(exe),'ui_callbacks::','--test-threads=1','--nocapture'],env=env,cwd=root,timeout=60,creationflags=priority).returncode
+    # Compile an owned gh stand-in. Only the isolated startup test has this PATH;
+    # even its RED execution cannot reach the user's official gh/account.
+    gh_fixture=out/'gh.exe'
+    fixture_command=['rustc','--edition=2024',str(root/'testing/updater_process_fixture.rs'),'-L',f'dependency={deps}','-C','target-feature=+crt-static','-C','codegen-units=1','-o',str(gh_fixture)]
+    for name in ['serde','serde_json','sha2','semver']: fixture_command+=['--extern',f'{name}={lib(name)}']
+    subprocess.run(fixture_command,env=env,cwd=root,check=True,creationflags=priority)
+    result=subprocess.run([str(exe),'ui_callbacks::','--test-threads=1','--nocapture'],env=env,cwd=root,timeout=60,creationflags=priority)
+    if result.returncode:return result.returncode
+    startup_env=dict(env);startup_env['PATH']=str(out)
+    startup_env['HARMONY_FIXTURE_GH_LOG']=str(out/'gh-invocations.log')
+    Path(startup_env['HARMONY_FIXTURE_GH_LOG']).unlink(missing_ok=True)
+    return subprocess.run([str(exe),'--exact','ui_callbacks::harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh','--ignored','--nocapture'],env=startup_env,cwd=root,timeout=60,creationflags=priority).returncode
 if __name__=='__main__':raise SystemExit(main())

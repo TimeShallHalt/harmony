@@ -14,6 +14,69 @@ fn fixture() -> (tempfile::TempDir, YapfastWindow, Rc<RefCell<Adapter>>) {
     (dir, window, state)
 }
 #[test]
+#[ignore = "requires runner-owned gh PATH and a separate testing event loop"]
+fn harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh() {
+    i_slint_backend_testing::init_integration_test_with_system_time();
+    let log = PathBuf::from(
+        std::env::var_os("HARMONY_FIXTURE_GH_LOG").expect("runner-owned log and gh PATH required"),
+    );
+    let count = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let pump = || {
+        slint::Timer::single_shot(std::time::Duration::from_millis(400), || {
+            let _ = slint::quit_event_loop();
+        });
+        slint::run_event_loop().unwrap();
+    };
+    for saved in [
+        "{}",
+        r#"{"check_on_startup":true,"download_automatically":true}"#,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let window = YapfastWindow::new().unwrap();
+        let state = Adapter::new(
+            Arc::new(BackgroundRuntime::new().unwrap()),
+            dir.path().into(),
+            &window,
+        )
+        .unwrap();
+        state.borrow_mut().layout.harmony_updates = serde_json::from_str(saved).unwrap();
+        bind_callbacks(&window, &state);
+        let before = count();
+        updater_info::startup(&window, &state, false);
+        pump();
+        assert_eq!(
+            count(),
+            before,
+            "normal fresh/migrated startup invoked gh without consent"
+        );
+        assert!(!window.global::<HarmonyUpdates>().get_check_on_startup());
+        assert!(
+            !window
+                .global::<HarmonyUpdates>()
+                .get_download_automatically()
+        );
+        window.global::<HarmonyUpdates>().invoke_check();
+        pump();
+        assert_eq!(
+            count(),
+            before + 2,
+            "manual check still runs fixture gh auth/api without auto consent"
+        );
+        window
+            .global::<HarmonyUpdates>()
+            .invoke_preferences_changed(true, false);
+        state.borrow_mut().layout.harmony_updates.last_check_unix = None;
+        updater_info::startup(&window, &state, false);
+        pump();
+        assert_eq!(count(), before + 4, "explicit opt-in enables startup check");
+    }
+}
+#[test]
 fn harmony_about_uses_running_build_and_copies_only_allowlisted_diagnostics() {
     let (_dir, window, _state) = fixture();
     window.set_settings_section(9);

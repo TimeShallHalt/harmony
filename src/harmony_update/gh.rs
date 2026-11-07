@@ -137,10 +137,18 @@ pub fn run_command(
                         return Err(Error::Size);
                     }
                     #[cfg(test)]
-                    BEFORE_WRITE.with(|hook| { if let Some(hook) = hook.borrow_mut().take() { hook(); } });
-                    output
-                        .write_all(&b)
-                        .map_err(|_| if cancel.check().is_err() { Error::Cancelled } else { Error::Io("write update download") })?;
+                    BEFORE_WRITE.with(|hook| {
+                        if let Some(hook) = hook.borrow_mut().take() {
+                            hook();
+                        }
+                    });
+                    output.write_all(&b).map_err(|_| {
+                        if cancel.check().is_err() {
+                            Error::Cancelled
+                        } else {
+                            Error::Io("write update download")
+                        }
+                    })?;
                 }
                 Ok(Err(())) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(Error::Network);

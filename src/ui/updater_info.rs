@@ -31,7 +31,7 @@ fn present(window: &YapfastWindow, controller: &Controller) {
         state
             .staged
             .as_ref()
-            .is_some_and(|(_, p)| p.phase == Phase::Staged),
+            .is_some_and(|(_, p)| matches!(p.phase, Phase::Staged | Phase::Applying)),
     );
     ui.set_may_discard(
         state
@@ -68,12 +68,14 @@ fn preferences(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
     let adapter = adapter.borrow();
     let prefs = &adapter.layout.harmony_updates;
     let ui = window.global::<HarmonyUpdates>();
-    ui.set_check_on_startup(prefs.check_on_startup);
-    ui.set_download_automatically(prefs.download_automatically);
+    ui.set_check_on_startup(prefs.automatic_checks_enabled());
+    ui.set_download_automatically(prefs.automatic_downloads_enabled());
 }
 fn request_check(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>, automatic: bool) {
     let mut state = adapter.borrow_mut();
-    if state.harmony_updates.busy() {
+    if state.harmony_updates.busy()
+        || (automatic && !state.layout.harmony_updates.automatic_checks_enabled())
+    {
         return;
     }
     let mut next = state.layout.clone();
@@ -90,7 +92,7 @@ fn request_check(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>, automat
         ));
         return;
     }
-    let download = automatic && next.harmony_updates.download_automatically;
+    let download = automatic && next.harmony_updates.automatic_downloads_enabled();
     state.layout = next;
     let controller = state.harmony_updates.clone();
     drop(state);
@@ -175,6 +177,7 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
     window.global::<HarmonyUpdates>().on_preferences_changed(move |check, download| {
         let (Some(window), Some(state)) = (weak.upgrade(), state.upgrade()) else { return; };
         let mut adapter = state.borrow_mut(); let mut next = adapter.layout.clone();
+        next.harmony_updates.consent_version = 1;
         next.harmony_updates.check_on_startup = check; next.harmony_updates.download_automatically = download;
         match next.try_write(&adapter.root) {
             Ok(()) => { adapter.layout = next; adapter.harmony_updates.status("Update preferences saved. Checks occur only on app startup or manual request."); }
@@ -208,7 +211,7 @@ pub(super) fn startup(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>, pr
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0, |v| v.as_secs());
                 !state.harmony_updates.snapshot().staged.is_some()
-                    && startup_due(p.check_on_startup, now, p.last_check_unix)
+                    && startup_due(p.automatic_checks_enabled(), now, p.last_check_unix)
             };
             if due {
                 request_check(&window, &state, true);

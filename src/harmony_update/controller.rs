@@ -5,6 +5,8 @@ use transaction::{Phase, Plan};
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    // Missing in pre-consent layouts: old default-true values are not consent.
+    pub consent_version: u8,
     pub check_on_startup: bool,
     pub download_automatically: bool,
     pub last_check_unix: Option<u64>,
@@ -12,10 +14,19 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            check_on_startup: true,
+            consent_version: 0,
+            check_on_startup: false,
             download_automatically: false,
             last_check_unix: None,
         }
+    }
+}
+impl Preferences {
+    pub fn automatic_checks_enabled(&self) -> bool {
+        self.consent_version == 1 && self.check_on_startup
+    }
+    pub fn automatic_downloads_enabled(&self) -> bool {
+        self.consent_version == 1 && self.download_automatically
     }
 }
 pub fn startup_due(enabled: bool, now: u64, last: Option<u64>) -> bool {
@@ -88,13 +99,18 @@ impl Controller {
     pub fn load_pending(&self) -> Result<()> {
         let _operation = self.begin("Reading saved update state…")?;
         let result = (|| {
-            let pending = transaction::pending(self.install.as_ref().map_err(Clone::clone)?)?;
+            let install = self.install.as_ref().map_err(Clone::clone)?;
+            let reconciled = transaction::reconcile(install);
+            let pending = transaction::pending(install)?;
+            self.state.lock().unwrap().staged =
+                pending.clone().filter(|(_, p)| p.phase != Phase::Installed);
+            reconciled?;
             if let Some((_, plan)) = &pending {
                 self.status(match plan.phase {
                 Phase::Staged if plan.armed => "Verified update is staged and authorized for your next full quit. Closing to tray does not install it.",
                 Phase::Staged => "Verified update is staged; choose Install on full exit when convenient.",
                 Phase::Installed => "Completed update journal; rollback retained. Running build information above is authoritative, even if another executable was installed later.",
-                Phase::Applying => "Interrupted update journal; rollback retained. Do not discard until recovery is reviewed.",
+                Phase::Applying => "Interrupted update; authorization revoked. Verified unfinished work can be authorized again for a natural full quit. Journal and rollback are retained; startup never replaces the installation.",
                 Phase::Failed => "Previous update failed; rollback retained. Inspect installation before retrying.",
             });
             } else {
@@ -131,7 +147,14 @@ impl Controller {
     fn download_inner(&self, c: &Candidate, transport: &dyn Transport) -> Result<()> {
         self.status("Downloading and verifying SHA-256 into owned staging…");
         let install = self.install.as_ref().map_err(Clone::clone)?;
-        transaction::stage(install, c, transport, &self.cancel)?;
+        if let Err(error) = transaction::stage(install, c, transport, &self.cancel) {
+            // Publication and durability are distinct: keep the committed state
+            // reachable in this controller as well as on the next startup.
+            if error == Error::Durability {
+                self.state.lock().unwrap().staged = transaction::pending(install)?;
+            }
+            return Err(error);
+        }
         let staged =
             transaction::pending(install)?.ok_or(Error::Invalid("staging read-back missing"))?;
         self.state.lock().unwrap().staged = Some(staged);
@@ -181,12 +204,13 @@ impl Controller {
         if !state
             .staged
             .as_ref()
-            .is_some_and(|(_, p)| p.phase == Phase::Staged && p.armed)
+            .is_some_and(|(_, p)| matches!(p.phase, Phase::Staged | Phase::Applying) && p.armed)
         {
             return Ok(());
         }
         self.finish(transaction::spawn_helper(
             self.install.as_ref().map_err(Clone::clone)?,
+            &state.staged.as_ref().unwrap().0,
         ))
     }
 }
@@ -199,11 +223,13 @@ pub fn current_install() -> Result<PathBuf> {
         if !p.is_absolute() {
             return Err(Error::Invalid("absolute APPIMAGE required"));
         }
+        let _running = super::image_identity::running(&p)?;
         Ok(p)
     }
     #[cfg(windows)]
     {
-        std::env::current_exe().map_err(|_| Error::Io("find running executable"))
+        // No verified backing-file handle is available for this portable layout.
+        Err(Error::UnsupportedImageIdentity)
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {

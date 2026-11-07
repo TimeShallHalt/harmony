@@ -17,18 +17,23 @@ class Cache:
             self.entries.append((name,digest,lib,meta))
         roots=sorted((self.root/'.fingerprint').glob('yapfast-*/test-bin-yapfast.json'),key=lambda p:p.stat().st_mtime,reverse=True)
         self.graph={}
-        def visit(meta):
+        def visit(meta,graph):
             for _,name,_,digest in meta['deps']:
                 matches=[e for e in self.entries if e[:2]==(name,digest)]
                 if not matches: continue  # build scripts/proc-macro DLLs aren't rlibs
                 if len(matches)!=1: raise RuntimeError(f'ambiguous exact cached {name}')
                 key=(name,digest)
-                if key not in self.graph:
-                    self.graph[key]=matches[0]; visit(matches[0][3])
+                if key not in graph:
+                    graph[key]=matches[0]; visit(matches[0][3],graph)
         if not roots: raise RuntimeError('no owner test-bin-yapfast fingerprint')
-        visit(json.loads(roots[0].read_text()))
+        visit(json.loads(roots[0].read_text()),self.graph)
+        self.host_graph={}
+        # slint-build is a build-script dependency, not a runtime root dep.
+        for build in (self.root/'.fingerprint').glob('yapfast-*/build-script-*.json'):
+            visit(json.loads(build.read_text()),self.host_graph)
     def lib(self,name,version_prefix=None):
         matches=[e for e in self.graph.values() if e[0]==name]
+        if not matches: matches=[e for e in self.host_graph.values() if e[0]==name]
         if version_prefix:
             def version(e):
                 dep=e[2].parent/(e[2].stem.removeprefix('lib')+'.d')

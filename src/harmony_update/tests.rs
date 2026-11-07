@@ -4,6 +4,10 @@ mod build_stamp;
 use release::*;
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, io::Write};
+fn activate_pending(install: &std::path::Path) -> Result<()> {
+    let name = transaction::pending(install)?.ok_or(Error::NotFound)?.0;
+    transaction::activate(install, &name)
+}
 fn current_fixture() -> BuildInfo {
     let mut info = BuildInfo::current();
     info.version = "1.0.0".into();
@@ -169,9 +173,9 @@ fn activation_is_user_armed_preserves_rollback_and_verifies_both_files() {
         .unwrap()
         .unwrap();
     let txn = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
-    assert!(transaction::activate(&install).is_err());
+    assert!(activate_pending(&install).is_err());
     transaction::arm(&install, true).unwrap();
-    transaction::activate(&install).unwrap();
+    activate_pending(&install).unwrap();
     assert_eq!(std::fs::read(&install).unwrap(), f.assets[&2]);
     let rollback = tmp.0.join(".harmony-updates").join(txn).join("rollback");
     assert_eq!(std::fs::read(rollback).unwrap(), b"old fixture executable");
@@ -179,6 +183,42 @@ fn activation_is_user_armed_preserves_rollback_and_verifies_both_files() {
         transaction::pending(&install).unwrap().unwrap().1.phase,
         transaction::Phase::Installed
     );
+}
+#[cfg(target_os = "linux")]
+#[test]
+fn committed_pending_pointer_sync_failure_retains_payload_and_reachable_recovery() {
+    let tmp = Temp::new();
+    let install = tmp.install();
+    let f = fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    safe_fs::FAIL_SYNC_FOR.with(|slot| *slot.borrow_mut() = Some("pending.json".into()));
+    assert!(
+        transaction::stage(&install, &c, &f, &Cancel::default()).is_err(),
+        "durability error must be reported"
+    );
+    let pending = transaction::pending(&install)
+        .expect("published pending pointer must not dangle")
+        .unwrap();
+    assert_eq!(
+        std::fs::read(
+            tmp.0
+                .join(".harmony-updates")
+                .join(&pending.0)
+                .join("payload")
+        )
+        .unwrap(),
+        f.assets[&2]
+    );
+    let controller = fixture_controller(Ok(install.clone()));
+    controller.load_pending().unwrap();
+    assert!(controller.snapshot().staged.is_some());
+    controller.arm(true).unwrap();
+    controller.arm(false).unwrap();
+    controller.discard().unwrap();
+    assert!(transaction::pending(&install).unwrap().is_none());
+    assert_eq!(std::fs::read(install).unwrap(), b"old fixture executable");
 }
 #[test]
 fn checksum_failure_does_not_publish_pending_or_change_installation() {
@@ -337,6 +377,53 @@ fn real_publish_failure_retains_target_and_verified_rollback() {
     );
 }
 #[test]
+fn concurrent_target_change_at_publication_is_preserved_not_overwritten() {
+    let tmp = Temp::new();
+    let install = tmp.install();
+    let f = fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+    transaction::arm(&install, true).unwrap();
+    assert_eq!(
+        transaction::activate_with_hook(&install, || std::fs::write(
+            &install,
+            b"unrelated concurrent image"
+        )
+        .unwrap()),
+        Err(Error::Conflict)
+    );
+    assert_eq!(
+        std::fs::read(&install).unwrap(),
+        b"unrelated concurrent image"
+    );
+}
+#[test]
+fn publication_error_never_restores_over_an_unrelated_concurrent_target() {
+    let tmp = Temp::new();
+    let install = tmp.install();
+    let f = fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    let txn = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+    transaction::arm(&install, true).unwrap();
+    let dir = tmp.0.join(".harmony-updates").join(txn);
+    assert!(
+        transaction::activate_with_hook(&install, || {
+            std::fs::write(&install, b"unrelated concurrent image").unwrap();
+            std::fs::remove_file(dir.join("payload")).unwrap();
+        })
+        .is_err()
+    );
+    assert_eq!(
+        std::fs::read(&install).unwrap(),
+        b"unrelated concurrent image",
+        "must not restore rollback over an image this transaction never published"
+    );
+}
+#[test]
 fn changed_installed_executable_is_never_overwritten_by_old_plan() {
     let tmp = Temp::new();
     let install = tmp.install();
@@ -347,7 +434,7 @@ fn changed_installed_executable_is_never_overwritten_by_old_plan() {
     transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
     transaction::arm(&install, true).unwrap();
     std::fs::write(&install, b"another installation").unwrap();
-    assert_eq!(transaction::activate(&install), Err(Error::Conflict));
+    assert_eq!(activate_pending(&install), Err(Error::Conflict));
     assert_eq!(std::fs::read(install).unwrap(), b"another installation");
 }
 #[test]
@@ -400,18 +487,29 @@ fn staging_size_mismatch_and_cancellation_never_arm_an_update() {
 #[test]
 #[ignore = "owned provider/race subprocess; use testing/run_updater_tests.py"]
 fn cancel_between_check_and_chunk_is_nonretryable_and_cleans_provider_and_busy() {
-    use std::{process::Command, time::{Duration, Instant}};
+    use std::{
+        process::Command,
+        time::{Duration, Instant},
+    };
     if std::env::var_os("HARMONY_CANCEL_RACE_CHILD").is_none() {
-        let mut cmd=Command::new(std::env::current_exe().unwrap());
+        let mut cmd = Command::new(std::env::current_exe().unwrap());
         cmd.args(["--exact", "harmony_update::tests::cancel_between_check_and_chunk_is_nonretryable_and_cleans_provider_and_busy", "--include-ignored", "--nocapture"])
             .env("HARMONY_CANCEL_RACE_CHILD", "1");
-        #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_4000); }
-        let mut child=cmd.spawn().unwrap();
-        let deadline=Instant::now()+Duration::from_secs(3);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_4000);
+        }
+        let mut child = cmd.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            if let Some(status)=child.try_wait().unwrap() { assert!(status.success()); break; }
-            if Instant::now()>deadline {
-                child.kill().unwrap(); child.wait().unwrap();
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            if Instant::now() > deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
                 panic!("write_all spun after cancellation instead of timely provider/busy cleanup");
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -420,27 +518,46 @@ fn cancel_between_check_and_chunk_is_nonretryable_and_cleans_provider_and_busy()
     }
     struct Race(Fixture);
     impl Transport for Race {
-        fn releases(&self,c:&Cancel)->Result<Vec<Release>> { self.0.releases(c) }
-        fn asset(&self,id:u64,w:&mut dyn Write,limit:u64,c:&Cancel)->Result<()> {
-            if id!=2 { return self.0.asset(id,w,limit,c); }
-            let cancel=c.clone();
-            gh::BEFORE_WRITE.with(|hook| *hook.borrow_mut()=Some(Box::new(move || cancel.0.store(true,Ordering::Release))));
-            let mut cmd=Command::new(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap());
+        fn releases(&self, c: &Cancel) -> Result<Vec<Release>> {
+            self.0.releases(c)
+        }
+        fn asset(&self, id: u64, w: &mut dyn Write, limit: u64, c: &Cancel) -> Result<()> {
+            if id != 2 {
+                return self.0.asset(id, w, limit, c);
+            }
+            let cancel = c.clone();
+            gh::BEFORE_WRITE.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || cancel.0.store(true, Ordering::Release)))
+            });
+            let mut cmd = Command::new(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap());
             cmd.arg("chunk-and-sleep");
-            #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_4000); }
-            let result=gh::run_command(cmd,w,limit,c,Duration::from_secs(1),Error::Network);
-            assert_eq!(result,Err(Error::Cancelled),"runner must translate the writer cancellation truthfully");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_4000);
+            }
+            let result = gh::run_command(cmd, w, limit, c, Duration::from_secs(1), Error::Network);
+            assert_eq!(
+                result,
+                Err(Error::Cancelled),
+                "runner must translate the writer cancellation truthfully"
+            );
             result
         }
     }
-    let tmp=Temp::new(); let install=tmp.install();
-    let controller=fixture_controller(Ok(install.clone())); let start=Instant::now();
-    assert_eq!(controller.check(&Race(fixture()),true),Err(Error::Cancelled));
-    assert!(start.elapsed()<Duration::from_secs(2));
+    let tmp = Temp::new();
+    let install = tmp.install();
+    let controller = fixture_controller(Ok(install.clone()));
+    let start = Instant::now();
+    assert_eq!(
+        controller.check(&Race(fixture()), true),
+        Err(Error::Cancelled)
+    );
+    assert!(start.elapsed() < Duration::from_secs(2));
     assert!(!controller.busy());
     assert!(transaction::pending(&install).unwrap().is_none());
-    assert_eq!(std::fs::read(install).unwrap(),b"old fixture executable");
-    controller.check(&fixture(),false).unwrap();
+    assert_eq!(std::fs::read(install).unwrap(), b"old fixture executable");
+    controller.check(&fixture(), false).unwrap();
 }
 #[test]
 fn filesystem_locks_exclude_other_update_transactions() {
@@ -471,6 +588,126 @@ fn windows_and_linux_path_tokens_fail_closed() {
     assert!(safe_fs::Dir::open(std::path::Path::new("relative")).is_err());
 }
 #[test]
+#[ignore = "actual inherited OS capabilities and owned parents; use runner"]
+fn launch_bound_parent_capability_rejects_wrong_identity_and_handles_early_exit() {
+    use std::{
+        process::Command,
+        time::{Duration, Instant},
+    };
+    let tmp = Temp::new();
+    for mode in ["valid", "wrong-birth", "wrong-pid", "early"] {
+        let marker = tmp.0.join(format!("{mode}.txt"));
+        let mut cmd = Command::new(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap());
+        cmd.arg("lease-parent").arg(&marker).arg(mode);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_4000);
+        }
+        let mut parent = cmd.spawn().unwrap();
+        if mode == "valid" {
+            std::thread::sleep(Duration::from_millis(80));
+            assert!(!marker.exists(), "must wait for its owned parent");
+        }
+        assert!(parent.wait().unwrap().success());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !marker.exists() {
+            assert!(Instant::now() < deadline, "capability child failed: {mode}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let expected = if mode == "wrong-birth"
+            || mode == "wrong-pid"
+            || (cfg!(target_os = "linux") && mode == "early")
+        {
+            b"rejected".as_slice()
+        } else {
+            b"exited".as_slice()
+        };
+        assert_eq!(std::fs::read(&marker).unwrap(), expected, "{mode}");
+    }
+}
+#[test]
+#[ignore = "owned already-exited parent; use runner"]
+fn bare_pid_after_parent_exit_is_not_an_identity_bound_handoff() {
+    let tmp = Temp::new();
+    let install = tmp.install();
+    let f = fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    let a = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+    transaction::arm(&install, true).unwrap();
+    let mut cmd =
+        std::process::Command::new(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap());
+    cmd.args(["sleep", "1"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_4000);
+    }
+    let mut parent = cmd.spawn().unwrap();
+    let pid = parent.id();
+    parent.wait().unwrap();
+    let args = [
+        "--harmony-update-helper".into(),
+        install.as_os_str().into(),
+        a.into(),
+        pid.to_string().into(),
+    ];
+    assert!(
+        helper::cli_main(&args).unwrap().is_err(),
+        "bare exited PID is not evidence of a spawning parent"
+    );
+    assert_eq!(std::fs::read(install).unwrap(), b"old fixture executable");
+}
+#[test]
+#[ignore = "owned parent process plus transaction race seam; use runner"]
+fn stale_helper_cannot_activate_or_fail_a_replacement_transaction() {
+    for replacement_armed in [true, false] {
+        let tmp = Temp::new();
+        let install = tmp.install();
+        let f = fixture();
+        let c = check_release(&f, &current_fixture(), &Cancel::default())
+            .unwrap()
+            .unwrap();
+        let a = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+        transaction::arm(&install, true).unwrap();
+        let mut parent =
+            std::process::Command::new(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap())
+                .args(["sleep", "1"])
+                .spawn()
+                .unwrap();
+        assert!(parent.wait().unwrap().success());
+        let path = install.clone();
+        helper::BEFORE_ACTIVATE.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                transaction::discard(&path).unwrap();
+                let f = fixture();
+                let c = check_release(&f, &current_fixture(), &Cancel::default())
+                    .unwrap()
+                    .unwrap();
+                transaction::stage(&path, &c, &f, &Cancel::default()).unwrap();
+                transaction::arm(&path, replacement_armed).unwrap();
+            }))
+        });
+        // Unit scheduling seam is after the real parent wait. The separate
+        // owned helper test exercises OS launch/wait as well.
+        assert_eq!(helper::after_parent(&install, &a), Err(Error::Conflict));
+        let b = transaction::pending(&install).unwrap().unwrap();
+        assert_eq!(
+            b.1.phase,
+            transaction::Phase::Staged,
+            "stale failure must not mutate B"
+        );
+        assert_eq!(b.1.armed, replacement_armed);
+        assert_eq!(std::fs::read(&install).unwrap(), b"old fixture executable");
+        assert_eq!(
+            std::fs::read(tmp.0.join(".harmony-updates").join(b.0).join("payload")).unwrap(),
+            f.assets[&2]
+        );
+    }
+}
+#[test]
 fn controller_persists_staged_state_and_does_not_arm_automatically() {
     let tmp = Temp::new();
     let install = tmp.install();
@@ -487,7 +724,7 @@ fn controller_persists_staged_state_and_does_not_arm_automatically() {
     restored.discard().unwrap();
     assert!(restored.snapshot().staged.is_none());
     let preferences: controller::Preferences = serde_json::from_str("{}").unwrap();
-    assert!(preferences.check_on_startup);
+    assert!(!preferences.check_on_startup);
     assert!(!preferences.download_automatically);
 }
 #[test]
@@ -635,6 +872,38 @@ fn provider_process_limits_failure_cancel_timeout_and_missing_cli_are_real() {
     );
 }
 #[test]
+#[ignore = "owned image rename/substitution, no substituted image executed; use runner"]
+fn running_image_identity_rejects_same_hash_path_substitution() {
+    for mode in ["identify-substituted", "identify-current"] {
+        let tmp = Temp::new();
+        let install = tmp.0.join("harmony.exe");
+        let marker = tmp.0.join("identity.txt");
+        let program = std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap();
+        std::fs::copy(&program, &install).unwrap();
+        let mut cmd = std::process::Command::new(&install);
+        cmd.arg(mode)
+            .arg(&program)
+            .arg(&marker)
+            .env("APPIMAGE", &install);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_4000);
+        }
+        assert!(cmd.status().unwrap().success());
+        let expected = if mode == "identify-current" && cfg!(target_os = "linux") {
+            b"accepted".as_slice()
+        } else {
+            b"rejected".as_slice()
+        };
+        assert_eq!(
+            std::fs::read(&marker).unwrap(),
+            expected,
+            "kernel identity, not another hash of the supplied path: {mode}"
+        );
+    }
+}
+#[test]
 #[ignore = "standalone owned helper fixture; use testing/run_updater_tests.py"]
 fn native_helper_waits_for_its_owned_parent_then_installs_without_relaunch() {
     let tmp = Temp::new();
@@ -708,24 +977,47 @@ fn staging_is_owned_and_not_writable_by_other_users() {
 #[cfg(windows)]
 #[test]
 fn windows_object_inherit_only_write_grants_are_rejected_on_actual_child_files() {
-    let tmp=Temp::new();
-    let staging=tmp.0.join("owned-staging");
+    let tmp = Temp::new();
+    let staging = tmp.0.join("owned-staging");
     std::fs::create_dir(&staging).unwrap();
-    let output=std::process::Command::new("icacls.exe").arg(&staging)
-        .args(["/grant", "*S-1-1-0:(OI)(IO)W"]).output().unwrap();
-    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stdout));
+    let output = std::process::Command::new("icacls.exe")
+        .arg(&staging)
+        .args(["/grant", "*S-1-1-0:(OI)(IO)W"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     // This ACE doesn't grant effective directory writes. NTFS does turn it
     // into an effective write ACE on the child; inspect those actual objects.
-    let dir=safe_fs::Dir::open(&staging).unwrap();
-    for name in ["payload","plan.json","helper.exe"] {
-        let path=staging.join(name); std::fs::write(&path,b"fixture").unwrap();
-        assert!(dir.file(name,false).is_err(),"accepted inherited child write ACL: {name}");
+    let dir = safe_fs::Dir::open(&staging).unwrap();
+    for name in ["payload", "plan.json", "helper.exe"] {
+        let path = staging.join(name);
+        std::fs::write(&path, b"fixture").unwrap();
+        assert!(
+            dir.file(name, false).is_err(),
+            "accepted inherited child write ACL: {name}"
+        );
     }
-    assert!(safe_fs::Dir::open(&tmp.0).unwrap().child("owned-staging",false).is_err(),"unsafe prospective inheritance must also fail before creating data");
-    let safe=safe_fs::Dir::open(&tmp.0).unwrap().child("safe-staging",true).unwrap();
-    for name in ["payload","plan.json","helper.exe"] {
-        drop(safe.file(name,true).unwrap());
-        assert!(safe.file(name,false).is_ok(),"private valid child rejected");
+    assert!(
+        safe_fs::Dir::open(&tmp.0)
+            .unwrap()
+            .child("owned-staging", false)
+            .is_err(),
+        "unsafe prospective inheritance must also fail before creating data"
+    );
+    let safe = safe_fs::Dir::open(&tmp.0)
+        .unwrap()
+        .child("safe-staging", true)
+        .unwrap();
+    for name in ["payload", "plan.json", "helper.exe"] {
+        drop(safe.file(name, true).unwrap());
+        assert!(
+            safe.file(name, false).is_ok(),
+            "private valid child rejected"
+        );
     }
 }
 #[cfg(windows)]
@@ -841,6 +1133,101 @@ fn build_stamp_emission_uses_real_git_identity_and_rejects_bad_release_ids() {
     }
 }
 #[test]
+#[ignore = "owned crash-cut subprocess; use runner"]
+fn crash_cut_child() {
+    let Some(path) = std::env::var_os("HARMONY_CRASH_INSTALL") else {
+        return;
+    };
+    let install = std::path::PathBuf::from(path);
+    let cut = std::env::var("HARMONY_CRASH_CUT").unwrap();
+    if cut == "displaced" {
+        transaction::AFTER_DISPLACE
+            .with(|hook| *hook.borrow_mut() = Some(Box::new(|| std::process::exit(92))));
+    }
+    if cut == "published" {
+        transaction::AFTER_PUBLISH
+            .with(|hook| *hook.borrow_mut() = Some(Box::new(|| std::process::exit(92))));
+    }
+    transaction::activate_with_hook(&install, || {
+        if cut == "journal" {
+            std::process::exit(92);
+        }
+    })
+    .unwrap();
+    panic!("crash cut was not reached");
+}
+fn cut_activation(install: &std::path::Path, cut: &str) {
+    let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+    cmd.args([
+        "--exact",
+        "harmony_update::tests::crash_cut_child",
+        "--ignored",
+    ])
+    .env("HARMONY_CRASH_INSTALL", install)
+    .env("HARMONY_CRASH_CUT", cut);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_4000);
+    }
+    assert_eq!(cmd.status().unwrap().code(), Some(92));
+}
+#[test]
+#[ignore = "owned crash-cut subprocess; use runner"]
+fn normal_controller_startup_reconciles_completed_publication_without_replacement() {
+    let tmp = Temp::new();
+    let install = tmp.install();
+    let f = fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+    transaction::arm(&install, true).unwrap();
+    cut_activation(&install, "published");
+    assert_eq!(
+        transaction::pending(&install).unwrap().unwrap().1.phase,
+        transaction::Phase::Applying
+    );
+    let restored = fixture_controller(Ok(install.clone()));
+    restored.load_pending().unwrap();
+    assert!(
+        restored.snapshot().staged.is_none(),
+        "normal startup must reconcile authoritative completed bytes"
+    );
+    assert_eq!(
+        transaction::pending(&install).unwrap().unwrap().1.phase,
+        transaction::Phase::Installed
+    );
+    assert_eq!(std::fs::read(install).unwrap(), f.assets[&2]);
+}
+#[test]
+#[ignore = "owned crash-cut subprocess; use runner"]
+fn normal_controller_requires_new_authorization_for_unfinished_applying() {
+    let tmp = Temp::new();
+    let install = tmp.install();
+    let f = fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+    transaction::arm(&install, true).unwrap();
+    cut_activation(&install, "journal");
+    let restored = fixture_controller(Ok(install.clone()));
+    restored.load_pending().unwrap();
+    assert!(
+        !restored.snapshot().staged.unwrap().1.armed,
+        "startup must revoke interrupted authorization, not blindly reset the journal"
+    );
+    restored.handoff_on_full_exit().unwrap();
+    assert_eq!(std::fs::read(&install).unwrap(), b"old fixture executable");
+    restored.arm(true).unwrap();
+    assert_eq!(
+        restored.snapshot().staged.unwrap().1.phase,
+        transaction::Phase::Applying
+    );
+    restored.arm(false).unwrap();
+}
+#[test]
 fn recovery_finishes_an_interrupted_journal_after_a_verified_atomic_publish() {
     let tmp = Temp::new();
     let install = tmp.install();
@@ -850,7 +1237,7 @@ fn recovery_finishes_an_interrupted_journal_after_a_verified_atomic_publish() {
         .unwrap();
     let txn = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
     transaction::arm(&install, true).unwrap();
-    transaction::activate(&install).unwrap();
+    activate_pending(&install).unwrap();
     let mut plan = transaction::pending(&install).unwrap().unwrap().1;
     plan.phase = transaction::Phase::Applying;
     plan.armed = true;
@@ -859,7 +1246,7 @@ fn recovery_finishes_an_interrupted_journal_after_a_verified_atomic_publish() {
         serde_json::to_vec(&plan).unwrap(),
     )
     .unwrap();
-    transaction::activate(&install).unwrap();
+    activate_pending(&install).unwrap();
     assert_eq!(
         transaction::pending(&install).unwrap().unwrap().1.phase,
         transaction::Phase::Installed

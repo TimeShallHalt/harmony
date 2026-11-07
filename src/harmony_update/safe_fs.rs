@@ -28,6 +28,11 @@ pub fn leaf(name: &str) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(test)]
+thread_local! {
+    // Fault injection only: a real successful rename followed by a failed sync.
+    pub(super) static FAIL_SYNC_FOR: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+}
 pub struct Dir {
     pub path: PathBuf,
     file: File,
@@ -423,10 +428,22 @@ impl Dir {
             {
                 return Err(Error::Io("rename update file"));
             }
+            #[cfg(test)]
+            if FAIL_SYNC_FOR.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                if slot.as_deref() == to.to_str().ok() {
+                    slot.take();
+                    true
+                } else {
+                    false
+                }
+            }) {
+                return Err(Error::Durability);
+            }
             self.file
                 .sync_all()
                 .and_then(|_| dest.file.sync_all())
-                .map_err(|_| Error::Io("sync update directory"))?;
+                .map_err(|_| Error::Durability)?;
         }
         #[cfg(windows)]
         {

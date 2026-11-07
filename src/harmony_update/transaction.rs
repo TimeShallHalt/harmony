@@ -248,7 +248,9 @@ pub fn stage(
         )?;
         Ok(name.clone())
     })();
-    if result.is_err() {
+    // A post-rename sync error means pending.json HAS been published. Removing
+    // its referents would convert a recoverable durability failure into data loss.
+    if result.is_err() && result != Err(Error::Durability) {
         for file in ["payload", "plan.json"] {
             if dir.exists(file)? && dir.remove(file).is_err() {
                 return Err(Error::Io(
@@ -259,14 +261,66 @@ pub fn stage(
     }
     result
 }
+/// Startup may reconcile completed bytes and revoke interrupted authorization;
+/// it never publishes a new image or rewinds an Applying journal to Staged.
+pub fn reconcile(install: &Path) -> Result<()> {
+    let (root, updates, target) = location(install)?;
+    let _lock = updates.lock()?;
+    let Some(name) = pending_name(&updates)? else {
+        return Ok(());
+    };
+    let dir = updates.child(&name, false)?;
+    let mut plan = read_plan(&dir, &target)?;
+    if plan.phase != Phase::Applying {
+        return Ok(());
+    }
+    if plan.armed {
+        plan.armed = false;
+        write_plan(&dir, &plan)?;
+    }
+    if hash(&mut dir.file("rollback", false)?, &Cancel::default())? != plan.previous_sha256 {
+        return Err(Error::Hash);
+    }
+    let artifact = validate_manifest(&plan.manifest, &BuildInfo::current().platform_key())?;
+    if !root.exists(&target)? {
+        // No normal shortcut can launch this layout after the evacuation cut.
+        // Preserve every inode, don't execute a path chosen by the journal.
+        return Err(Error::Unsupported);
+    }
+    let installed = hash(&mut root.file(&target, false)?, &Cancel::default())?;
+    if installed == artifact.sha256 {
+        plan.phase = Phase::Installed;
+        return write_plan(&dir, &plan);
+    }
+    recovery_ready(&root, &dir, &target, &plan)
+}
+fn recovery_ready(root: &Dir, dir: &Dir, target: &str, plan: &Plan) -> Result<()> {
+    if !root.exists(target)? {
+        return Err(Error::Unsupported);
+    }
+    if hash(&mut root.file(target, false)?, &Cancel::default())? != plan.previous_sha256 {
+        return Err(Error::Conflict);
+    }
+    if dir.exists("displaced")? {
+        return Err(Error::Conflict);
+    }
+    if hash(&mut dir.file("rollback", false)?, &Cancel::default())? != plan.previous_sha256 {
+        return Err(Error::Hash);
+    }
+    let artifact = validate_manifest(&plan.manifest, &BuildInfo::current().platform_key())?;
+    validate_payload(dir, &artifact)
+}
 pub fn arm(install: &Path, enabled: bool) -> Result<()> {
-    let (_, updates, target) = location(install)?;
+    let (root, updates, target) = location(install)?;
     let _lock = updates.lock()?;
     let name = pending_name(&updates)?.ok_or(Error::Invalid("no staged update"))?;
     let dir = updates.child(&name, false)?;
     let mut plan = read_plan(&dir, &target)?;
-    if plan.phase != Phase::Staged {
-        return Err(Error::Invalid("update not staged"));
+    if !matches!(plan.phase, Phase::Staged | Phase::Applying) {
+        return Err(Error::Invalid("update not staged/recoverable"));
+    }
+    if enabled && plan.phase == Phase::Applying {
+        recovery_ready(&root, &dir, &target, &plan)?;
     }
     plan.armed = enabled;
     write_plan(&dir, &plan)
@@ -290,8 +344,8 @@ pub fn discard(install: &Path) -> Result<()> {
     updates.remove("pending.json")?;
     Ok(()) // Journal and rollback are intentionally retained; no recursive deletion.
 }
-pub fn activate(install: &Path) -> Result<()> {
-    activate_inner(install, || {})
+pub fn activate(install: &Path, expected: &str) -> Result<()> {
+    activate_inner(install, expected, || {})
 }
 fn copy_verified(source: &mut File, dir: &Dir, name: &str, expected: &str) -> Result<()> {
     source
@@ -312,10 +366,13 @@ fn copy_verified(source: &mut File, dir: &Dir, name: &str, expected: &str) -> Re
     }
     Ok(())
 }
-fn activate_inner(install: &Path, before_publish: impl FnOnce()) -> Result<()> {
+fn activate_inner(install: &Path, expected: &str, before_publish: impl FnOnce()) -> Result<()> {
     let (root, updates, target) = location(install)?;
     let _lock = updates.lock()?;
     let name = pending_name(&updates)?.ok_or(Error::Invalid("no staged update"))?;
+    if name != expected {
+        return Err(Error::Conflict);
+    }
     let dir = updates.child(&name, false)?;
     let mut plan = read_plan(&dir, &target)?;
     if !plan.armed || !matches!(plan.phase, Phase::Staged | Phase::Applying) {
@@ -360,56 +417,106 @@ fn activate_inner(install: &Path, before_publish: impl FnOnce()) -> Result<()> {
     if hash(&mut dir.file("rollback", false)?, &Cancel::default())? != plan.previous_sha256 {
         return Err(Error::Hash);
     }
+    // Freeze the journal before any namespace mutation. Publication never uses
+    // overwrite=true. First atomically MOVE the actual displaced inode to an
+    // owned, unique slot, then validate that inode, then publish NOREPLACE.
+    // A concurrently created installation wins; it is never overwritten by an
+    // error/restore path. This deliberately permits a recoverable absent-target
+    // window rather than promising a nonexistent cross-platform rename CAS.
     plan.phase = Phase::Applying;
     write_plan(&dir, &plan)?;
     before_publish();
-    let result = (|| {
-        // Revalidate the leaf after any intervening I/O; no symlink is followed.
-        if hash(&mut dir.file("payload", false)?, &Cancel::default())? != artifact.sha256 {
-            return Err(Error::Hash);
-        }
-        dir.rename("payload", &root, &target, true)?;
-        if hash(&mut root.file(&target, false)?, &Cancel::default())? != artifact.sha256 {
-            return Err(Error::Hash);
-        }
-        plan.phase = Phase::Installed;
-        plan.armed = false;
-        write_plan(&dir, &plan)
-    })();
-    if result.is_err() {
-        // If publication never happened the old target is untouched. Otherwise
-        // restore from a verified copy without consuming the rollback itself.
-        let baseline = root
-            .file(&target, false)
-            .and_then(|mut f| hash(&mut f, &Cancel::default()))
-            .ok();
-        if baseline.as_deref() != Some(&plan.previous_sha256) {
-            let restore = format!("restore-{}.tmp", std::process::id());
-            copy_verified(
-                &mut dir.file("rollback", false)?,
-                &root,
-                &restore,
-                &plan.previous_sha256,
-            )?;
-            root.rename(&restore, &root, &target, true)?;
-            if hash(&mut root.file(&target, false)?, &Cancel::default())? != plan.previous_sha256 {
-                return Err(Error::Hash);
-            }
-        }
+    if let Err(error) = validate_payload(&dir, &artifact) {
         plan.phase = Phase::Failed;
         plan.armed = false;
         write_plan(&dir, &plan)?;
+        return Err(error);
     }
-    result
+    if !dir.exists("displaced")? {
+        root.rename(&target, &dir, "displaced", false)?;
+    }
+    if hash(&mut dir.file("displaced", false)?, &Cancel::default())? != plan.previous_sha256 {
+        // Preserve the unrecognized displaced image. Restore it only if the
+        // launch slot is empty; an unrelated concurrent target always wins.
+        let _ = dir.rename("displaced", &root, &target, false);
+        plan.armed = false;
+        write_plan(&dir, &plan)?;
+        return Err(Error::Conflict);
+    }
+    #[cfg(test)]
+    AFTER_DISPLACE.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().take() {
+            hook();
+        }
+    });
+    if let Err(error) = dir.rename("payload", &root, &target, false) {
+        // Restore without consuming the verified rollback, and never replace a
+        // newly appeared target. On collision the displaced inode is retained.
+        let _ = dir.rename("displaced", &root, &target, false);
+        plan.armed = false;
+        write_plan(&dir, &plan)?;
+        return Err(error);
+    }
+    #[cfg(test)]
+    AFTER_PUBLISH.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().take() {
+            hook();
+        }
+    });
+    if hash(&mut root.file(&target, false)?, &Cancel::default())? != artifact.sha256 {
+        return Err(Error::Conflict); // Never blindly restore over a third image.
+    }
+    plan.phase = Phase::Installed;
+    plan.armed = false;
+    write_plan(&dir, &plan)
 }
-pub fn spawn_helper(install: &Path) -> Result<()> {
-    let (root, updates, target) = location(install)?;
+fn validate_payload(dir: &Dir, artifact: &release::Artifact) -> Result<()> {
+    let mut payload = dir.file("payload", false)?;
+    if payload
+        .metadata()
+        .map_err(|_| Error::Io("staged size"))?
+        .len()
+        != artifact.size
+    {
+        return Err(Error::Size);
+    }
+    if hash(&mut payload, &Cancel::default())? != artifact.sha256 {
+        return Err(Error::Hash);
+    }
+    validate_executable(&mut payload, &artifact.platform)
+}
+#[cfg(test)]
+thread_local! {
+    // Crash/race scheduling seams; all publication syscalls remain real.
+    pub(super) static AFTER_DISPLACE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+    pub(super) static AFTER_PUBLISH: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+}
+pub fn spawn_helper(install: &Path, expected: &str) -> Result<()> {
+    let (_root, updates, target) = location(install)?;
     let _lock = updates.lock()?;
     let name = pending_name(&updates)?.ok_or(Error::Invalid("no staged update"))?;
+    if name != expected {
+        return Err(Error::Conflict);
+    }
     let dir = updates.child(&name, false)?;
     let plan = read_plan(&dir, &target)?;
-    if plan.phase != Phase::Staged || !plan.armed {
+    if !matches!(plan.phase, Phase::Staged | Phase::Applying) || !plan.armed {
         return Err(Error::Invalid("full-exit install not authorized"));
+    }
+    let mut running = match super::image_identity::running(install) {
+        Ok(image) => image,
+        Err(error) => {
+            let mut failed = plan.clone();
+            failed.armed = false;
+            if failed.phase == Phase::Staged {
+                failed.phase = Phase::Failed;
+            }
+            write_plan(&dir, &failed)?;
+            return Err(error);
+        }
+    };
+    if hash(&mut running, &Cancel::default())? != plan.previous_sha256 {
+        return Err(Error::Conflict);
     }
     let helper_name = if cfg!(windows) {
         "helper.exe"
@@ -417,12 +524,7 @@ pub fn spawn_helper(install: &Path) -> Result<()> {
         "helper.AppImage"
     };
     if !dir.exists(helper_name)? {
-        copy_verified(
-            &mut root.file(&target, false)?,
-            &dir,
-            helper_name,
-            &plan.previous_sha256,
-        )?;
+        copy_verified(&mut running, &dir, helper_name, &plan.previous_sha256)?;
     }
     let mut helper = dir.file(helper_name, false)?;
     if hash(&mut helper, &Cancel::default())? != plan.previous_sha256 {
@@ -485,7 +587,6 @@ pub fn spawn_helper(install: &Path) -> Result<()> {
     cmd.arg("--harmony-update-helper")
         .arg(install)
         .arg(&name)
-        .arg(std::process::id().to_string())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -503,16 +604,27 @@ pub fn spawn_helper(install: &Path) -> Result<()> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    cmd.spawn()
-        .map_err(|_| Error::Io("launch full-exit updater helper"))?;
+    let parent = lifetime::Parent::for_self()?;
+    if let Err(error) = lifetime::launch(cmd, parent) {
+        let mut failed = read_plan(&dir, &target)?;
+        failed.armed = false;
+        if failed.phase == Phase::Staged {
+            failed.phase = Phase::Failed;
+        }
+        write_plan(&dir, &failed)?;
+        return Err(error);
+    }
     Ok(()) // Handoff only, not an installation success claim.
 }
-pub fn record_helper_failure(install: &Path) -> Result<()> {
+pub fn record_helper_failure(install: &Path, expected: &str) -> Result<()> {
     let (_, updates, target) = location(install)?;
     let _lock = updates.lock()?;
     let Some(name) = pending_name(&updates)? else {
         return Ok(());
     };
+    if name != expected {
+        return Err(Error::Conflict);
+    }
     let dir = updates.child(&name, false)?;
     let mut plan = read_plan(&dir, &target)?;
     if plan.phase == Phase::Staged {
@@ -524,5 +636,6 @@ pub fn record_helper_failure(install: &Path) -> Result<()> {
 }
 #[cfg(test)]
 pub fn activate_with_hook(install: &Path, hook: impl FnOnce()) -> Result<()> {
-    activate_inner(install, hook)
+    let name = pending(install)?.ok_or(Error::NotFound)?.0;
+    activate_inner(install, &name, hook)
 }
