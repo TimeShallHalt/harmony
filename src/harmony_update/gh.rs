@@ -34,7 +34,7 @@ pub fn command() -> Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
+        cmd.creation_flags(0x0800_4000);
     }
     cmd.stdin(Stdio::null()).stderr(Stdio::null());
     cmd

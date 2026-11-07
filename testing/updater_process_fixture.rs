@@ -7,6 +7,11 @@ mod harmony_update;
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if let Some(result) = harmony_update::cli_main(&args) {
+        // Owned-fixture wrapper records the REAL production helper result only
+        // after it returns. This is not an activation/identity bypass.
+        if let Some(path) = std::env::var_os("HARMONY_FIXTURE_HELPER_RESULT") {
+            std::fs::write(path, format!("{result:?}")).unwrap();
+        }
         if let Err(error) = result {
             eprintln!("{error}");
             std::process::exit(1);
@@ -120,13 +125,33 @@ fn main() {
                 Err(_) => std::fs::write(&args[1], b"rejected").unwrap(),
             }
         }
-        "handoff" => {
+        "recover-handoff" => {
+            let controller =
+                harmony_update::controller::Controller::new(Ok(std::path::PathBuf::from(&args[1])));
+            controller.load_pending().unwrap();
+            assert!(!controller.snapshot().staged.as_ref().unwrap().1.armed);
+            controller.arm(true).unwrap();
+            controller.handoff_on_full_exit().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        "handoff" | "handoff-hold" => {
             let install = std::path::Path::new(&args[1]);
             let expected = harmony_update::transaction::pending(install)
                 .unwrap()
                 .unwrap()
                 .0;
             harmony_update::transaction::spawn_helper(install, &expected).unwrap();
+            if mode == "handoff-hold" {
+                std::fs::write(&args[2], b"ready").unwrap();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while !std::path::Path::new(&args[3]).exists() {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "owned handoff release timed out"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
             std::thread::sleep(std::time::Duration::from_millis(150));
         }
         _ => panic!("unknown fixture mode"),

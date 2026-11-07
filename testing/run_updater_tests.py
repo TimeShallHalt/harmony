@@ -9,6 +9,19 @@ import os
 import subprocess
 import sys
 import tomllib
+import re
+import time
+
+
+def checked_tests(command, env, scratch, **kwargs):
+    result=subprocess.run(command,env=env,capture_output=True,text=True,encoding='utf-8',errors='replace',**kwargs)
+    (scratch/f'test-{time.time_ns()}.log').write_text(result.stdout+'\n'+result.stderr,encoding='utf-8')
+    print(result.stdout,end='');print(result.stderr,end='',file=sys.stderr)
+    if result.returncode:return result.returncode
+    summaries=re.findall(r'test result: .*? (\d+) passed; (\d+) failed;',result.stdout)
+    if not summaries or sum(map(int,summaries[-1]))==0:
+        print('No tests executed; refusing false GREEN.',file=sys.stderr);return 2
+    return 0
 
 
 def main():
@@ -21,6 +34,7 @@ def main():
     scratch.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["CARGO_BUILD_JOBS"] = "2"
+    env["RAYON_NUM_THREADS"] = "2"
     env["RUSTFLAGS"] = "-C codegen-units=2"
     priority = subprocess.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == "win32" else 0
     if sys.platform != "win32":
@@ -44,7 +58,7 @@ def main():
             manifest.write('\n[[bin]]\nname="updater-process-fixture"\npath="' + (root / 'testing/updater_process_fixture.rs').as_posix() + '"\n')
         subprocess.run(["cargo", "build", "--jobs", "2", "--manifest-path", str(scratch / "Cargo.toml"), "--bin", "updater-process-fixture"], env=env, check=True)
         env["HARMONY_TEST_PROCESS_FIXTURE"] = str(scratch / "target/debug/updater-process-fixture")
-        return subprocess.run(["cargo", "test", "--jobs", "2", "--lib", "--manifest-path", str(scratch / "Cargo.toml"), "--", "--test-threads=1", "--include-ignored", *rest], env=env).returncode
+        return checked_tests(["cargo", "test", "--jobs", "2", "--lib", "--manifest-path", str(scratch / "Cargo.toml"), "--", "--test-threads=1", "--include-ignored", *rest], env, scratch,timeout=120)
     if not env.get("VCINSTALLDIR"):
         vswhere = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"
         vs = subprocess.check_output([str(vswhere), "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], text=True).strip()
@@ -75,7 +89,7 @@ def main():
     subprocess.run(fixture_command, env=env, cwd=root, check=True, creationflags=priority)
     env["HARMONY_TEST_PROCESS_FIXTURE"] = str(fixture)
     subprocess.run(command, env=env, cwd=root, check=True, creationflags=priority)
-    return subprocess.run([str(exe), "--test-threads=1", "--include-ignored", *rest], env=env, cwd=root, timeout=120, creationflags=priority).returncode
+    return checked_tests([str(exe), "--test-threads=1", "--include-ignored", *rest], env, scratch, cwd=root, timeout=120, creationflags=priority)
 
 
 if __name__ == "__main__":

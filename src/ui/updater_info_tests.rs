@@ -14,6 +14,120 @@ fn fixture() -> (tempfile::TempDir, YapfastWindow, Rc<RefCell<Adapter>>) {
     (dir, window, state)
 }
 #[test]
+#[ignore = "separate testing event loop with owned saved-journal fixtures; use runner"]
+fn harmony_normal_startup_exposes_safe_applying_recovery_in_native_ui() {
+    use crate::harmony_update::{
+        BuildInfo,
+        controller::Controller,
+        release::{Artifact, Manifest},
+        transaction::{Phase, Plan},
+    };
+    use sha2::{Digest, Sha256};
+    i_slint_backend_testing::init_integration_test_with_system_time();
+    let pump = || {
+        slint::Timer::single_shot(std::time::Duration::from_millis(300), || {
+            let _ = slint::quit_event_loop();
+        });
+        slint::run_event_loop().unwrap();
+    };
+    for published in [false, true] {
+        // Saved-journal fixture, not fabricated service data. Native module
+        // tests separately produce these states by actual owned-process cuts.
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("harmony.exe");
+        let txn = dir.path().join(".harmony-updates/txn-ui-cut");
+        std::fs::create_dir_all(&txn).unwrap();
+        let old = b"old owned UI fixture";
+        let mut payload = vec![0u8; 128];
+        payload[..2].copy_from_slice(b"MZ");
+        payload[60..64].copy_from_slice(&64u32.to_le_bytes());
+        payload[64..68].copy_from_slice(b"PE\0\0");
+        payload[68..70].copy_from_slice(&0x8664u16.to_le_bytes());
+        let artifact = Artifact {
+            platform: BuildInfo::current().platform_key(),
+            name: "Harmony-1.0.1-windows-x86_64.exe".into(),
+            size: payload.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(&payload)),
+            format: "exe".into(),
+        };
+        let plan = Plan {
+            schema: 1,
+            target: "harmony.exe".into(),
+            previous_sha256: format!("{:x}", Sha256::digest(old)),
+            manifest: Manifest {
+                schema: 1,
+                repository: "TimeShallHalt/harmony".into(),
+                tag: "harmony-v1.0.1-b1".into(),
+                version: "1.0.1".into(),
+                build_id: 1,
+                commit: "0123456789abcdef0123456789abcdef01234567".into(),
+                artifacts: vec![artifact],
+            },
+            armed: true,
+            phase: Phase::Applying,
+        };
+        std::fs::write(&install, if published { &payload } else { old.as_slice() }).unwrap();
+        std::fs::write(txn.join("rollback"), old).unwrap();
+        if !published {
+            std::fs::write(txn.join("payload"), &payload).unwrap();
+        }
+        std::fs::write(txn.join("plan.json"), serde_json::to_vec(&plan).unwrap()).unwrap();
+        std::fs::write(
+            dir.path().join(".harmony-updates/pending.json"),
+            br#""txn-ui-cut""#,
+        )
+        .unwrap();
+        let window = YapfastWindow::new().unwrap();
+        let state = Adapter::new(
+            Arc::new(BackgroundRuntime::new().unwrap()),
+            dir.path().into(),
+            &window,
+        )
+        .unwrap();
+        state.borrow_mut().harmony_updates = Arc::new(Controller::new(Ok(install.clone())));
+        bind_callbacks(&window, &state);
+        updater_info::startup(&window, &state, false);
+        pump();
+        let ui = window.global::<HarmonyUpdates>();
+        if published {
+            assert!(!ui.get_staged());
+            assert_eq!(
+                crate::harmony_update::transaction::pending(&install)
+                    .unwrap()
+                    .unwrap()
+                    .1
+                    .phase,
+                Phase::Installed
+            );
+        } else {
+            assert!(ui.get_staged());
+            assert!(ui.get_may_arm());
+            assert!(!ui.get_armed());
+            assert!(!ui.get_may_discard());
+            ui.invoke_arm(true);
+            pump();
+            assert!(ui.get_armed());
+            assert_eq!(
+                crate::harmony_update::transaction::pending(&install)
+                    .unwrap()
+                    .unwrap()
+                    .1
+                    .phase,
+                Phase::Applying,
+                "no blind journal reset"
+            );
+            assert_eq!(
+                std::fs::read(&install).unwrap(),
+                old,
+                "UI authorization cannot replace a running image"
+            );
+            ui.invoke_arm(false);
+            pump();
+            assert!(!ui.get_armed());
+        }
+    }
+}
+#[test]
 #[ignore = "requires runner-owned gh PATH and a separate testing event loop"]
 fn harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh() {
     i_slint_backend_testing::init_integration_test_with_system_time();

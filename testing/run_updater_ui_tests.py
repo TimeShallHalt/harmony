@@ -22,6 +22,7 @@ def main():
     out.mkdir(parents=True,exist_ok=True)
     env=dict(os.environ)
     env['CARGO_BUILD_JOBS']='2'
+    env['RAYON_NUM_THREADS']='2'
     priority=subprocess.BELOW_NORMAL_PRIORITY_CLASS
     vswhere=Path(os.environ.get('ProgramFiles(x86)','C:/Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
     vs=subprocess.check_output([str(vswhere),'-latest','-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-property','installationPath'],text=True).strip()
@@ -117,5 +118,11 @@ fn bind_callbacks(window:&YapfastWindow,adapter:&Rc<RefCell<Adapter>>) { updater
     startup_env=dict(env);startup_env['PATH']=str(out)
     startup_env['HARMONY_FIXTURE_GH_LOG']=str(out/'gh-invocations.log')
     Path(startup_env['HARMONY_FIXTURE_GH_LOG']).unlink(missing_ok=True)
-    return subprocess.run([str(exe),'--exact','ui_callbacks::harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh','--ignored','--nocapture'],env=startup_env,cwd=root,timeout=60,creationflags=priority).returncode
+    for name in ['harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh','harmony_normal_startup_exposes_safe_applying_recovery_in_native_ui']:
+        result=subprocess.run([str(exe),'--exact',f'ui_callbacks::{name}','--ignored','--nocapture'],env=startup_env,cwd=root,timeout=60,creationflags=priority,capture_output=True,text=True,encoding='utf-8',errors='replace')
+        print(result.stdout);print(result.stderr,file=sys.stderr)
+        (out/(name+'.log')).write_text(result.stdout+'\n'+result.stderr,encoding='utf-8')
+        if result.returncode:return result.returncode
+        if '1 passed; 0 failed;' not in result.stdout:raise RuntimeError('isolated UI test did not execute')
+    return 0
 if __name__=='__main__':raise SystemExit(main())

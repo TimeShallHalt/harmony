@@ -203,7 +203,8 @@ pub fn stage(
         return Err(Error::Conflict);
     }
     let dir = updates.child(&name, true)?;
-    let result = (|| {
+    let mut pending_publication = false;
+    let mut result = (|| {
         let mut file = dir.file("payload", true)?;
         let mut bounded = BoundedWriter {
             file: &mut file,
@@ -242,12 +243,18 @@ pub fn stage(
         };
         write_plan(&dir, &plan)?;
         cancel.check()?;
+        pending_publication = true;
         updates.atomic(
             "pending.json",
             &serde_json::to_vec(&name).map_err(|_| Error::Invalid("pending transaction"))?,
         )?;
         Ok(name.clone())
     })();
+    if result == Err(Error::Durability) && !pending_publication {
+        // A plan rename is not a pending-pointer publication. Leave any prior
+        // Installed pointer alone and report this attempt as unpublished.
+        result = Err(Error::Io("sync staging journal before pending publication"));
+    }
     // A post-rename sync error means pending.json HAS been published. Removing
     // its referents would convert a recoverable durability failure into data loss.
     if result.is_err() && result != Err(Error::Durability) {
