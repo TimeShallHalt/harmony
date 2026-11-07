@@ -2,7 +2,7 @@
 
 ## Scope
 
-Ren's personal native Rust/Slint Discord client on Windows and Linux. Source is the existing Yapfast fork, not a new web client. Ren explicitly chose extensible native theme packs instead of actual browser CSS, to minimize CPU and memory. This is a multi-release roadmap, not a claim that every requested feature can be completed in one patch.
+Ren's personal native Rust/Slint Discord client on Windows and Linux. Source is the existing Yapfast fork, not a new web client. Ren explicitly chose extensible native theme packs instead of actual browser CSS, to minimize CPU and memory. The current scope is ALL requested features, original-resolution image viewing, automatic updates and Settings app/build information. Work may be integrated in bounded verified slices, but a partial release or roadmap must never be represented as completion of the full request. See `architecture.md` for native ownership and acceptance boundaries.
 
 ## Reference sources
 

@@ -647,9 +647,7 @@ pub fn parse(value: &Value) -> Option<Message> {
                 preview_url: (image || video)
                     .then(|| scaled_url(attachment, PREVIEW_WIDTH, PREVIEW_HEIGHT, image))
                     .flatten(),
-                view_url: image
-                    .then(|| scaled_url(attachment, VIEW_WIDTH, VIEW_HEIGHT, true))
-                    .flatten(),
+                view_url: image.then(|| original_image_url(attachment, &url)),
                 video_url: video.then(|| url.to_string()),
                 link_url: None,
                 animated: image && animated(attachment),
@@ -876,9 +874,46 @@ fn spoils_links(content: &str) -> bool {
 pub const PREVIEW_WIDTH: u64 = 550;
 pub const PREVIEW_HEIGHT: u64 = 400;
 
-/// The image viewer's largest size.
-pub const VIEW_WIDTH: u64 = 1920;
-pub const VIEW_HEIGHT: u64 = 1200;
+/// Select original supported image bytes, without window-size transformations.
+/// `original` must already be the caller's approved source: an attachment's
+/// signed CDN URL, or Discord's proxy for externally hosted embed pictures.
+/// AVIF/HEIC/SVG and unknown formats keep the existing animated WebP conversion,
+/// requested at source dimensions. That compatibility conversion is not a
+/// claim of byte-for-byte fidelity to an unsupported source encoding.
+pub(crate) fn original_image_url(media: &Value, original: &str) -> String {
+    let supported = match media["content_type"].as_str() {
+        Some(kind) => {
+            let kind = kind.split(';').next().unwrap_or_default().trim();
+            [
+                "image/png",
+                "image/apng",
+                "image/jpeg",
+                "image/jpg",
+                "image/gif",
+                "image/webp",
+            ]
+            .iter()
+            .any(|supported| kind.eq_ignore_ascii_case(supported))
+        }
+        None => {
+            let path = media["url"]
+                .as_str()
+                .unwrap_or(original)
+                .split(['?', '#'])
+                .next()
+                .unwrap_or_default();
+            let extension = path.rsplit('.').next().unwrap_or_default();
+            ["png", "apng", "jpg", "jpeg", "gif", "webp"]
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        }
+    };
+    if supported {
+        original.to_owned()
+    } else {
+        scaled_url(media, u64::MAX, u64::MAX, true).unwrap_or_else(|| original.to_owned())
+    }
+}
 
 /// Asks Discord's media proxy for the image fitted into `max_width` by
 /// `max_height` and never enlarged, as the official client does, so a phone
@@ -2014,8 +2049,8 @@ mod tests {
         );
         assert_eq!(
             message.attachments[0].view_url.as_deref(),
-            Some("https://media/cat.png?ex=1&animated=true&format=webp&width=1440&height=540"),
-            "a small image isn't enlarged"
+            Some("https://cdn/cat.png"),
+            "the viewer requests original bytes; sized WebP is only for previews"
         );
         // A video plays from the file, its poster from the media proxy.
         let video = &message.attachments[1];

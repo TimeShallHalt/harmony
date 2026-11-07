@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-use crate::message::{Attachment, Shown, VIEW_HEIGHT, VIEW_WIDTH, date, iso_ms, scaled_url};
+use crate::message::{Attachment, Shown, date, iso_ms, original_image_url, scaled_url};
 
 /// The size thumbnails beside an embed's text are downloaded at: twice what
 /// they show at, for high-DPI displays.
@@ -76,7 +76,7 @@ fn picture(value: &Value, shown: Shown, thumbnail: bool) -> Option<Attachment> {
         image: !matches!(shown, Shown::Poster(_)),
         dimensions,
         preview_url: Some(preview_url),
-        view_url: scaled_url(value, VIEW_WIDTH, VIEW_HEIGHT, animated),
+        view_url: Some(original_image_url(value, proxy)),
         still_url: None,
         video_url: None,
         link_url: None,

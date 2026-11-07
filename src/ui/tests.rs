@@ -4030,6 +4030,88 @@ fn a_call_shows_on_its_servers_icon_and_its_closed_folder() {
 }
 
 #[test]
+fn an_original_reaches_the_native_viewer_without_an_adapter_resize() {
+    use yapfast_core::chat::{
+        PREVIEW_HEIGHT, PREVIEW_WIDTH, VIEW_HEIGHT, VIEW_WIDTH, decode_picture,
+    };
+
+    i_slint_backend_testing::init_no_event_loop();
+    let directory = tempfile::tempdir().unwrap();
+    let window = classic_window();
+    let adapter = Adapter::new(
+        Arc::new(BackgroundRuntime::new().unwrap()),
+        directory.path().into(),
+        &window,
+    )
+    .unwrap();
+    let mut adapter = adapter.borrow_mut();
+    let original = image::RgbaImage::from_fn(3840, 1200, |x, y| {
+        image::Rgba([(x & 255) as u8, (y & 255) as u8, ((x ^ y) & 255) as u8, 255])
+    });
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    original
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    let preview = Arc::new(decode_picture(bytes.get_ref(), PREVIEW_WIDTH, PREVIEW_HEIGHT).unwrap());
+    let full = Arc::new(decode_picture(bytes.get_ref(), VIEW_WIDTH, VIEW_HEIGHT).unwrap());
+    let weak = Arc::downgrade(&full);
+    adapter.app.state.messages = Arc::new(vec![Arc::new(ChatMessage {
+        item: "original-fixture".into(),
+        attachments: vec![yapfast_core::chat::Attachment {
+            name: "original.png".into(),
+            size: Some(bytes.get_ref().len() as u64),
+            image: true,
+            dimensions: Some(original.dimensions()),
+            preview: Some(preview),
+            preview_failed: false,
+            placement: yapfast_core::chat::Placement::Message,
+            gif: None,
+            spoiler: false,
+            video: false,
+            url: None,
+        }],
+        ..Default::default()
+    })]);
+    adapter.app.state.viewer = Some(yapfast_core::application::Viewer {
+        item: "original-fixture".into(),
+        index: 0,
+        pictures: [(0, None)].into(),
+        ..Default::default()
+    });
+    adapter.refresh(&window);
+    assert_eq!(window.get_viewer_image().size().width, PREVIEW_WIDTH);
+    adapter
+        .app
+        .state
+        .viewer
+        .as_mut()
+        .unwrap()
+        .pictures
+        .insert(0, Some(Ok(full)));
+    adapter.refresh(&window);
+    let shown = window.get_viewer_image();
+    assert_eq!(
+        (shown.size().width, shown.size().height),
+        original.dimensions()
+    );
+    let pixels = shown
+        .to_rgba8()
+        .expect("native original pixels are readable");
+    assert_eq!(pixels.as_bytes(), original.as_raw().as_slice());
+    assert_eq!(window.get_viewer_note(), "");
+    drop(pixels);
+    drop(shown);
+    adapter.app.state.viewer = None;
+    adapter.refresh(&window);
+    assert!(!window.get_viewer_open());
+    assert_eq!(window.get_viewer_image().size().width, 0);
+    assert!(
+        weak.upgrade().is_none(),
+        "closing must release the decoded original"
+    );
+}
+
+#[test]
 fn closing_the_viewer_lets_go_of_its_picture() {
     i_slint_backend_testing::init_no_event_loop();
     let directory = tempfile::tempdir().unwrap();

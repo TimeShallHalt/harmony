@@ -20,10 +20,11 @@ pub const PREVIEW_HEIGHT: u32 = 400;
 /// The pictures a pinned message's or a search result's card shows at
 /// most; it names the rest.
 pub const FOUND_PICTURES: usize = 4;
-/// The image viewer shows pictures up to this size, so a full-size photo
-/// costs at most about 9 MiB while it's open.
-pub const VIEW_WIDTH: u32 = 1920;
-pub const VIEW_HEIGHT: u32 = 1200;
+/// Original viewer pixels are kept within the decoder's existing safety bounds.
+/// Fitting belongs to presentation; shrinking here permanently discards detail.
+/// Images outside these bounds are refused rather than silently downsampled.
+pub const VIEW_WIDTH: u32 = 8192;
+pub const VIEW_HEIGHT: u32 = 8192;
 
 /// What someone is doing on Discord: a game, music, a stream or a Hang
 /// status, shared as the gateway parsed it.
@@ -3903,7 +3904,8 @@ pub(crate) fn decode_preview(data: &[u8]) -> Option<Picture> {
     decode_picture(data, PREVIEW_WIDTH, PREVIEW_HEIGHT)
 }
 
-/// Decode an image for the viewer, shrunk to fit a large window.
+/// Decode original viewer pixels without shrinking them to a window size.
+/// The shared decoder's dimension/allocation limits still apply.
 #[cfg(any(feature = "matrix", test))]
 pub(crate) fn decode_view(data: &[u8]) -> Option<Picture> {
     decode_picture(data, VIEW_WIDTH, VIEW_HEIGHT)
@@ -4837,10 +4839,27 @@ mod tests {
     }
 
     #[test]
+    fn viewer_keeps_original_pixels_above_the_old_resolution_cap() {
+        let original = image::RgbaImage::from_fn(3840, 1200, |x, y| {
+            image::Rgba([(x & 255) as u8, (y & 255) as u8, ((x ^ y) & 255) as u8, 255])
+        });
+        let mut data = std::io::Cursor::new(Vec::new());
+        original
+            .write_to(&mut data, image::ImageFormat::Png)
+            .unwrap();
+        let viewed = decode_view(data.get_ref()).unwrap();
+        assert_eq!((viewed.width, viewed.height), original.dimensions());
+        assert_eq!(&viewed.rgba[..], original.as_raw().as_slice());
+        let preview = decode_preview(data.get_ref()).unwrap();
+        assert_eq!(preview.width, PREVIEW_WIDTH);
+        assert!(preview.height < original.height());
+    }
+
+    #[test]
     fn pictures_shrink_to_fit_but_never_grow() {
         let small = decode_view(&png(800, 500)).unwrap();
         assert_eq!((small.width, small.height), (800, 500));
-        let large = decode_view(&png(3840, 1200)).unwrap();
+        let large = decode_picture(&png(3840, 1200), 1920, 1200).unwrap();
         assert_eq!((large.width, large.height), (1920, 600));
         let preview = decode_preview(&png(800, 500)).unwrap();
         // Discord's previews go up to 550 by 400.

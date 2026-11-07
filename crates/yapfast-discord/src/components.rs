@@ -11,8 +11,8 @@
 use serde_json::Value;
 
 use crate::message::{
-    Attachment, IS_SPOILER, PREVIEW_HEIGHT, PREVIEW_WIDTH, Shown, VIEW_HEIGHT, VIEW_WIDTH,
-    animated, scaled_url,
+    Attachment, IS_SPOILER, PREVIEW_HEIGHT, PREVIEW_WIDTH, Shown, animated, original_image_url,
+    scaled_url,
 };
 
 /// The message flag of a message made of components alone, without content
@@ -330,7 +330,14 @@ fn select(component: &Value) -> Row {
 /// item, fitted into `size`. Discord's proxy must have it.
 fn media(item: &Value, slot: usize, size: (u64, u64), spoiler: bool) -> Option<Attachment> {
     let url = item["url"].as_str()?;
-    item["proxy_url"].as_str()?;
+    let proxy = item["proxy_url"].as_str()?;
+    // External galleries remain on Discord's proxy; only its own attachment
+    // URLs can be fetched directly as originals.
+    let original = if url.starts_with("https://cdn.discordapp.com/attachments/") {
+        url
+    } else {
+        proxy
+    };
     let video = item["content_type"]
         .as_str()
         .is_some_and(|kind| kind.starts_with("video/"));
@@ -343,9 +350,7 @@ fn media(item: &Value, slot: usize, size: (u64, u64), spoiler: bool) -> Option<A
         dimensions: side("width").zip(side("height")),
         // A video's poster is its first frame alone.
         preview_url: scaled_url(item, size.0, size.1, !video),
-        view_url: (!video)
-            .then(|| scaled_url(item, VIEW_WIDTH, VIEW_HEIGHT, true))
-            .flatten(),
+        view_url: (!video).then(|| original_image_url(item, original)),
         still_url: None,
         video_url: video.then(|| url.to_owned()),
         link_url: None,
