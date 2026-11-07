@@ -2,14 +2,22 @@
 Rebuild the integration application after a production change before claiming
 GREEN; this helper reports its exact library inputs and never mutates Cargo.
 """
+import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRATCH = Path.home() / 'AppData/Local/hermes/cache/scratch/harmony-fullres-pixels'
+parser = argparse.ArgumentParser(allow_abbrev=False)
+parser.add_argument('--source', type=Path, default=ROOT / 'testing/fullres_pixel_regression.rs')
+parser.add_argument('--suite', default='fullres-pixels')
+options, test_args = parser.parse_known_args()
+if not re.fullmatch(r'[a-z0-9_-]+', options.suite):
+    raise SystemExit('Invalid scratch suite name.')
+SCRATCH = Path.home() / 'AppData/Local/hermes/cache/scratch' / ('harmony-' + options.suite)
 SCRATCH.mkdir(parents=True, exist_ok=True)
 vc = 'C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvars64.bat'
 setup = subprocess.run('call "' + vc.replace('/', '\\') + '" >nul && set', shell=True,
@@ -24,7 +32,7 @@ for key in ('TEMP', 'TMP', 'TMPDIR'):
 deps = ROOT / 'target/fast/deps'
 exe = SCRATCH / 'pixel-regression.exe'
 args = ['C:/Users/ren/.cargo/bin/rustc.exe', '--edition=2024', '--test',
-        str(ROOT / 'testing/fullres_pixel_regression.rs'), '-C', 'target-feature=+crt-static',
+        str(options.source.resolve()), '-C', 'target-feature=+crt-static',
         '-C', 'opt-level=1', '-L', 'dependency=' + str(deps), '-o', str(exe)]
 def newest_library(name):
     found = sorted(deps.glob('lib' + name + '-*.rlib'), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -54,7 +62,8 @@ def dependency_library(library, dependency):
 core = newest_library('yapfast_core')
 discord = dependency_library(core, 'yapfast_discord')
 libraries = {'yapfast_core': core, 'image': newest_library('image'),
-             'yapfast_discord': discord, 'serde_json': dependency_library(discord, 'serde_json')}
+             'yapfast_discord': discord, 'serde_json': dependency_library(discord, 'serde_json'),
+             'tokio': dependency_library(discord, 'tokio')}
 for name, library in libraries.items():
     print('Production input:', library.name, flush=True)
     args += ['--extern', name + '=' + str(library)]
@@ -68,5 +77,5 @@ flags = subprocess.BELOW_NORMAL_PRIORITY_CLASS
 compiled = subprocess.run(args, env=env, cwd=ROOT, creationflags=flags)
 if compiled.returncode:
     raise SystemExit(compiled.returncode)
-raise SystemExit(subprocess.run([str(exe), '--nocapture', *sys.argv[1:]], env=env,
+raise SystemExit(subprocess.run([str(exe), '--nocapture', *test_args], env=env,
                                cwd=ROOT, creationflags=flags).returncode)

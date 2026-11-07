@@ -261,6 +261,8 @@ pub fn may_work_later(error: &anyhow::Error) -> bool {
 
 pub struct Api {
     http: Client,
+    /// File requests have no account cookie jar and validate every redirect.
+    files: Client,
     /// Empty without a login; Discord may refresh it in READY.
     token: RwLock<String>,
     /// The API's base URL: Discord's, or the test server's.
@@ -292,12 +294,32 @@ impl Api {
             .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
             .build()
             .context("could not set up HTTPS")?;
+        // A permitted proxy URL must not redirect the downloader to an
+        // arbitrary site or local service. Keep account HTTP behavior separate
+        // and don't share account cookies with third-party media providers.
+        let files = Client::builder()
+            .user_agent(client::user_agent())
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .http2_keep_alive_interval(std::time::Duration::from_secs(10))
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    attempt.error("too many media redirects")
+                } else if allowed(attempt.url().as_str()).is_err() {
+                    attempt.error("refused media redirect outside the allowlist")
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .build()
+            .context("could not set up media HTTPS")?;
         let base = match client::test_server() {
             Some(server) => format!("{server}/api/v9"),
             None => API.to_owned(),
         };
         Ok(Self {
             http,
+            files,
             token: RwLock::new(token),
             base,
             limits: Limits::default(),
@@ -2059,15 +2081,22 @@ impl Api {
         self.read_file(url, limit).await
     }
 
-    /// Downloads a file without checking where it is from.
+    /// Reads an initially approved file, refusing excess bytes before copying
+    /// them into the result. Redirect targets are checked by the media client.
     async fn read_file(&self, url: &str, limit: usize) -> Result<Vec<u8>> {
         let mut response = self.get_file(url).await?;
+        if response
+            .content_length()
+            .is_some_and(|size| size > limit as u64)
+        {
+            return Err(TooLarge.into());
+        }
         let mut data = Vec::new();
         while let Some(chunk) = self.next_chunk(&mut response).await? {
-            data.extend_from_slice(&chunk);
-            if data.len() > limit {
-                bail!("the file is too large");
+            if chunk.len() > limit.saturating_sub(data.len()) {
+                return Err(TooLarge.into());
             }
+            data.extend_from_slice(&chunk);
         }
         Ok(data)
     }
@@ -2100,9 +2129,10 @@ impl Api {
 
     /// Asks for a file, giving up if Discord doesn't answer within [`STALL`].
     async fn get_file(&self, url: &str) -> Result<Response> {
-        let response = tokio::time::timeout(self.stall, self.http.get(url).send())
+        let response = tokio::time::timeout(self.stall, self.files.get(url).send())
             .await
             .map_err(|_| Stalled)?
+            .map_err(reqwest::Error::without_url)
             .context("could not reach Discord")?;
         if !response.status().is_success() {
             return Err(Refused(response.status()).into());

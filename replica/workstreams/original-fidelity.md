@@ -24,6 +24,10 @@
 
 The additional registered root UI adapter regression **passed**: `cargo test --locked --profile fast --no-default-features --features desktop,discord an_original_reaches_the_native_viewer_without_an_adapter_resize -- --nocapture --test-threads=1`. It feeds a generated original through the real core decoder, `Adapter::refresh` and Slint image-buffer conversion, verifies the full dimensions and every RGBA byte, then closes and asserts release of the original Picture allocation. Native result: **1 passed**, zero failed; 276 other tests were filtered out. This test uses the headless native backend, not physical desktop input.
 
+## Related transport follow-up
+
+`media-transport.md` records a separately reproduced and fixed inherited downloader redirect/size-limit weakness. Its seven real loopback HTTP regressions passed against rebuilt production libraries, and the nine original-fidelity regressions passed again afterward. That follow-up leaves original/preview byte budgets unchanged. The whole-root suite result above predates the transport follow-up; final all-branch integrated testing remains required.
+
 ## Deliberate limits and remaining work
 
 The original-fetch byte budget is still the baseline 20 MiB and decoder allocation budget is still 256 MiB. An image beyond these safeguards must offer save/open-original rather than be silently represented as a blurry success. The dedicated lifecycle workstream owns stronger typed size-limit messages, bounded original retention, stale-result rejection and cancellation; its changes are not part of this slice yet. The separate profile-media workstream owns avatar/banner entry points.

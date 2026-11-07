@@ -81,6 +81,7 @@ The source viewer now keeps supported original image pixels inside the existing 
 - A registered native root adapter regression passed from the real decoder through Slint image-buffer conversion and close/release. This is account-free/headless testing, not physical input or a live-account image inspection.
 - The existing 11 native viewer tests and 18 branding/theme/viewer source contracts passed.
 - Current full root suite: **269 passed, 1 failed, 6 ignored, 1 filtered out**. Only the pre-existing round-edge emoji assertion failed. The expressions workstream owns its fix; do not represent the full suite as green.
+- A subsequent media-only HTTP hardening slice reproduced the inherited redirect gap with real loopback servers, then passed seven production-API regressions for per-hop allowlisting, bounded chains, signed-query redaction and typed preallocation byte limits. The forbidden target counter changed from one request to zero. The nine original-pixel/URL regressions passed again and another Windows desktop build succeeded. See `replica/workstreams/media-transport.md`; the full-root result above predates this follow-up and must be rerun after integration.
 - Dedicated branches still own original-request cancellation/retention, avatar/banner entry points, updates/information and remaining feature families. Neither this slice nor the new binaries have been installed or activated; the installed artifact listed above is unchanged. No mouse/focus/call/music control was taken.
 
 ## Deployment policy
