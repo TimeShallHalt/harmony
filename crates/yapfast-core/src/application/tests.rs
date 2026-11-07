@@ -1,5 +1,8 @@
 use super::{preview::preview_room, *};
 
+#[path = "viewer_lifecycle_tests.rs"]
+mod viewer_lifecycle;
+
 #[cfg(feature = "discord")]
 fn discord_event(snapshot: yapfast_discord::service::Snapshot) -> Event {
     Event::Discord(Arc::new(snapshot))
@@ -2760,6 +2763,116 @@ fn videos_play_in_the_open_room_until_it_closes() {
     assert!(app.state.video.is_none(), "leaving the room stops it");
 }
 
+fn image_request(effects: &[Effect]) -> crate::original::Request {
+    effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Backend(Command::ViewImage { request, .. }) => Some(request.clone()),
+            _ => None,
+        })
+        .expect("the application must issue a new original request")
+}
+
+#[test]
+fn viewer_lifecycle_navigation_releases_the_inactive_original() {
+    let mut app = connected();
+    app.apply(Event::Timeline {
+        room: "dm".into(),
+        messages: timeline(vec![ChatMessage {
+            item: "e:originals".into(),
+            attachments: (0..3)
+                .map(|_| chat::Attachment {
+                    name: "fixture.png".into(),
+                    size: None,
+                    image: true,
+                    dimensions: None,
+                    preview: None,
+                    preview_failed: false,
+                    placement: chat::Placement::Message,
+                    gif: None,
+                    spoiler: false,
+                    video: false,
+                    url: None,
+                })
+                .collect(),
+            ..Default::default()
+        }]),
+    });
+    let effects = app.dispatch(Action::ViewImage {
+        item: "e:originals".into(),
+        index: 0,
+    });
+    let request = image_request(&effects);
+    let picture = Arc::new(Picture {
+        width: 2,
+        height: 2,
+        rgba: chat::Pixels::new(2, 2, vec![42; 16]),
+        ..Default::default()
+    });
+    let pixels = Arc::downgrade(&picture);
+    app.apply(Event::Image {
+        room: "dm".into(),
+        item: "e:originals".into(),
+        index: 0,
+        request,
+        picture: Ok(crate::original::Decoded::fixture(picture)),
+    });
+    assert!(pixels.upgrade().is_some(), "the active image is retained");
+    app.dispatch(Action::StepImage(1));
+    assert!(
+        pixels.upgrade().is_none(),
+        "navigation must release inactive decoded pixels"
+    );
+    assert_eq!(app.state.viewer.as_ref().unwrap().pictures.len(), 1);
+}
+
+#[test]
+fn viewer_lifecycle_reopening_rejects_the_previous_result() {
+    let mut app = connected();
+    app.apply(Event::Timeline {
+        room: "dm".into(),
+        messages: timeline(vec![ChatMessage {
+            item: "e:originals".into(),
+            attachments: vec![chat::Attachment {
+                name: "fixture.png".into(),
+                size: None,
+                image: true,
+                dimensions: None,
+                preview: None,
+                preview_failed: false,
+                placement: chat::Placement::Message,
+                gif: None,
+                spoiler: false,
+                video: false,
+                url: None,
+            }],
+            ..Default::default()
+        }]),
+    });
+    let effects = app.dispatch(Action::ViewImage {
+        item: "e:originals".into(),
+        index: 0,
+    });
+    let request = image_request(&effects);
+    app.dispatch(Action::CloseImage);
+    app.dispatch(Action::ViewImage {
+        item: "e:originals".into(),
+        index: 0,
+    });
+    app.apply(Event::Image {
+        room: "dm".into(),
+        item: "e:originals".into(),
+        index: 0,
+        request,
+        picture: Err("the previous, closed request"),
+    });
+    assert_eq!(
+        app.state.viewer.as_ref().unwrap().pictures[&0],
+        None,
+        "a late result for the same attachment must not complete the new request"
+    );
+}
+
 #[test]
 fn the_viewer_steps_through_a_messages_images() {
     let mut app = connected();
@@ -2813,15 +2926,17 @@ fn the_viewer_steps_through_a_messages_images() {
         [2],
         "the file is skipped"
     );
-    assert!(
-        viewed(app.dispatch(Action::StepImage(1))).is_empty(),
-        "back to the first, which is already loading"
+    assert_eq!(
+        viewed(app.dispatch(Action::StepImage(1))),
+        [0],
+        "back to the first reloads the cancelled request"
     );
     assert_eq!(
         app.state.viewer.as_ref().map(|viewer| viewer.index),
         Some(0)
     );
-    app.dispatch(Action::StepImage(-1));
+    let effects = app.dispatch(Action::StepImage(-1));
+    let request = image_request(&effects);
     assert_eq!(
         app.state.viewer.as_ref().map(|viewer| viewer.index),
         Some(2),
@@ -2831,6 +2946,7 @@ fn the_viewer_steps_through_a_messages_images() {
         room: "dm".into(),
         item: "e:m".into(),
         index: 2,
+        request,
         picture: Err("gone"),
     });
     assert_eq!(
@@ -3517,6 +3633,7 @@ fn discord_threads_show_beside_their_channel() {
         room: "discord:10:30".into(),
         item: "d:5".into(),
         index: 0,
+        request: image_request(&effects),
         picture: Err("gone"),
     });
     assert_eq!(

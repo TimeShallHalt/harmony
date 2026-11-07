@@ -17,6 +17,28 @@ use super::{
     *,
 };
 
+fn original_download_error(error: &anyhow::Error) -> &'static str {
+    // The address stays out of the log: it names the attachment.
+    let status = error
+        .downcast_ref::<Refused>()
+        .map(|Refused(status)| status.as_u16());
+    let stalled = error.is::<Stalled>();
+    tracing::warn!(?status, stalled, "could not download an image to view");
+    if error.is::<yapfast_discord::api::TooLarge>() {
+        "This original exceeds the viewer's safe download limit. Save the original to open it elsewhere."
+    } else if status == Some(403) {
+        "This original's link may have expired, or access was refused. Reopen the conversation to refresh its attachments."
+    } else if stalled {
+        "Discord stopped sending this image. Try again."
+    } else {
+        "Yapfast couldn't download this image from Discord. Try again."
+    }
+}
+
+#[cfg(test)]
+#[path = "original_tests.rs"]
+mod original_tests;
+
 pub(super) struct Pending {
     pub(super) nonce: String,
     pub(super) body: String,
@@ -198,6 +220,7 @@ pub struct OpenChannel {
     // it leaves the recent channels cancels it. What the person did, such
     // as sending, finishes on its own.
     tasks: JoinSet<()>,
+    viewer_task: crate::original::Task,
 }
 
 impl OpenChannel {
@@ -266,6 +289,7 @@ impl OpenChannel {
             rendered_with: Rendering::default(),
             topic_sent: None,
             tasks: JoinSet::new(),
+            viewer_task: crate::original::Task::default(),
         })
     }
 
@@ -525,6 +549,7 @@ impl OpenChannel {
     /// messages: a window goes. Decoded previews are owned by the shared
     /// byte-bounded cache.
     pub(super) fn shelve(&mut self) {
+        self.viewer_task.cancel();
         self.present();
         self.trim();
         self.pictures.clear();
@@ -1388,15 +1413,17 @@ impl OpenChannel {
         });
     }
 
-    /// Downloads an image attachment at viewing size, through Discord's media
-    /// proxy, and decodes it for the viewer.
+    /// Downloads and decodes the viewer original, separately from previews
+    /// and message/history work. Shelving the channel cancels only this task.
     pub fn view_image(
         &mut self,
         discord: &Discord,
         done: &UnboundedSender<Done>,
         item: String,
         index: usize,
+        request: crate::original::Request,
     ) {
+        self.viewer_task.cancel();
         let room = self.room.clone();
         let Some(url) = self
             .attachment(&item, index)
@@ -1406,49 +1433,39 @@ impl OpenChannel {
                 room,
                 item,
                 index,
+                request,
                 picture: Err("This image is no longer available."),
             });
             return;
         };
         let (discord, done) = (discord.clone(), done.clone());
-        self.tasks.spawn(async move {
-            let picture = match discord.download_now(&url, MAX_PREVIEW_DOWNLOAD_BYTES).await {
-                Ok(data) => tokio::task::spawn_blocking({
-                    let url = url.clone();
-                    move || {
-                        super::render::decode(
-                            &url,
-                            &data,
-                            (crate::chat::VIEW_WIDTH, crate::chat::VIEW_HEIGHT),
-                        )
-                    }
-                })
-                .await
-                .ok()
-                .flatten()
-                .map(Arc::new)
-                .ok_or("Yapfast can't show this image. Save it to open it elsewhere."),
-                Err(error) => {
-                    // The address stays out of the log: it names the attachment.
-                    let status = error
-                        .downcast_ref::<Refused>()
-                        .map(|Refused(status)| status.as_u16());
-                    let stalled = error.is::<Stalled>();
-                    tracing::warn!(?status, stalled, "could not download an image to view");
-                    Err(if stalled {
-                        "Discord stopped sending this image. Try again."
-                    } else {
-                        "Yapfast couldn't download this image from Discord. Try again."
-                    })
-                }
-            };
-            let _ = done.send(Done::Image {
-                room,
-                item,
-                index,
-                picture,
-            });
-        });
+        let decoding_url = url.clone();
+        let completed = request.clone();
+        self.viewer_task.start(
+            request,
+            async move {
+                discord
+                    .download_now(&url, MAX_PREVIEW_DOWNLOAD_BYTES)
+                    .await
+                    .map_err(|error| original_download_error(&error))
+            },
+            move |data| {
+                super::render::decode(
+                    &decoding_url,
+                    &data,
+                    (crate::chat::VIEW_WIDTH, crate::chat::VIEW_HEIGHT),
+                )
+            },
+            move |picture| {
+                let _ = done.send(Done::Image {
+                    room,
+                    item,
+                    index,
+                    request: completed,
+                    picture,
+                });
+            },
+        );
     }
 
     /// The channel as Yapfast's timeline. Starts downloading image previews it

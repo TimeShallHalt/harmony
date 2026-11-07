@@ -1842,6 +1842,7 @@ pub enum Command {
         room: String,
         item: String,
         index: usize,
+        request: crate::original::Request,
     },
     /// Play an attachment's video where its poster shows, at most `width`
     /// by `height` pixels, on `speakers`, stopping any other; it goes as
@@ -3398,7 +3399,8 @@ pub enum Event {
         room: String,
         item: String,
         index: usize,
-        picture: Result<Arc<Picture>, &'static str>,
+        request: crate::original::Request,
+        picture: Result<crate::original::Decoded, &'static str>,
     },
     /// A new message to notify the person of.
     Notify(Notification),

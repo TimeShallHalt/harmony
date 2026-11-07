@@ -117,7 +117,8 @@ pub enum Done {
         room: String,
         item: String,
         index: usize,
-        picture: Result<Arc<Picture>, &'static str>,
+        request: crate::original::Request,
+        picture: Result<crate::original::Decoded, &'static str>,
     },
     Saved {
         room: String,

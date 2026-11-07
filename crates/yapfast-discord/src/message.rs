@@ -318,7 +318,8 @@ pub struct Attachment {
     pub dimensions: Option<(u32, u32)>,
     /// The image scaled down by Discord's media proxy, for previews.
     pub preview_url: Option<String>,
-    /// The image scaled down to fit the viewer, by the same proxy.
+    /// The approved original image source, or its full-size compatibility
+    /// conversion for formats the native decoder does not support.
     pub view_url: Option<String>,
     /// A still picture to show when the preview, a video, can't be shown:
     /// a Tenor or Giphy GIF's first frame.
@@ -877,9 +878,11 @@ pub const PREVIEW_HEIGHT: u64 = 400;
 /// Select original supported image bytes, without window-size transformations.
 /// `original` must already be the caller's approved source: an attachment's
 /// signed CDN URL, or Discord's proxy for externally hosted embed pictures.
-/// AVIF/HEIC/SVG and unknown formats keep the existing animated WebP conversion,
-/// requested at source dimensions. That compatibility conversion is not a
-/// claim of byte-for-byte fidelity to an unsupported source encoding.
+/// AVIF/HEIC/SVG and unknown formats keep the animated WebP conversion at
+/// source dimensions when its metadata is available. Otherwise retain this
+/// already approved original for explicit decoder refusal and Save/open; never
+/// substitute a thumbnail and report full-resolution success. A compatibility
+/// conversion is not byte-for-byte fidelity to an unsupported source encoding.
 pub(crate) fn original_image_url(media: &Value, original: &str) -> String {
     let supported = match media["content_type"].as_str() {
         Some(kind) => {

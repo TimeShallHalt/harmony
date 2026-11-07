@@ -89,6 +89,7 @@ struct OpenRoom {
     visible: HashSet<String>,
     // Dropping the set when the room closes cancels its downloads and requests.
     tasks: JoinSet<()>,
+    viewer_task: crate::original::Task,
     /// The member list being read; a newer membership change replaces it.
     members: Option<AbortHandle>,
 }
@@ -489,6 +490,7 @@ impl Matrix {
                             requested: HashSet::new(),
                             visible: HashSet::new(),
                             tasks: JoinSet::new(),
+                            viewer_task: crate::original::Task::default(),
                             members: None,
                         };
                         load_members(&mut active, events);
@@ -661,8 +663,13 @@ impl Matrix {
                 let result = save_attachment(client, open.as_ref(), &room, &item, &path).await;
                 let _ = events.send(Event::Saved { room, name, result });
             }
-            Command::ViewImage { room, item, index } => {
-                view_image(client, open, room, item, index, events).await;
+            Command::ViewImage {
+                room,
+                item,
+                index,
+                request,
+            } => {
+                view_image(client, open, room, item, index, request, events).await;
             }
             Command::SaveDraft { room, body } => {
                 if let Ok(id) = OwnedRoomId::try_from(room)
@@ -1629,16 +1636,20 @@ fn image_source(item: &EventTimelineItem) -> Option<MediaSource> {
     }
 }
 
-/// Downloads an item's image and decodes it for the viewer, in the open
-/// room's tasks, so closing the room cancels it.
+/// Downloads the original in its own cancellable task, not the room's preview
+/// tasks. Discord and Matrix share the process-wide original decode bound.
 async fn view_image(
     client: &Client,
     open: &mut Option<OpenRoom>,
     room: String,
     item: String,
     index: usize,
+    request: crate::original::Request,
     events: &UnboundedSender<Event>,
 ) {
+    if let Some(open) = open.as_mut() {
+        open.viewer_task.cancel();
+    }
     let source = match (active_timeline(open.as_ref(), &room), parse_item(&item)) {
         (Some(timeline), Some(id)) if index == 0 => timeline
             .items()
@@ -1654,34 +1665,38 @@ async fn view_image(
             room,
             item,
             index,
+            request,
             picture: Err("This image is no longer available."),
         });
         return;
     };
     let (client, events) = (client.clone(), events.clone());
-    open.tasks.spawn(async move {
-        let picture =
-            match matrix_media::content(&client, &source, MAX_PREVIEW_DOWNLOAD_BYTES).await {
-                Ok(data) => tokio::task::spawn_blocking(move || decode_view(&data))
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(Arc::new)
-                    .ok_or("Yapfast can't show this image. Save it to open it elsewhere."),
-                Err(matrix_media::Failed::TooLarge) => {
-                    Err("This image is too large to show here. Save it to open it elsewhere.")
-                }
-                Err(_) => Err(
-                    "Yapfast couldn't download this image. Check your connection and try again.",
-                ),
-            };
-        let _ = events.send(Event::Image {
-            room,
-            item,
-            index,
-            picture,
-        });
-    });
+    let completed = request.clone();
+    open.viewer_task.start(
+        request,
+        async move {
+            matrix_media::content(&client, &source, MAX_PREVIEW_DOWNLOAD_BYTES)
+                .await
+                .map_err(|failed| match failed {
+                    matrix_media::Failed::TooLarge => {
+                        "This image is too large to show here. Save it to open it elsewhere."
+                    }
+                    _ => {
+                        "Yapfast couldn't download this image. Check your connection and try again."
+                    }
+                })
+        },
+        move |data| decode_view(&data),
+        move |picture| {
+            let _ = events.send(Event::Image {
+                room,
+                item,
+                index,
+                request: completed,
+                picture,
+            });
+        },
+    );
 }
 
 async fn save_attachment(
@@ -2208,6 +2223,7 @@ mod tests {
             requested: HashSet::new(),
             visible: HashSet::new(),
             tasks: JoinSet::new(),
+            viewer_task: crate::original::Task::default(),
             members: None,
         }
     }

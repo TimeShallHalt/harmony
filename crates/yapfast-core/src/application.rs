@@ -98,6 +98,7 @@ pub use threads::{
 
 use calls::call_sounds;
 use compose::has_markdown;
+use messages::OriginalView;
 use preview::{preview_members, sample_actions};
 use profiles::dm_profile;
 
@@ -345,8 +346,8 @@ pub struct Viewer {
     pub item: String,
     /// The attachment shown, by its place in the message.
     pub index: usize,
-    /// Images at viewing size by attachment: `None` while one downloads,
-    /// else the image or why it can't show.
+    /// Only the active original: `None` while it downloads, else the image
+    /// or why it can't show. Inactive originals are released, not cached.
     pub pictures: HashMap<usize, Option<Result<Arc<Picture>, &'static str>>>,
 }
 
@@ -2008,6 +2009,8 @@ type TimelineArc = Arc<Vec<Arc<ChatMessage>>>;
 #[derive(Default)]
 pub struct Application {
     pub state: AppState,
+    /// Request ownership is not part of clonable presentation state.
+    original: Option<OriginalView>,
     /// The lists from Matrix; `state` shows them with Discord's.
     matrix_rooms: Vec<Arc<ChatRoom>>,
     matrix_servers: Vec<Arc<ChatServer>>,
@@ -2436,6 +2439,7 @@ impl Application {
         // A keystroke in the composer shows no picture that wasn't on screen.
         let composing = matches!(action, Action::SetDraft(_) | Action::MentionQuery(_));
         let mut effects = self.dispatch_action(action);
+        self.sync_original();
         effects.extend(self.send_pending_message());
         effects.extend(self.show_panel_profile());
         if !composing {
@@ -2446,6 +2450,7 @@ impl Application {
 
     pub fn apply(&mut self, event: Event) -> Vec<Effect> {
         let mut effects = self.apply_event(event);
+        self.sync_original();
         // A DM just started, or a thread asked for, opens once the lists
         // have it.
         if let Some(room) = self
@@ -3107,6 +3112,8 @@ impl Application {
             },
             Action::UnlinkDiscord => {
                 if self.state.discord_linked && self.state.account.is_some() {
+                    self.state.viewer = None;
+                    self.original = None;
                     vec![Effect::Backend(Command::Discord(DiscordCommand::Unlink))]
                 } else {
                     vec![]
@@ -3411,15 +3418,25 @@ impl Application {
                 room,
                 item,
                 index,
+                request,
                 picture,
             } => {
                 // The room it came from: the selected one, or the thread
                 // beside it.
-                if self.state.room_of(&item) == Some(&room)
+                if self
+                    .original
+                    .as_ref()
+                    .is_some_and(|active| active.request == request)
+                    && !request.is_cancelled()
+                    && self.state.room_of(&item) == Some(&room)
                     && let Some(viewer) = &mut self.state.viewer
                     && viewer.item == item
+                    && viewer.index == index
                 {
-                    viewer.pictures.insert(index, Some(picture));
+                    viewer.pictures.insert(
+                        index,
+                        Some(picture.map(crate::original::Decoded::into_picture)),
+                    );
                 }
             }
             Event::Picture { url, picture } => self.keep_picture(url, picture),

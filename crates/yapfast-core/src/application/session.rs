@@ -51,6 +51,8 @@ impl Application {
             self.reset();
             vec![]
         } else if self.state.account.is_some() {
+            self.state.viewer = None;
+            self.original = None;
             self.state.busy = true;
             self.state.notice = Some("Signing out...".into());
             vec![Effect::Backend(Command::Logout)]
@@ -71,6 +73,18 @@ impl Application {
             Command::Send { room, .. } | Command::Edit { room, .. } => {
                 if self.state.sending.as_ref() == Some(room) {
                     self.state.sending = None;
+                }
+            }
+            Command::ViewImage { request, .. } => {
+                if self
+                    .original
+                    .as_ref()
+                    .is_some_and(|active| active.request == *request)
+                {
+                    self.original = None;
+                    if let Some(viewer) = &mut self.state.viewer {
+                        viewer.pictures.insert(viewer.index, Some(Err(STOPPED)));
+                    }
                 }
             }
             Command::Earlier(room) => {
@@ -125,6 +139,8 @@ impl Application {
 
     /// Call after the event stream closes. Error details from the last event survive.
     pub fn stopped(&mut self) {
+        self.state.viewer = None;
+        self.original = None;
         let was_busy = self.state.busy;
         self.state.busy = false;
         self.state.online = false;

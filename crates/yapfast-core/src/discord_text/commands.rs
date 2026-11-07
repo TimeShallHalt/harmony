@@ -306,7 +306,12 @@ pub fn command(
             item, index, path, ..
         } => channel.save(discord, done, &item, index, path),
         Command::CopyAttachment { item, index, .. } => channel.copy(discord, done, &item, index),
-        Command::ViewImage { item, index, .. } => channel.view_image(discord, done, item, index),
+        Command::ViewImage {
+            item,
+            index,
+            request,
+            ..
+        } => channel.view_image(discord, done, item, index, request),
         Command::Earlier(room) if !channel.earlier(discord, done) => {
             let _ = events.send(Event::HistoryLoaded {
                 room,
@@ -482,6 +487,7 @@ pub fn finished(
             Done::Image {
                 item,
                 index,
+                request,
                 picture,
                 ..
             },
@@ -491,6 +497,7 @@ pub fn finished(
                 room,
                 item,
                 index,
+                request,
                 picture,
             });
         }

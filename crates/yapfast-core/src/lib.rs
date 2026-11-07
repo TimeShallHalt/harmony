@@ -62,6 +62,7 @@ pub mod mention;
 pub mod meter;
 pub mod network;
 pub mod noise;
+pub mod original;
 pub mod picture;
 #[cfg(feature = "discord")]
 pub mod playback;

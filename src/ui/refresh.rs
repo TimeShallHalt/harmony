@@ -4013,15 +4013,7 @@ impl Adapter {
         window.set_viewer_width(width as i32);
         window.set_viewer_height(height as i32);
         let shown = full.or(attachment.preview.as_ref());
-        let image = match (shown, &self.viewer_image) {
-            (Some(shown), Some((cached, image))) if Arc::ptr_eq(shown, cached) => image.clone(),
-            (Some(shown), _) => {
-                let image = picture(shown);
-                self.viewer_image = Some((shown.clone(), image.clone()));
-                image
-            }
-            (None, _) => slint::Image::default(),
-        };
+        let image = super::viewer_picture::image(shown, &mut self.viewer_image, picture);
         window.set_viewer_image(image);
         let (frames, delays) = shown.map(animation).unwrap_or_default();
         window.set_viewer_frames(frames);

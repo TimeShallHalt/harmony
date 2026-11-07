@@ -46,10 +46,10 @@ mod channel_settings;
 mod emoji_animation;
 mod games;
 mod gifs;
-mod menus;
-mod messages;
 #[cfg(test)]
 mod media_viewer_tests;
+mod menus;
+mod messages;
 #[cfg(windows)]
 mod move_loop;
 mod pictures;
@@ -65,6 +65,7 @@ mod theme_pack;
 mod theme_pack_ui_tests;
 mod tiles;
 mod title_bar;
+mod viewer_picture;
 mod yapfast;
 
 use callbacks::bind_callbacks;

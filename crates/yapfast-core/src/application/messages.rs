@@ -2,7 +2,45 @@
 
 use super::*;
 
+/// The application owns cancellation, independently of clonable UI snapshots.
+pub(super) struct OriginalView {
+    room: String,
+    item: String,
+    index: usize,
+    account: Option<String>,
+    discord_user: Option<String>,
+    pub(super) request: crate::original::Request,
+}
+
+impl Drop for OriginalView {
+    fn drop(&mut self) {
+        self.request.cancel();
+    }
+}
+
 impl Application {
+    /// Closing or changing the source invalidates the request even if its
+    /// result is already queued. Room/aside/account changes go through this
+    /// after each application transition, including provider events.
+    pub(super) fn sync_original(&mut self) {
+        let Some(active) = &self.original else {
+            return;
+        };
+        let current = self.state.viewer.as_ref().is_some_and(|viewer| {
+            viewer.item == active.item
+                && viewer.index == active.index
+                && self.state.room_of(&viewer.item) == Some(&active.room)
+                && self.state.message(&viewer.item).is_some()
+                && self.state.account == active.account
+                && self.state.discord_user == active.discord_user
+                && !active.request.is_cancelled()
+        });
+        if !current {
+            self.original = None;
+            self.state.viewer = None;
+        }
+    }
+
     pub(super) fn react(&mut self, item: String, key: String) -> Vec<Effect> {
         let Some(room) = self.state.room_of(&item).cloned() else {
             return vec![];
@@ -545,14 +583,27 @@ impl Application {
         let Some(viewer) = &mut self.state.viewer else {
             return vec![];
         };
+        // Originals are not a cache: only the selected image may own pixels
+        // or a pending marker. Returning to an abandoned request reloads it.
+        viewer.pictures.retain(|index, _| *index == viewer.index);
         if self.state.preview || viewer.pictures.contains_key(&viewer.index) {
             return vec![];
         }
         viewer.pictures.insert(viewer.index, None);
+        let request = crate::original::Request::new();
+        self.original = Some(OriginalView {
+            room: room.clone(),
+            item: viewer.item.clone(),
+            index: viewer.index,
+            account: self.state.account.clone(),
+            discord_user: self.state.discord_user.clone(),
+            request: request.clone(),
+        });
         vec![Effect::Backend(Command::ViewImage {
             room,
             item: viewer.item.clone(),
             index: viewer.index,
+            request,
         })]
     }
 
