@@ -214,20 +214,25 @@ impl Controller {
         ))
     }
 }
+/// A shortcut/registration must point at the stable entry, never a transient
+/// version or the currently evacuated image. Legacy layouts keep their existing
+/// registration behavior; this function does not write registrations itself.
+pub fn normal_entry() -> Result<PathBuf> {
+    if let Some(install) = super::bootstrap::current_install()? {
+        return Ok(install.with_file_name(super::bootstrap::names().0));
+    }
+    std::env::current_exe().map_err(|_| Error::Io("normal launch entry"))
+}
 pub fn current_install() -> Result<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         if let Some(install) = super::bootstrap::current_install()? {
             return Ok(install);
         }
-        let p = std::env::var_os("APPIMAGE")
-            .map(PathBuf::from)
-            .ok_or(Error::Unsupported)?;
-        if !p.is_absolute() {
-            return Err(Error::Invalid("absolute APPIMAGE required"));
-        }
-        let _running = super::image_identity::running(&p)?;
-        Ok(p)
+        // Even a kernel-identical direct outer image has no usable normal
+        // entry after evacuation. Mounted AppImages additionally lack the
+        // required outer/inner image binding. Neither is migrated implicitly.
+        Err(Error::Unsupported)
     }
     #[cfg(windows)]
     {

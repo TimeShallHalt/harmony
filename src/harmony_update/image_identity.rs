@@ -2,7 +2,7 @@
 //! proposed installation location, never evidence of what is executing.
 use super::*;
 use std::{fs::File, path::Path};
-pub(super) fn running(install: &Path) -> Result<File> {
+pub(crate) fn running(install: &Path) -> Result<File> {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::MetadataExt;

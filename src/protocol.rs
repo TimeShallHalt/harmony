@@ -32,7 +32,9 @@ pub fn refresh(root: &Path) {
 #[cfg(windows)]
 fn command(root: &Path) -> std::io::Result<Vec<String>> {
     use crate::autostart::path_text;
-    let mut command = vec![path_text(std::env::current_exe()?)?];
+    let mut command = vec![path_text(
+        crate::harmony_update::controller::normal_entry().map_err(std::io::Error::other)?,
+    )?];
     let usual = yapfast_core::default_directory().ok();
     if usual.as_deref() != Some(root) {
         command.extend([

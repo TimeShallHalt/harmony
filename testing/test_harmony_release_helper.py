@@ -44,6 +44,23 @@ class ReleaseHelper(unittest.TestCase):
             p=Path(name); wrong=p/'wrong.exe'; wrong.write_bytes(b'PK archive fixture')
             result=self.invoke(p,'--artifact',f'windows-x86_64={wrong}')
             self.assertNotEqual(result.returncode,0); self.assertFalse((p/'out/harmony-update-v1.json').exists())
+    def test_native_elf_layout_packaging_is_explicit_and_cannot_masquerade_as_appimage(self):
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as name:
+            p=Path(name); source=p/'native.elf'
+            native=appimage(); native[8:11]=b'\0\0\0'; native[16:18]=(3).to_bytes(2,'little'); source.write_bytes(native)
+            refused=self.invoke(p,'--artifact',f'linux-x86_64={source}')
+            self.assertNotEqual(refused.returncode,0,'existing AppImage packaging must not silently change')
+            result=self.invoke(p,'--linux-format','native-elf','--artifact',f'linux-x86_64={source}')
+            self.assertEqual(result.returncode,0,result.stderr)
+            a=json.loads((p/'out/harmony-update-v1.json').read_text())['artifacts'][0]
+            self.assertEqual(a['format'],'elf'); self.assertEqual(a['name'],'Harmony-1.0.1-linux-x86_64.elf')
+            self.assertEqual((p/'out'/a['name']).read_bytes(),native)
+            self.assertEqual(a['sha256'],hashlib.sha256(native).hexdigest())
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as name:
+            p=Path(name); source=p/'mounted.AppImage'; source.write_bytes(appimage())
+            result=self.invoke(p,'--linux-format','native-elf','--artifact',f'linux-x86_64={source}')
+            self.assertNotEqual(result.returncode,0,'an outer AppImage is not a direct native layout')
+            self.assertFalse((p/'out/harmony-update-v1.json').exists())
     def test_no_overwrite_and_no_duplicate_platform(self):
         with tempfile.TemporaryDirectory(dir=SCRATCH) as name:
             p=Path(name); win=p/'input.exe'; win.write_bytes(pe())

@@ -37,7 +37,8 @@ pub fn refresh() {
 
 /// What starts Yapfast in the tray, with the data folder this one uses.
 fn command() -> std::io::Result<Vec<String>> {
-    let program = std::env::current_exe()?;
+    let program =
+        crate::harmony_update::controller::normal_entry().map_err(std::io::Error::other)?;
     #[cfg(target_os = "linux")]
     let program = crate::desktop_entry::appimage(&program).unwrap_or(program);
     let mut command = vec![path_text(program)?, "--background".to_owned()];

@@ -19,6 +19,8 @@ class UpdaterWiring(unittest.TestCase):
         self.assertIn('super::updater_info::bind(window, adapter)', callbacks)
         self.assertIn('updater_info::startup', ui)
         self.assertIn('handoff_on_full_exit', ui)
+        for path in ['src/autostart.rs','src/protocol.rs','src/desktop_entry.rs']:
+            self.assertIn('harmony_update::controller::normal_entry()', (ROOT/path).read_text())
     def test_native_helper_dispatch_precedes_tls_and_app_runtime(self):
         main = (ROOT / 'src/main.rs').read_text()
         self.assertLess(main.index('harmony_update::cli_main'), main.index('yapfast_core::init_tls()?'))

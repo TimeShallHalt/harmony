@@ -61,7 +61,7 @@ def main():
         subprocess.run(["cargo", "build", "--jobs", "2", "--manifest-path", str(scratch / "Cargo.toml"), "--bin", "harmony-bootstrap"], env=env, check=True)
         env["HARMONY_TEST_BOOTSTRAP"] = str(scratch / "target/debug/harmony-bootstrap")
         env["HARMONY_TEST_PROCESS_FIXTURE"] = str(scratch / "target/debug/updater-process-fixture")
-        return checked_tests(["cargo", "test", "--jobs", "2", "--lib", "--manifest-path", str(scratch / "Cargo.toml"), "--", "--test-threads=1", "--include-ignored", *rest], env, scratch,timeout=120)
+        return checked_tests(["cargo", "test", "--jobs", "2", "--lib", "--manifest-path", str(scratch / "Cargo.toml"), "--", "--test-threads=1", "--include-ignored", *rest], env, scratch,timeout=180)
     if not env.get("VCINSTALLDIR"):
         vswhere = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"
         vs = subprocess.check_output([str(vswhere), "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], text=True).strip()

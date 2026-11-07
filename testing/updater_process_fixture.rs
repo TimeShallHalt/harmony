@@ -94,6 +94,7 @@ fn main() {
                 &args[1],
                 serde_json::to_vec(&serde_json::json!({
                     "install": install,
+                    "entry": harmony_update::controller::normal_entry().unwrap(),
                     "load_error": loaded.err().map(|e| e.to_string()),
                     "phase": staged.as_ref().map(|(_, p)| &p.phase),
                     "armed": staged.as_ref().is_some_and(|(_,p)| p.armed)
@@ -102,9 +103,10 @@ fn main() {
             )
             .unwrap();
         }
-        "identify-current" | "identify-substituted" => {
+        "identify-current" | "identify-substituted" | "identify-legacy-layout" => {
+            let proposed = std::env::current_exe().unwrap();
             if mode == "identify-substituted" {
-                let running = std::env::current_exe().unwrap();
+                let running = &proposed;
                 std::fs::rename(&running, running.with_file_name("original-image")).unwrap();
                 // Same bytes, different inode: repeated path hashes cannot
                 // distinguish this substitution. This new file is NEVER run.
@@ -112,7 +114,13 @@ fn main() {
             }
             std::fs::write(
                 &args[2],
-                if harmony_update::controller::current_install().is_ok() {
+                if (if mode == "identify-legacy-layout" {
+                    harmony_update::controller::current_install().map(|_| ())
+                } else {
+                    harmony_update::image_identity::running(&proposed).map(|_| ())
+                })
+                .is_ok()
+                {
                     b"accepted".as_slice()
                 } else {
                     b"rejected".as_slice()

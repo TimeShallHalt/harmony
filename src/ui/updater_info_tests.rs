@@ -128,6 +128,163 @@ fn harmony_normal_startup_exposes_safe_applying_recovery_in_native_ui() {
     }
 }
 #[test]
+#[ignore = "actual owned exit cuts and native stable-layout recovery callbacks; use runner"]
+fn harmony_stable_layout_cut_recovery_uses_real_native_startup_and_callbacks() {
+    use crate::harmony_update::{
+        BuildInfo, Cancel, Result, bootstrap, controller::Controller, release::*, transaction,
+    };
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+    struct OwnedBytes(Vec<u8>);
+    impl Transport for OwnedBytes {
+        fn releases(&self, _: &Cancel) -> Result<Vec<Release>> {
+            unreachable!("offline staging fixture")
+        }
+        fn asset(&self, _: u64, out: &mut dyn Write, _: u64, _: &Cancel) -> Result<()> {
+            out.write_all(&self.0)
+                .map_err(|_| crate::harmony_update::Error::Io("owned bytes"))
+        }
+    }
+    i_slint_backend_testing::init_integration_test_with_system_time();
+    let pump = || {
+        slint::Timer::single_shot(std::time::Duration::from_millis(300), || {
+            let _ = slint::quit_event_loop();
+        });
+        slint::run_event_loop().unwrap();
+    };
+    let payload_source = PathBuf::from(
+        std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").expect("runner-owned fixture"),
+    );
+    let bootstrap_source = PathBuf::from(
+        std::env::var_os("HARMONY_TEST_BOOTSTRAP").expect("standalone native bootstrap"),
+    );
+    let digest = |p: &Path| format!("{:x}", Sha256::digest(std::fs::read(p).unwrap()));
+    for cut in ["journal", "displaced", "published"] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("owned-install");
+        std::fs::create_dir(&root).unwrap();
+        bootstrap::create(
+            &root,
+            &bootstrap_source,
+            &digest(&bootstrap_source),
+            &payload_source,
+            &digest(&payload_source),
+        )
+        .unwrap();
+        let install = root.join(bootstrap::names().1);
+        let entry_before = std::fs::read(root.join(bootstrap::names().0)).unwrap();
+        let mut bytes = std::fs::read(&payload_source).unwrap();
+        bytes.extend_from_slice(b"owned next-version UI fixture");
+        let artifact = Artifact {
+            platform: BuildInfo::current().platform_key(),
+            name: format!("Harmony-1.0.1-{}.exe", BuildInfo::current().platform_key()),
+            size: bytes.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            format: "exe".into(),
+        };
+        let manifest = Manifest {
+            schema: 1,
+            repository: REPOSITORY.into(),
+            tag: "harmony-v1.0.1-b1".into(),
+            version: "1.0.1".into(),
+            build_id: 1,
+            commit: "0123456789abcdef0123456789abcdef01234567".into(),
+            artifacts: vec![artifact.clone()],
+        };
+        let asset = Asset {
+            id: 2,
+            name: artifact.name.clone(),
+            size: artifact.size,
+            url: format!("https://api.github.com/repos/{REPOSITORY}/releases/assets/2"),
+        };
+        let candidate = Candidate {
+            release: Release {
+                tag_name: manifest.tag.clone(),
+                html_url: format!(
+                    "https://github.com/{REPOSITORY}/releases/tag/{}",
+                    manifest.tag
+                ),
+                draft: false,
+                prerelease: false,
+                assets: vec![asset.clone()],
+            },
+            manifest,
+            asset,
+            artifact,
+        };
+        transaction::stage(&install, &candidate, &OwnedBytes(bytes), &Cancel::default()).unwrap();
+        transaction::arm(&install, true).unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child
+            .args([
+                "--exact",
+                "harmony_update::tests::crash_cut_child",
+                "--ignored",
+            ])
+            .env("HARMONY_CRASH_INSTALL", &install)
+            .env("HARMONY_CRASH_CUT", cut);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            child.creation_flags(0x0800_4000);
+        }
+        assert_eq!(child.status().unwrap().code(), Some(92));
+        assert_eq!(install.exists(), cut != "displaced");
+        let window = YapfastWindow::new().unwrap();
+        let state = Adapter::new(
+            Arc::new(BackgroundRuntime::new().unwrap()),
+            dir.path().into(),
+            &window,
+        )
+        .unwrap();
+        state.borrow_mut().harmony_updates = Arc::new(Controller::new(Ok(install.clone())));
+        bind_callbacks(&window, &state);
+        updater_info::startup(&window, &state, false);
+        pump();
+        let ui = window.global::<HarmonyUpdates>();
+        if cut == "published" {
+            assert!(!ui.get_staged());
+            assert_eq!(
+                transaction::pending(&install).unwrap().unwrap().1.phase,
+                transaction::Phase::Installed
+            );
+        } else {
+            assert!(ui.get_staged());
+            assert!(ui.get_may_arm());
+            assert!(!ui.get_armed());
+            assert!(!ui.get_may_discard());
+            ui.invoke_arm(true);
+            pump();
+            assert!(ui.get_armed(), "actual callback must authorize {cut}");
+            assert_eq!(
+                transaction::pending(&install).unwrap().unwrap().1.phase,
+                transaction::Phase::Applying
+            );
+            assert_eq!(
+                install.exists(),
+                cut != "displaced",
+                "native authorization cannot publish or restore"
+            );
+            ui.invoke_discard();
+            pump();
+            assert!(ui.get_staged(), "Applying must not be discardable");
+            ui.invoke_arm(false);
+            pump();
+            assert!(!ui.get_armed());
+            state
+                .borrow()
+                .harmony_updates
+                .handoff_on_full_exit()
+                .unwrap();
+            assert_eq!(install.exists(), cut != "displaced");
+        }
+        assert_eq!(
+            std::fs::read(root.join(bootstrap::names().0)).unwrap(),
+            entry_before
+        );
+    }
+}
+#[test]
 #[ignore = "requires runner-owned gh PATH and a separate testing event loop"]
 fn harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh() {
     i_slint_backend_testing::init_integration_test_with_system_time();

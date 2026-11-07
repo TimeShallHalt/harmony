@@ -32,12 +32,12 @@ fn create_owned_layout(tmp: &Temp) -> (std::path::PathBuf, std::path::PathBuf) {
     .unwrap();
     std::fs::copy(
         std::env::var_os("HARMONY_TEST_BOOTSTRAP")
-            .unwrap_or(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap()),
+            .expect("real standalone native bootstrap required"),
         &boot,
     )
     .unwrap();
     let sha = |p: &std::path::Path| format!("{:x}", Sha256::digest(std::fs::read(p).unwrap()));
-    let result = owned_command(&program)
+    let result = owned_command(&boot)
         .arg("--harmony-create-launch-layout")
         .arg(&tmp.0)
         .arg(&boot)
@@ -97,6 +97,26 @@ fn native_elf_updates_require_the_explicit_stable_layout() {
 }
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "native layouts must not accept mounted-format update payloads; use runner"]
+fn stable_native_layout_rejects_appimage_update_before_staging() {
+    let tmp = Temp::new();
+    let (entry, install) = create_owned_layout(&tmp);
+    let old = std::fs::read(&install).unwrap();
+    let f = fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        transaction::stage(&install, &c, &f, &Cancel::default()),
+        Err(Error::Unsupported),
+        "a native stable entry cannot launch a mounted AppImage"
+    );
+    assert!(transaction::pending(&install).unwrap().is_none());
+    assert_eq!(std::fs::read(&install).unwrap(), old);
+    assert!(entry.exists());
+}
+#[cfg(target_os = "linux")]
+#[test]
 #[ignore = "actual stable entry -> owned payload -> normal Controller; use runner"]
 fn stable_entry_launches_verified_native_payload_without_appimage_environment() {
     let tmp = Temp::new();
@@ -117,6 +137,75 @@ fn stable_entry_launches_verified_native_payload_without_appimage_environment() 
     assert_eq!(value["install"], install.to_str().unwrap());
     assert!(value["phase"].is_null());
     assert_eq!(value["armed"], false);
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "registration target must remain the stable normal entry; use runner"]
+fn stable_registration_never_points_to_evacuated_or_version_payloads() {
+    for cut in [None, Some("displaced"), Some("published")] {
+        let tmp = Temp::new();
+        let (entry, install) = create_owned_layout(&tmp);
+        if let Some(cut) = cut {
+            let f = native_payload_fixture();
+            let c = check_release(&f, &current_fixture(), &Cancel::default())
+                .unwrap()
+                .unwrap();
+            transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+            transaction::arm(&install, true).unwrap();
+            cut_activation(&install, cut);
+        }
+        let marker = tmp.0.join("entry-path");
+        let result = owned_command(&entry)
+            .arg("normal-startup")
+            .arg(&marker)
+            .env_remove("APPIMAGE")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(marker).unwrap()).unwrap();
+        assert_eq!(
+            value["entry"],
+            entry.to_str().unwrap(),
+            "all normal entry registrations must survive {cut:?}"
+        );
+    }
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "legacy direct entry cannot claim normal crash recovery; use runner"]
+fn legacy_current_install_refuses_portable_layout_even_with_matching_kernel_image() {
+    let tmp = Temp::new();
+    let install = tmp.0.join("Harmony.AppImage");
+    std::fs::copy(
+        std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap(),
+        &install,
+    )
+    .unwrap();
+    let marker = tmp.0.join("boundary-result");
+    assert!(
+        owned_command(&install)
+            .arg("identify-legacy-layout")
+            .arg(&install)
+            .arg(&marker)
+            .env("APPIMAGE", &install)
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert_eq!(
+        std::fs::read(&marker).unwrap(),
+        b"rejected",
+        "legacy entry has no recovery bootstrap; explicit migration required"
+    );
+    assert!(
+        !tmp.0.join(".harmony-launch").exists(),
+        "no implicit migration"
+    );
 }
 #[test]
 #[ignore = "explicit new-layout installer, owned executable inputs only; use runner"]
@@ -1660,6 +1749,81 @@ fn stable_normal_entry_recovers_every_publication_and_durability_cut() {
             "next normal launch after {cut}: {}",
             String::from_utf8_lossy(&result.stderr)
         );
+    }
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "no execution of substituted target/displaced/link/anchor paths; use runner"]
+fn stable_entry_rejects_unverified_recovery_images_and_unknown_layout_paths() {
+    for change in ["target", "displaced", "rollback", "link", "anchor"] {
+        let tmp = Temp::new();
+        let (entry, install) = create_owned_layout(&tmp);
+        let f = native_payload_fixture();
+        let c = check_release(&f, &current_fixture(), &Cancel::default())
+            .unwrap()
+            .unwrap();
+        let txn = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+        transaction::arm(&install, true).unwrap();
+        cut_activation(&install, "displaced");
+        let saved = tmp.0.join(".harmony-updates").join(&txn);
+        let journal = std::fs::read(saved.join("plan.json")).unwrap();
+        let original = std::fs::read(saved.join("displaced")).unwrap();
+        match change {
+            "target" => {
+                std::fs::write(&install, &f.assets[&2]).unwrap();
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&install)
+                    .unwrap()
+                    .write_all(b"unrecognized concurrent image")
+                    .unwrap();
+            }
+            "displaced" | "rollback" => {
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(saved.join(change))
+                    .unwrap()
+                    .write_all(b"substitution")
+                    .unwrap();
+            }
+            "link" => {
+                std::fs::remove_file(saved.join("displaced")).unwrap();
+                std::os::unix::fs::symlink(saved.join("rollback"), saved.join("displaced"))
+                    .unwrap();
+            }
+            "anchor" => {
+                let path = tmp.0.join(".harmony-launch/layout.json");
+                let mut a: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                a["target"] = serde_json::json!(".harmony-updates/txn-other/evil");
+                std::fs::write(path, serde_json::to_vec(&a).unwrap()).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let marker = tmp.0.join("must-not-execute");
+        let result = owned_command(&entry)
+            .arg("normal-startup-status")
+            .arg(&marker)
+            .env_remove("APPIMAGE")
+            .output()
+            .unwrap();
+        assert!(
+            !result.status.success(),
+            "unverified {change} must fail before exec"
+        );
+        assert!(
+            !marker.exists(),
+            "suspected executable must not be run to ask its identity"
+        );
+        assert_eq!(
+            std::fs::read(saved.join("plan.json")).unwrap(),
+            journal,
+            "launcher does not reset journals"
+        );
+        if change != "displaced" && change != "link" {
+            assert_eq!(std::fs::read(saved.join("displaced")).unwrap(), original);
+        }
+        assert_eq!(install.exists(), change == "target");
     }
 }
 #[cfg(target_os = "linux")]

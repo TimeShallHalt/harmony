@@ -113,12 +113,19 @@ fn bind_callbacks(window:&YapfastWindow,adapter:&Rc<RefCell<Adapter>>) { updater
     fixture_command=['rustc','--edition=2024',str(root/'testing/updater_process_fixture.rs'),'-L',f'dependency={deps}','-C','target-feature=+crt-static','-C','codegen-units=1','-o',str(gh_fixture)]
     for name in ['serde','serde_json','sha2','semver']: fixture_command+=['--extern',f'{name}={lib(name)}']
     subprocess.run(fixture_command,env=env,cwd=root,check=True,creationflags=priority)
+    bootstrap_fixture=out/'harmony-bootstrap.exe'
+    bootstrap_command=list(fixture_command)
+    bootstrap_command[bootstrap_command.index(str(root/'testing/updater_process_fixture.rs'))]=str(root/'scripts/harmony_bootstrap.rs')
+    bootstrap_command[bootstrap_command.index(str(gh_fixture))]=str(bootstrap_fixture)
+    subprocess.run(bootstrap_command,env=env,cwd=root,check=True,creationflags=priority)
+    env['HARMONY_TEST_PROCESS_FIXTURE']=str(gh_fixture)
+    env['HARMONY_TEST_BOOTSTRAP']=str(bootstrap_fixture)
     result=subprocess.run([str(exe),'ui_callbacks::','--test-threads=1','--nocapture'],env=env,cwd=root,timeout=60,creationflags=priority)
     if result.returncode:return result.returncode
     startup_env=dict(env);startup_env['PATH']=str(out)
     startup_env['HARMONY_FIXTURE_GH_LOG']=str(out/'gh-invocations.log')
     Path(startup_env['HARMONY_FIXTURE_GH_LOG']).unlink(missing_ok=True)
-    for name in ['harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh','harmony_normal_startup_exposes_safe_applying_recovery_in_native_ui']:
+    for name in ['harmony_normal_startup_requires_fresh_and_migrated_consent_before_gh','harmony_normal_startup_exposes_safe_applying_recovery_in_native_ui','harmony_stable_layout_cut_recovery_uses_real_native_startup_and_callbacks']:
         result=subprocess.run([str(exe),'--exact',f'ui_callbacks::{name}','--ignored','--nocapture'],env=startup_env,cwd=root,timeout=60,creationflags=priority,capture_output=True,text=True,encoding='utf-8',errors='replace')
         print(result.stdout);print(result.stderr,file=sys.stderr)
         (out/(name+'.log')).write_text(result.stdout+'\n'+result.stderr,encoding='utf-8')

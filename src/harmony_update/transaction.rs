@@ -225,9 +225,16 @@ pub fn stage(
     cancel: &Cancel,
 ) -> Result<String> {
     let artifact = validate_manifest(&candidate.manifest, &BuildInfo::current().platform_key())?;
-    if artifact.format == "elf" {
-        // Packaging opt-in, never a silent reinterpretation of portable input.
+    if install.file_name().and_then(|s| s.to_str()) == Some(super::bootstrap::names().1) {
+        // Fixed native layout cannot accept a mounted-format AppImage: that
+        // would publish bytes its stable normal entry cannot safely execute.
         super::bootstrap::anchor(install).map_err(|_| Error::Unsupported)?;
+        if cfg!(target_os = "linux") && artifact.format != "elf" {
+            return Err(Error::Unsupported);
+        }
+    } else if artifact.format == "elf" {
+        // Packaging opt-in, never a silent reinterpretation of portable input.
+        return Err(Error::Unsupported);
     }
     if candidate.asset.name != artifact.name
         || candidate.asset.size != artifact.size

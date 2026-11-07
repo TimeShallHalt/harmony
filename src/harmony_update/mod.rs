@@ -5,7 +5,7 @@ pub use build_info::BuildInfo;
 pub mod controller;
 pub mod gh;
 mod helper;
-mod image_identity;
+pub(crate) mod image_identity;
 pub(crate) mod lifetime;
 pub mod release;
 pub use helper::cli_main;
@@ -59,7 +59,7 @@ impl std::fmt::Display for Error {
             Self::Conflict => f.write_str("Update identity/storage conflict: same version/build with another commit, a changed installation, or an existing staged update. Inspect/discard staging before retrying."),
             Self::Timeout => f.write_str("Update provider/helper timed out; no automatic restart was attempted."),
             Self::UnsupportedImageIdentity => f.write_str("Automatic installation is disabled: independent kernel-backed running-image identity is unavailable for this layout. Windows portable and mounted/inner AppImage activation are not currently supported. Use a separately verified manual installation."),
-            Self::Unsupported => f.write_str("Self-update unsupported here: Windows portable executable or Linux AppImage required; platform artifact may be absent. Manual installation remains available."),
+            Self::Unsupported => f.write_str("Self-update is unsupported for this layout/platform. Safe normal-launch recovery requires a separately installed stable native entry; legacy portable and mounted AppImage layouts need a separately verified manual installation."),
             Self::Invalid(context) => write!(f, "Update rejected: {context}."),
             Self::Io(context) => write!(f, "Update filesystem/provider failure: {context}. Check permissions/free space; no automatic restart."),
             Self::Durability => f.write_str("Update state was published, but directory durability could not be confirmed. Recoverable files were retained; inspect saved state before retrying."),
