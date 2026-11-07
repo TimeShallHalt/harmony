@@ -2128,6 +2128,20 @@ pub struct OAuthPreview {
 /// Commands only the linked Discord account carries out.
 #[derive(Clone)]
 pub enum DiscordCommand {
+    /// Only an identity-bound resource derived from the received profile.
+    ViewProfileMedia {
+        request: u64,
+        asset: crate::profile_media::Asset,
+        cancellation: crate::original::Request,
+    },
+    CancelProfileMedia(u64),
+    /// Save the downloaded bytes, not a URL passed to privileged fetching.
+    SaveProfileMedia {
+        request: u64,
+        account: String,
+        bytes: Arc<[u8]>,
+        path: PathBuf,
+    },
     /// Downloads these pictures for the disk cache alone, decoding none and
     /// holding none in memory: what a start prefetches so that the picker's
     /// first look finds its emoji kept. See [`Pictures::prefetch`].
@@ -3804,6 +3818,16 @@ pub enum Event {
         names: Vec<String>,
     },
     /// A picture [`DiscordCommand::Pictures`] asked for, decoded.
+    ProfileMedia {
+        request: u64,
+        asset: crate::profile_media::Asset,
+        loaded: crate::original::Completion<crate::profile_media::Loaded>,
+    },
+    ProfileMediaSaved {
+        request: u64,
+        account: String,
+        result: Result<(), &'static str>,
+    },
     Picture {
         url: String,
         picture: Arc<Picture>,

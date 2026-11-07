@@ -2,6 +2,7 @@ import { ClientStyle } from "yapfast/style.slint";
 import { ScrollView, ListView } from "scrollview.slint";
 import { Theme, Middle, Label, Tip, BadgeTip } from "theme.slint";
 import { ActionButton, IconButton, Avatar, StatusText, PictureStore, TextField, ServerTagChip } from "controls.slint";
+import { ProfileMediaTarget } from "profile-media.slint";
 import { StatusDot } from "rail.slint";
 
 /// A member of the open room. A heading starts each role's group.
@@ -201,6 +202,7 @@ export struct ProfileBadgeRow { icon: string, description: string, link: string,
 export struct ProfileConnectionRow { kind: string, name: string, url: string, since: string, verified: bool }
 
 export struct ProfileData {
+    avatar-media: bool, banner-media: bool,
     id: string, name: string, initial: string, tint: color, picture: image,
     /// The colours of the profile's theme, a Nitro setting, which tint the
     /// card's gradient and border; the card is plain without them.
@@ -606,6 +608,8 @@ export component ProfileCard inherits Rectangle {
     /// The tallest the card may be.
     in property <length> limit: 100000px;
     callback enlarge;
+    /// 0 avatar, 1 banner. Resolved from the received profile by Rust, not a URL.
+    callback view-media(int);
     callback close;
     callback open-link(string);
     callback befriend;
@@ -665,6 +669,11 @@ export component ProfileCard inherits Rectangle {
                         if root.data.banner.width > 0: Image {
                             width: parent.width; height: parent.height; source: root.data.banner; image-fit: cover;
                         }
+                        if root.data.banner-media && !root.preview: ProfileMediaTarget {
+                            available: true; label: "View " + root.data.name + "'s banner";
+                            identity: root.data.id;
+                            activated => { root.view-media(1); }
+                        }
                     }
                     Rectangle {
                         x: root.pad - 6px; y: root.banner-height - root.avatar-size / 2 - 6px;
@@ -675,13 +684,11 @@ export component ProfileCard inherits Rectangle {
                             x: parent.width - self.width - (root.large ? 14px : 10px); y: parent.height - self.height - (root.large ? 14px : 10px);
                             presence: root.data.presence; ring: root.ground;
                         }
-                        // The picture opens the full profile.
-                        if !root.large && !root.preview: TouchArea {
-                            mouse-cursor: MouseCursor.pointer;
-                            accessible-role: button;
-                            accessible-label: "View full profile";
-                            accessible-action-default => { root.enlarge(); }
-                            clicked => { root.enlarge(); }
+                        if root.data.avatar-media && !root.preview: ProfileMediaTarget {
+                            available: true; label: "View " + root.data.name + "'s avatar";
+                            identity: root.data.id;
+                            radius: self.width / 2;
+                            activated => { root.view-media(0); }
                         }
                     }
                 }
@@ -1021,6 +1028,7 @@ export component ProfileCard inherits Rectangle {
 // doing and what they share with this account.
 export component ProfileModal inherits Rectangle {
     in property <ProfileData> data;
+    callback view-media(int);
     callback close;
     callback more(length, length);
     callback befriend;
@@ -1051,6 +1059,7 @@ export component ProfileModal inherits Rectangle {
             width: max(340px, parent.width * 0.4 - 8px); height: parent.height - 16px;
             data: root.data;
             close => { root.close(); }
+            view-media(kind) => { root.view-media(kind); }
             befriend => { root.befriend(); }
             message-person(user) => { root.message-person(user); }
             save-note(user, note) => { root.save-note(user, note); }

@@ -26,18 +26,23 @@ impl Application {
         let Some(active) = &self.original else {
             return;
         };
-        let current = self.state.viewer.as_ref().is_some_and(|viewer| {
-            viewer.item == active.item
+        let owns_viewer = self.state.viewer.as_ref().is_some_and(|viewer| {
+            matches!(viewer.source, ViewerSource::Message)
+                && viewer.item == active.item
                 && viewer.index == active.index
-                && self.state.room_of(&viewer.item) == Some(&active.room)
-                && self.state.message(&viewer.item).is_some()
-                && self.state.account == active.account
-                && self.state.discord_user == active.discord_user
-                && !active.request.is_cancelled()
         });
+        let current = owns_viewer
+            && self.state.room_of(&active.item) == Some(&active.room)
+            && self.state.message(&active.item).is_some()
+            && self.state.account == active.account
+            && self.state.discord_user == active.discord_user
+            && !active.request.is_cancelled();
         if !current {
             self.original = None;
-            self.state.viewer = None;
+            // Cancelling this owner must not erase a newly selected source.
+            if owns_viewer {
+                self.state.viewer = None;
+            }
         }
     }
 
@@ -322,6 +327,7 @@ impl Application {
             return vec![];
         }
         self.state.viewer = Some(Viewer {
+            source: ViewerSource::Message,
             item,
             index,
             pictures: HashMap::new(),
@@ -333,6 +339,9 @@ impl Application {
         let Some(viewer) = &self.state.viewer else {
             return vec![];
         };
+        if !matches!(viewer.source, ViewerSource::Message) {
+            return vec![];
+        }
         let images: Vec<usize> = self
             .state
             .message(&viewer.item)
@@ -571,6 +580,14 @@ impl Application {
     /// Downloads the viewer's image at viewing size, unless it has it or is
     /// getting it. The preview shows until it arrives.
     pub(super) fn load_image(&mut self) -> Vec<Effect> {
+        if self
+            .state
+            .viewer
+            .as_ref()
+            .is_some_and(|viewer| !matches!(viewer.source, ViewerSource::Message))
+        {
+            return vec![];
+        }
         let Some(room) = self
             .state
             .viewer

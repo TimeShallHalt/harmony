@@ -1,0 +1,55 @@
+import { Theme } from "theme.slint";
+
+// Restore the profile's keyboard boundary after the image overlay closes.
+// This is Slint component focus only; it never activates an OS window.
+export component ProfileMediaReturnKeys inherits FocusScope {
+    in property <bool> viewer-open;
+    callback close-profile;
+    enabled: !root.viewer-open;
+    init => { if !root.viewer-open { self.focus(); } }
+    changed viewer-open => { if !root.viewer-open { self.focus(); } }
+    key-pressed(event) => {
+        if event.text == Key.Escape { root.close-profile(); return accept; }
+        return reject;
+    }
+}
+
+// Only profile media uses this target. Ordinary roster/message avatars retain
+// their existing open-profile callbacks. No fetch happens during construction.
+export component ProfileMediaTarget inherits Rectangle {
+    in property <bool> available;
+    in property <string> label;
+    in property <string> identity;
+    in property <length> radius: 4px;
+    callback activated;
+    public function activate() { if root.available { root.activated(); } }
+    border-radius: root.radius;
+    border-width: keys.has-focus ? 2px : 0px;
+    border-color: Theme.accent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.available;
+    accessible-action-default => { root.activate(); }
+    forward-focus: keys;
+    keys := FocusScope {
+        enabled: root.available;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.activate(); return accept;
+            }
+            return reject;
+        }
+    }
+    TouchArea {
+        property <string> pressed-identity;
+        enabled: root.available;
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { self.pressed-identity = root.identity; }
+            if event.kind == PointerEventKind.cancel { self.pressed-identity = ""; }
+        }
+        clicked => {
+            if self.pressed-identity == root.identity { keys.focus(); root.activate(); }
+        }
+    }
+}

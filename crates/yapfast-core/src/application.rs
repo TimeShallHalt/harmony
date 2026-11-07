@@ -38,6 +38,7 @@ mod places;
 mod polls;
 mod preview;
 mod profile_editor;
+mod profile_media;
 mod profiles;
 mod reactions;
 mod rooms;
@@ -343,12 +344,22 @@ struct ForwardSent {
 /// An image attachment shown large, and the message's other images to step to.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Viewer {
+    /// Profile assets never masquerade as chat messages. Legacy item/index
+    /// and pictures below are used ONLY by the Message source.
+    pub source: ViewerSource,
     pub item: String,
     /// The attachment shown, by its place in the message.
     pub index: usize,
     /// Only the active original: `None` while it downloads, else the image
     /// or why it can't show. Inactive originals are released, not cached.
     pub pictures: HashMap<usize, Option<Result<Arc<Picture>, &'static str>>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum ViewerSource {
+    #[default]
+    Message,
+    Profile(crate::profile_media::Session),
 }
 
 /// A person's profile card: beside the member list, or large over the window.
@@ -1419,6 +1430,15 @@ pub enum Action {
         index: usize,
     },
     /// Show an item's image attachment large.
+    ViewProfileMedia {
+        user: String,
+        slot: crate::profile_media::Slot,
+        kind: chat::ProfilePicture,
+    },
+    SaveProfileMedia {
+        request: u64,
+        path: PathBuf,
+    },
     ViewImage {
         item: String,
         index: usize,
@@ -2011,6 +2031,7 @@ pub struct Application {
     pub state: AppState,
     /// Request ownership is not part of clonable presentation state.
     original: Option<OriginalView>,
+    profile_original: Option<profile_media::ProfileOriginal>,
     /// The lists from Matrix; `state` shows them with Discord's.
     matrix_rooms: Vec<Arc<ChatRoom>>,
     matrix_servers: Vec<Arc<ChatServer>>,
@@ -2436,6 +2457,7 @@ fn shelved(messages: &[Arc<ChatMessage>]) -> Vec<Arc<ChatMessage>> {
 
 impl Application {
     pub fn dispatch(&mut self, action: Action) -> Vec<Effect> {
+        let media_request = self.profile_media_request();
         // A keystroke in the composer shows no picture that wasn't on screen.
         let composing = matches!(action, Action::SetDraft(_) | Action::MentionQuery(_));
         let mut effects = self.dispatch_action(action);
@@ -2445,11 +2467,17 @@ impl Application {
         if !composing {
             effects.extend(self.request_pictures());
         }
+        effects.extend(self.reconcile_profile_media(media_request));
         effects
     }
 
     pub fn apply(&mut self, event: Event) -> Vec<Effect> {
+        let media_request = self.profile_media_request();
+        let media_account = self.state.discord_user.clone();
         let mut effects = self.apply_event(event);
+        if media_account != self.state.discord_user {
+            self.forget_profile_media_authority();
+        }
         self.sync_original();
         // A DM just started, or a thread asked for, opens once the lists
         // have it.
@@ -2471,6 +2499,7 @@ impl Application {
         effects.extend(self.send_pending_message());
         effects.extend(self.show_panel_profile());
         effects.extend(self.request_pictures());
+        effects.extend(self.reconcile_profile_media(media_request));
         effects
     }
 
@@ -2741,6 +2770,10 @@ impl Application {
             Action::SaveAttachment { item, index, path } => self.save_attachment(item, index, path),
             Action::CopyAttachment { item, index } => self.copy_attachment(item, index),
             Action::ViewImage { item, index } => self.view_image(item, index),
+            Action::ViewProfileMedia { user, slot, kind } => {
+                self.view_profile_media(user, slot, kind)
+            }
+            Action::SaveProfileMedia { request, path } => self.save_profile_media(request, path),
             Action::PlayVideo {
                 item,
                 index,
@@ -3430,6 +3463,7 @@ impl Application {
                     && !request.is_cancelled()
                     && self.state.room_of(&item) == Some(&room)
                     && let Some(viewer) = &mut self.state.viewer
+                    && matches!(viewer.source, ViewerSource::Message)
                     && viewer.item == item
                     && viewer.index == index
                 {
@@ -3440,6 +3474,31 @@ impl Application {
                 }
             }
             Event::Picture { url, picture } => self.keep_picture(url, picture),
+            Event::ProfileMedia {
+                request,
+                asset,
+                loaded,
+            } => {
+                self.profile_media_loaded(request, &asset, loaded);
+            }
+            Event::ProfileMediaSaved {
+                request,
+                account,
+                result,
+            } => {
+                if let Some(Viewer {
+                    source: ViewerSource::Profile(session),
+                    ..
+                }) = &mut self.state.viewer
+                    && session.request == request
+                    && session.asset.account() == account
+                {
+                    session.save_note = Some(match result {
+                        Ok(()) => "Image saved.",
+                        Err(error) => error,
+                    });
+                }
+            }
             Event::Video(video) => {
                 self.state.video = video.filter(|video| {
                     self.state.selected.as_ref() == Some(&video.room)

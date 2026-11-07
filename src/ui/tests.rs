@@ -1,4 +1,6 @@
 use super::*;
+#[path = "profile_media_adapter_tests.rs"]
+mod profile_media_adapter;
 
 // Keep the coordinate and appearance regressions in the classic mode.
 // The Yapfast tests below exercise the new defaults separately.
@@ -4146,6 +4148,7 @@ fn closing_the_viewer_lets_go_of_its_picture() {
         ..Default::default()
     })]);
     adapter.app.state.viewer = Some(yapfast_core::application::Viewer {
+        source: yapfast_core::application::ViewerSource::Message,
         item: "i0".into(),
         index: 0,
         pictures: HashMap::new(),

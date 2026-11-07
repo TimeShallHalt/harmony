@@ -4,6 +4,10 @@ use super::*;
 use std::{future::Future, io::Cursor, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 
+#[cfg(feature = "discord")]
+#[path = "profile_media_lifecycle_tests.rs"]
+mod profile_media_lifecycle;
+
 fn fixture() -> Application {
     let mut app = connected();
     app.apply(Event::Timeline {

@@ -64,6 +64,40 @@ impl Application {
     /// Call when the backend could not accept an effect's command.
     pub fn backend_failed(&mut self, command: &Command) {
         match command {
+            Command::Discord(DiscordCommand::ViewProfileMedia {
+                request,
+                asset,
+                cancellation,
+            }) => {
+                if let Some(Viewer {
+                    source: ViewerSource::Profile(session),
+                    ..
+                }) = &mut self.state.viewer
+                {
+                    session.accept(
+                        *request,
+                        asset,
+                        crate::profile_media::Loaded {
+                            bytes: None,
+                            picture: Err("Profile media is unavailable. Reconnect and try again."),
+                        },
+                    );
+                }
+                cancellation.cancel();
+                return;
+            }
+            Command::Discord(DiscordCommand::CancelProfileMedia(_)) => return,
+            Command::Discord(DiscordCommand::SaveProfileMedia { request, .. }) => {
+                if let Some(Viewer {
+                    source: ViewerSource::Profile(session),
+                    ..
+                }) = &mut self.state.viewer
+                    && session.request == *request
+                {
+                    session.save_note = Some("Saving is unavailable. Reconnect and try again.");
+                }
+                return;
+            }
             // A missing picture leaves an initial; it says nothing new.
             Command::Discord(DiscordCommand::Pictures(_)) => return,
             Command::Voice(_) => {
@@ -141,6 +175,7 @@ impl Application {
     pub fn stopped(&mut self) {
         self.state.viewer = None;
         self.original = None;
+        self.profile_original = None;
         let was_busy = self.state.busy;
         self.state.busy = false;
         self.state.online = false;

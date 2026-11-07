@@ -66,6 +66,9 @@ pub mod original;
 pub mod picture;
 #[cfg(feature = "discord")]
 pub mod playback;
+pub mod profile_media;
+#[cfg(feature = "discord")]
+mod profile_media_io;
 pub mod push_to_talk;
 #[cfg(feature = "discord")]
 pub mod ring;

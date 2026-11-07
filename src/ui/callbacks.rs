@@ -529,6 +529,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     bind!(on_close_switcher, Action::CloseSwitcher);
     bind!(on_dismiss_notice, Action::DismissNotice);
     bind!(on_close_image, Action::CloseImage);
+    super::profile_media::bind(window, adapter);
     {
         let adapter = adapter.clone();
         let weak = window.as_weak();

@@ -21,6 +21,33 @@ pub fn command(
     done: &UnboundedSender<Done>,
     events: &UnboundedSender<Event>,
 ) {
+    // Active Chat owns the cancelable profile loader. If no Chat exists, do
+    // not silently swallow these commands and strand the overlay in loading.
+    let command = match command {
+        Command::Discord(DiscordCommand::ViewProfileMedia { request, asset, .. }) => {
+            let _ = events.send(Event::ProfileMedia {
+                request,
+                asset,
+                loaded: crate::original::Completion::unadmitted(crate::profile_media::Loaded {
+                    bytes: None,
+                    picture: Err("Profile media is unavailable. Reconnect and try again."),
+                }),
+            });
+            return;
+        }
+        Command::Discord(DiscordCommand::SaveProfileMedia {
+            request, account, ..
+        }) => {
+            let _ = events.send(Event::ProfileMediaSaved {
+                request,
+                account,
+                result: Err("Saving is unavailable. Reconnect and try again."),
+            });
+            return;
+        }
+        Command::Discord(DiscordCommand::CancelProfileMedia(_)) => return,
+        command => command,
+    };
     if matches!(command, Command::Open(_) | Command::CloseRoom) {
         channels.close();
     }

@@ -3959,6 +3959,13 @@ impl Adapter {
     }
 
     fn show_viewer(&mut self, window: &YapfastWindow) {
+        if self.show_profile_media(window) {
+            return;
+        }
+        window.set_viewer_profile_media(false);
+        window.set_viewer_media_link(SharedString::default());
+        window.set_viewer_source_key(SharedString::default());
+        window.set_viewer_save_ready(true);
         let state = &self.app.state;
         let viewing = state.viewer.as_ref().and_then(|viewer| {
             let message = state.message(&viewer.item)?;

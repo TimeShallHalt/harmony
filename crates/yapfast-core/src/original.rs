@@ -15,6 +15,10 @@ use tokio::{
 // keeps the same permit while queued, until consumed or dropped.
 static DECODING: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
+pub(crate) fn admission() -> Arc<Semaphore> {
+    DECODING.get_or_init(|| Arc::new(Semaphore::new(1))).clone()
+}
+
 use crate::chat::Picture;
 
 /// Identity and cancellation of one viewer request. Clones refer to that same
@@ -42,7 +46,7 @@ impl Request {
         *self.0.borrow()
     }
 
-    async fn cancelled(&self) {
+    pub(crate) async fn cancelled(&self) {
         let mut changed = self.0.subscribe();
         let _ = changed.wait_for(|cancelled| *cancelled).await;
     }
@@ -51,24 +55,53 @@ impl Request {
 /// A completion owns its decoding slot until the application consumes it.
 /// This prevents large completed originals accumulating in event queues.
 #[derive(Debug)]
-pub struct Decoded {
-    picture: Arc<Picture>,
+pub struct Completion<T> {
+    value: T,
     _permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
-impl Decoded {
-    pub(crate) fn into_picture(self) -> Arc<Picture> {
-        self.picture
+impl<T> Completion<T> {
+    pub(crate) fn admitted(value: T, permit: tokio::sync::OwnedSemaphorePermit) -> Self {
+        Self {
+            value,
+            _permit: Some(permit),
+        }
+    }
+
+    /// Errors without downloaded/decoded buffers need no admission lease.
+    pub(crate) fn unadmitted(value: T) -> Self {
+        Self {
+            value,
+            _permit: None,
+        }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+
+    pub(crate) fn value_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+
+    #[cfg(test)]
+    pub(crate) fn value(&self) -> &T {
+        &self.value
     }
 
     /// A tiny decoded fixture for core/adapter tests; production completions
     /// must come through Task so they carry admission ownership.
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub fn fixture(picture: Arc<Picture>) -> Self {
-        Self {
-            picture,
-            _permit: None,
-        }
+    pub fn fixture(value: T) -> Self {
+        Self::unadmitted(value)
+    }
+}
+
+pub type Decoded = Completion<Arc<Picture>>;
+
+impl Decoded {
+    pub(crate) fn into_picture(self) -> Arc<Picture> {
+        self.into_inner()
     }
 }
 
@@ -105,9 +138,7 @@ impl Task {
             let work = async {
                 // Admit before fetching, so abandoned originals cannot queue
                 // many compressed downloads behind the single decoder either.
-                let permit = DECODING
-                    .get_or_init(|| Arc::new(Semaphore::new(1)))
-                    .clone()
+                let permit = admission()
                     .acquire_owned()
                     .await
                     .map_err(|_| "The image viewer has stopped.")?;
@@ -117,10 +148,7 @@ impl Task {
                     if decoding.is_cancelled() {
                         return None;
                     }
-                    decode(data).map(|picture| Decoded {
-                        picture: Arc::new(picture),
-                        _permit: Some(permit),
-                    })
+                    decode(data).map(|picture| Decoded::admitted(Arc::new(picture), permit))
                 })
                 .await
                 .ok()

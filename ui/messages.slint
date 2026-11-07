@@ -1763,6 +1763,7 @@ component ViewerMenu inherits PopupWindow {
     in property <int> index;
     in property <bool> video;
     in property <bool> preview;
+    in property <bool> copyable: true;
     /// Its address on the web, or empty when it has none.
     in property <string> link;
     /// Where it opens in the viewer, which is this big.
@@ -1783,7 +1784,7 @@ component ViewerMenu inherits PopupWindow {
     property <MenuRow> open-link-row: { id: "open-link", text: "Open Link", icon: @image-url("icons/external-link.svg") };
     property <[MenuRow]> rows: root.link == "" ? [root.save-row]
         : root.preview ? [root.copy-link-row, root.open-link-row]
-        : root.video ? [root.save-row, root.copy-link-row, root.open-link-row]
+        : root.video || !root.copyable ? [root.save-row, root.copy-link-row, root.open-link-row]
         : [{ id: "copy-image", text: "Copy Image", icon: @image-url("icons/image.svg") }, root.save-row, root.copy-link-row, root.open-link-row];
     x: max(8px, min(root.room-width - content.menu-width - 8px, root.at-x));
     y: root.at-y + content.main-height <= root.room-height - 8px
@@ -1805,6 +1806,11 @@ component ViewerMenu inherits PopupWindow {
 }
 
 export component ImageViewer inherits Rectangle {
+    in property <bool> profile-media;
+    in property <string> media-link;
+    in property <string> source-key;
+    in property <bool> save-ready: true;
+    callback save-profile-media;
     in property <image> viewer-image;
     in property <[image]> viewer-frames;
     in property <[int]> viewer-delays;
@@ -1892,6 +1898,7 @@ export component ImageViewer inherits Rectangle {
     public function reset-view() { root.fit-image(); }
     changed viewer-item => { root.reset-view(); }
     changed viewer-index => { root.reset-view(); }
+    changed source-key => { root.reset-view(); }
 
     // What its menu is for, read as it opens, as the arrows change the picture.
     property <string> menu-link;
@@ -1954,7 +1961,7 @@ export component ImageViewer inherits Rectangle {
                         if event.kind == PointerEventKind.up { self.panning = false; }
                     }
                     if event.button == PointerEventButton.right && event.kind == PointerEventKind.down && self.on-picture {
-                        root.menu-link = root.attachment-link(root.viewer-item, root.viewer-index);
+                        root.menu-link = root.profile-media ? root.media-link : root.attachment-link(root.viewer-item, root.viewer-index);
                         root.menu-x = self.absolute-position.x + self.mouse-x - root.absolute-position.x;
                         root.menu-y = self.absolute-position.y + self.mouse-y - root.absolute-position.y;
                         if !root.preview || root.menu-link != "" { image-menu.show(); }
@@ -1991,7 +1998,14 @@ export component ImageViewer inherits Rectangle {
                 if !root.preview: Middle {
                     IconButton {
                         icon: @image-url("icons/download.svg"); label: "Save " + root.viewer-name;
-                        clicked => { root.save-attachment(root.viewer-item, root.viewer-index); }
+                        enabled: root.save-ready;
+                        clicked => { if root.profile-media { root.save-profile-media(); } else { root.save-attachment(root.viewer-item, root.viewer-index); } }
+                    }
+                }
+                if root.profile-media && root.media-link != "": Middle {
+                    IconButton {
+                        icon: @image-url("icons/external-link.svg"); label: "Open original";
+                        clicked => { root.open-link(root.media-link); }
                     }
                 }
                 Middle { IconButton { icon: @image-url("icons/x.svg"); label: "Close"; clicked => { root.close-image(); } } }
@@ -2036,11 +2050,13 @@ export component ImageViewer inherits Rectangle {
         }
     }
     image-menu := ViewerMenu {
-        item: root.viewer-item; index: root.viewer-index; preview: root.preview;
+        item: root.viewer-item; index: root.viewer-index;
+        preview: root.preview || (root.profile-media && !root.save-ready);
+        copyable: !root.profile-media;
         link: root.menu-link; at-x: root.menu-x; at-y: root.menu-y;
         room-width: root.width; room-height: root.height;
         copy-image(item, index) => { root.copy-attachment(item, index); }
-        save-attachment(item, index) => { root.save-attachment(item, index); }
+        save-attachment(item, index) => { if root.profile-media { root.save-profile-media(); } else { root.save-attachment(item, index); } }
         copy-text(text) => { root.copy-text(text); }
         open-link(link) => { root.open-link(link); }
         done => { viewer-keys.focus(); }

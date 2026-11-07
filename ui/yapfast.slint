@@ -36,6 +36,7 @@ import { StagedFile, StagedTile, Composer, MentionRow, MentionList, EmojiSuggest
 import { EmojiCell, EmojiRow, EmojiSection, EmojiCard, EmojiCardView, MessageRow, ReactionToggle, EmojiButton, EmojiPicker, MessageMenu, MessageGallery, MessageStickers, FileCard, MessageContent, EmbedView, BotTag, NoConversation, ConversationStart, HistoryEdge, UnreadBar, PresentBar, ImageViewer, VideoViewer, VideoPlayer, Polls } from "messages.slint";
 import { SettingsRow, SettingsScreen, AccountSettings, AppearanceSettings, ThemeCard, ThemeColour, VoiceSettings, MessageSettings, NotificationSettings, SoundSettings, AdvancedSettings, DiscordLinkSettings, DiscordSettings, BlockedRow, GameActivitySettings, GameExecutable } from "settings.slint";
 import { MemberRow, ProfileData, BadgeTipCard, ProfileServerRow, MemberPanel, ProfileCard, ProfileModal, ServerCard, RoleCard } from "people.slint";
+import { ProfileMediaReturnKeys } from "profile-media.slint";
 import { RequestRow, FriendRow, FriendsScreen, HeaderTab, RequestsScreen, AddFriendDialog } from "friends.slint";
 import { ContactRow, PlaceRow, ReactionPill, ReactorRow, StatusDialog, NewDmDialog, ForwardDialog, QuickSwitcher, ReactionsDialog, StatusMenu, PersonPrompt, PersonDialog, LeavingDialog, PollAnswerDraft, PollDialog } from "dialogs.slint";
 import { InvitePrompt, InviteDialog, JoinPrompt, JoinDialog, EventPrompt, EventDialog, GiftPrompt, GiftDialog, OAuthPrompt, OAuthDialog, ChannelPrompt, ChannelDialog, ProfileEditorPrompt, ProfileEditorDialog } from "server.slint";
@@ -694,6 +695,12 @@ export component YapfastWindow inherits Window {
     /// Save the note on this person: the id, then the note ("" removes it).
     callback save-note(string, string);
     in property <bool> viewer-open;
+    in property <bool> viewer-profile-media;
+    in property <string> viewer-media-link;
+    in property <string> viewer-source-key;
+    in property <bool> viewer-save-ready: true;
+    callback view-profile-media(string, bool, int);
+    callback save-profile-media;
     in property <image> viewer-image;
     in property <[image]> viewer-frames;
     in property <[int]> viewer-delays;
@@ -3544,6 +3551,7 @@ export component YapfastWindow inherits Window {
                             x: ClientStyle.profile-inset; y: ClientStyle.profile-inset;
                             docked: true; width: parent.width - 2 * ClientStyle.profile-inset; height: parent.height - 2 * ClientStyle.profile-inset;
                             data: root.panel-profile;
+                            view-media(kind) => { root.view-profile-media(root.panel-profile.id, true, kind); }
                             enlarge => { root.enlarge-panel-profile(); }
                             befriend => { root.befriend(root.panel-profile.id); }
                             more(x, y) => { root.open-context-menu(root.panel-profile.id, true, x, y); }
@@ -4013,12 +4021,9 @@ export component YapfastWindow inherits Window {
     }
     if profile-motion.shown: Rectangle {
         TouchArea { clicked => { root.close-profile(); } }
-        FocusScope {
-            init => { self.focus(); }
-            key-pressed(event) => {
-                if event.text == Key.Escape { root.close-profile(); return accept; }
-                return reject;
-            }
+        ProfileMediaReturnKeys {
+            viewer-open: root.viewer-open;
+            close-profile => { root.close-profile(); }
         }
         ProfileCard {
             opacity: Popup.opacity(profile-motion.amount); transform-scale: Popup.scale(profile-motion.amount);
@@ -4029,6 +4034,7 @@ export component YapfastWindow inherits Window {
             y: max(root.title-height + 8px, min(root.height - self.height - 8px, (root.profile-at-pointer ? root.anchor-y - 8px : root.profile-y - 16px)));
             data: root.profile;
             enlarge => { root.enlarge-profile(); }
+            view-media(kind) => { root.view-profile-media(root.profile.id, false, kind); }
             close => { root.close-profile(); }
             befriend => { root.befriend(root.profile.id); }
             more(x, y) => { root.open-context-menu(root.profile.id, true, x, y); }
@@ -4044,12 +4050,9 @@ export component YapfastWindow inherits Window {
     if large-profile-motion.shown: Rectangle {
         background: rgba(0, 0, 0, 0.7 * large-profile-motion.amount);
         TouchArea { clicked => { root.close-profile(); } }
-        FocusScope {
-            init => { self.focus(); }
-            key-pressed(event) => {
-                if event.text == Key.Escape { root.close-profile(); return accept; }
-                return reject;
-            }
+        ProfileMediaReturnKeys {
+            viewer-open: root.viewer-open;
+            close-profile => { root.close-profile(); }
         }
         ProfileModal {
             opacity: Popup.opacity(large-profile-motion.amount); transform-scale: Popup.scale(large-profile-motion.amount);
@@ -4057,6 +4060,7 @@ export component YapfastWindow inherits Window {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             data: root.profile;
             close => { root.close-profile(); }
+            view-media(kind) => { root.view-profile-media(root.profile.id, false, kind); }
             befriend => { root.befriend(root.profile.id); }
             message-person(user) => { root.close-profile(); root.message-person(user); }
             save-note(user, note) => { root.save-note(user, note); }
@@ -4118,6 +4122,9 @@ export component YapfastWindow inherits Window {
     }
     // An image shown large over everything; see ImageViewer.
     if root.viewer-open: ImageViewer {
+        profile-media: root.viewer-profile-media; media-link: root.viewer-media-link;
+        source-key: root.viewer-source-key; save-ready: root.viewer-save-ready;
+        save-profile-media => { root.save-profile-media(); }
         y: root.title-height; height: root.height - root.title-height;
         viewer-image: root.viewer-image; viewer-frames: root.viewer-frames; viewer-delays: root.viewer-delays;
         viewer-width: root.viewer-width; viewer-height: root.viewer-height; viewer-name: root.viewer-name;

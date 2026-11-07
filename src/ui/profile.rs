@@ -251,7 +251,32 @@ pub(super) fn profile_data(
             .then(|| avatar_color(profile.avatar.as_deref(), &avatar))
             .flatten()
     });
+    let media_available = !state.preview && state.discord_online && (!view.loading || view.kept);
     ProfileData {
+        avatar_media: media_available
+            && state
+                .discord_user
+                .as_deref()
+                .and_then(|account| {
+                    yapfast_core::profile_media::Asset::from_profile(
+                        account,
+                        profile,
+                        ProfilePicture::Avatar,
+                    )
+                })
+                .is_some(),
+        banner_media: media_available
+            && state
+                .discord_user
+                .as_deref()
+                .and_then(|account| {
+                    yapfast_core::profile_media::Asset::from_profile(
+                        account,
+                        profile,
+                        ProfilePicture::Banner,
+                    )
+                })
+                .is_some(),
         theme_primary: role_color(profile.theme.map(|theme| theme[0])),
         theme_secondary: role_color(profile.theme.map(|theme| theme[1])),
         has_theme: profile.theme.is_some(),

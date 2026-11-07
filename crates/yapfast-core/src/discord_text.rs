@@ -48,6 +48,8 @@ mod overwrites;
 mod own_profile;
 mod ownership;
 mod people;
+#[cfg(test)]
+mod profile_media_tests;
 mod render;
 mod roles;
 mod server_settings;
@@ -159,6 +161,7 @@ pub(crate) struct Chat {
     done: UnboundedSender<Done>,
     finished: UnboundedReceiver<Done>,
     pictures: discord::Pictures,
+    profile_media: crate::profile_media_io::Loader,
     saving: tokio::time::Interval,
     /// The video playing in the open channel or the thread beside it.
     video: Option<crate::playback::Playback>,
@@ -203,6 +206,7 @@ impl Chat {
             done,
             finished,
             pictures: discord::Pictures::new(),
+            profile_media: crate::profile_media_io::Loader::default(),
             saving: {
                 let mut saving =
                     tokio::time::interval_at(tokio::time::Instant::now() + SAVE_EVERY, SAVE_EVERY);
@@ -220,6 +224,83 @@ impl Chat {
 
     pub(crate) fn command(&mut self, command: Command, events: &UnboundedSender<Event>) {
         match command {
+            Command::Discord(DiscordCommand::ViewProfileMedia {
+                request,
+                asset,
+                cancellation,
+            }) => {
+                let discord = self.discord.clone();
+                let fetching = asset.clone();
+                let events = events.clone();
+                self.profile_media.start(
+                    request,
+                    cancellation,
+                    async move {
+                        if discord.snapshots().borrow().user_id.as_deref()
+                            != Some(fetching.account())
+                        {
+                            return Err("This profile belongs to a different account session.");
+                        }
+                        let bytes = discord
+                            .download_now(fetching.url(), crate::profile_media_io::MAX_BYTES)
+                            .await
+                            .map_err(|error| crate::profile_media_io::download_error(&error))?;
+                        if discord.snapshots().borrow().user_id.as_deref()
+                            != Some(fetching.account())
+                        {
+                            return Err("The account changed while this image was loading.");
+                        }
+                        Ok(bytes)
+                    },
+                    move |mut loaded| {
+                        // Reuse the existing on-disk animation source rather than
+                        // pinning another copy of all compressed animation bytes.
+                        if let Ok(picture) = &mut loaded.value_mut().picture
+                            && picture.animation.is_some()
+                            && let Some(file) = yapfast_discord::cache::kept_picture(asset.url())
+                        {
+                            if let Some(picture) = Arc::get_mut(picture) {
+                                picture.read_from(file);
+                            }
+                        }
+                        let _ = events.send(Event::ProfileMedia {
+                            request,
+                            asset,
+                            loaded,
+                        });
+                    },
+                );
+                return;
+            }
+            Command::Discord(DiscordCommand::CancelProfileMedia(request)) => {
+                self.profile_media.cancel(request);
+                return;
+            }
+            Command::Discord(DiscordCommand::SaveProfileMedia {
+                request,
+                account,
+                bytes,
+                path,
+            }) => {
+                let events = events.clone();
+                let same_account =
+                    self.discord.snapshots().borrow().user_id.as_deref() == Some(account.as_str());
+                tokio::spawn(async move {
+                    let result = if !same_account {
+                        Err("The account changed before saving this image.")
+                    } else {
+                        tokio::fs::write(path, bytes.as_ref()).await.map_err(
+                            |_| "Harmony couldn't save this image. Choose another location.",
+                        )
+                    };
+                    let _ = events.send(Event::ProfileMediaSaved {
+                        request,
+                        account,
+                        result,
+                    });
+                });
+                return;
+            }
             Command::Discord(DiscordCommand::Pictures(urls)) => {
                 self.pictures.fetch(&self.discord, urls, events);
                 return;

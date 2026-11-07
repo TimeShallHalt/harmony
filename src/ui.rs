@@ -56,6 +56,9 @@ mod pictures;
 mod placement;
 mod polls;
 mod profile;
+mod profile_media;
+#[cfg(test)]
+mod profile_media_tests;
 mod refresh;
 mod server_settings;
 mod shell;
