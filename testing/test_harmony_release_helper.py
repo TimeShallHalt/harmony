@@ -68,6 +68,21 @@ class ReleaseHelper(unittest.TestCase):
             p=Path(name); win=p/'input.exe'; linux=p/'bad.AppImage'; win.write_bytes(pe()); linux.write_bytes(b'not an AppImage')
             result=self.invoke(p,'--artifact',f'windows-x86_64={win}','--artifact',f'linux-x86_64={linux}')
             self.assertNotEqual(result.returncode,0); self.assertEqual(list((p/'out').iterdir()),[])
+    def test_cli_build_id_rejects_raw_noncanonical_tokens_before_conversion(self):
+        for token in ['01', '+1', '١', '１', ' 1', '1 ', '-1', '0', '18446744073709551616']:
+            with self.subTest(token=token), tempfile.TemporaryDirectory(dir=SCRATCH) as name:
+                p=Path(name); win=p/'input.exe'; win.write_bytes(pe())
+                result=self.invoke(p,'--build-id',token,'--artifact',f'windows-x86_64={win}')
+                self.assertNotEqual(result.returncode,0,repr(token))
+                self.assertFalse((p/'out/harmony-update-v1.json').exists())
+    def test_cli_canonical_positive_build_id_bounds_are_preserved(self):
+        for token in ['1','18446744073709551615']:
+            with self.subTest(token=token), tempfile.TemporaryDirectory(dir=SCRATCH) as name:
+                p=Path(name); win=p/'input.exe'; win.write_bytes(pe()); stamp=p/'stamp.json'
+                stamp.write_text(json.dumps({'version':'1.0.1','build_id':int(token),'commit':COMMIT,'dirty':False,'platform':'windows','architecture':'x86_64','upstream':'Yapfast 0.3.0','license':'GPL-3.0-or-later'}))
+                result=subprocess.run([sys.executable,str(ROOT/'scripts/harmony-release-manifest.py'),'--version','1.0.1','--build-id',token,'--commit',COMMIT,'--artifact',f'windows-x86_64={win}','--build-info',f'windows-x86_64={stamp}','--output-dir',str(p/'out')],capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(json.loads((p/'out/harmony-update-v1.json').read_text())['build_id'],int(token))
     def test_version_tokens_are_rejected_without_repair(self):
         import runpy
         assemble=runpy.run_path(str(ROOT/'scripts/harmony-release-manifest.py'))['assemble']

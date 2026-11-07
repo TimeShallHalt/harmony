@@ -130,9 +130,18 @@ def assemble(version, build_id, commit, inputs, output, build_infos):
             except OSError: pass  # Never recurse into or erase unrelated output.
         raise
 
+def build_id_token(raw):
+    # Validate the original CLI bytes-as-text, never int()'s permissive syntax.
+    if not re.fullmatch(r'[1-9][0-9]*', raw, flags=re.ASCII) or len(raw)>20:
+        raise argparse.ArgumentTypeError('canonical positive ASCII build ID required')
+    value=int(raw)
+    if value>2**64-1:
+        raise argparse.ArgumentTypeError('build ID exceeds u64')
+    return value
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--version',required=True); p.add_argument('--build-id',required=True,type=int); p.add_argument('--commit',required=True)
+    p.add_argument('--version',required=True); p.add_argument('--build-id',required=True,type=build_id_token); p.add_argument('--commit',required=True)
     p.add_argument('--artifact',action='append',required=True,help='PLATFORM=PATH (repeat for each tested portable artifact)')
     p.add_argument('--build-info',action='append',required=True,help='PLATFORM=clean Cargo harmony-build-info.json (repeat per artifact)')
     p.add_argument('--output-dir',required=True,type=Path)
