@@ -32,6 +32,15 @@ pub fn leaf(name: &str) -> Result<()> {
 thread_local! {
     // Fault injection only: a real successful rename followed by a failed sync.
     pub(super) static FAIL_SYNC_FOR: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+    pub(super) static RENAME_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(&str, &str)>>> = std::cell::RefCell::new(None);
+}
+#[cfg(test)]
+fn rename_boundary(point: &str, to: &str) {
+    RENAME_HOOK.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook(point, to);
+        }
+    });
 }
 pub struct Dir {
     pub path: PathBuf,
@@ -202,7 +211,7 @@ impl Dir {
             Err(Error::Unsupported)
         }
     }
-    fn require_private(&self) -> Result<()> {
+    pub(super) fn require_private(&self) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::MetadataExt;
@@ -410,6 +419,8 @@ impl Dir {
         if !replace && dest.exists(to)? {
             return Err(Error::Conflict);
         }
+        #[cfg(test)]
+        rename_boundary("before", to);
         #[cfg(target_os = "linux")]
         {
             use std::os::fd::AsRawFd;
@@ -429,6 +440,8 @@ impl Dir {
                 return Err(Error::Io("rename update file"));
             }
             #[cfg(test)]
+            rename_boundary("visible", to.to_str().unwrap());
+            #[cfg(test)]
             if FAIL_SYNC_FOR.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 if slot.as_deref() == to.to_str().ok() {
@@ -444,6 +457,8 @@ impl Dir {
                 .sync_all()
                 .and_then(|_| dest.file.sync_all())
                 .map_err(|_| Error::Durability)?;
+            #[cfg(test)]
+            rename_boundary("durable", to.to_str().unwrap());
         }
         #[cfg(windows)]
         {

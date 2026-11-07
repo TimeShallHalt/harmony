@@ -6,6 +6,13 @@ mod build_stamp;
 mod harmony_update;
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(result) = harmony_update::bootstrap::install_cli(&args) {
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Some(result) = harmony_update::cli_main(&args) {
         // Owned-fixture wrapper records the REAL production helper result only
         // after it returns. This is not an activation/identity bypass.
@@ -55,6 +62,46 @@ fn main() {
             }
         }
         "fail" => std::process::exit(7),
+        "normal-startup" | "normal-startup-status" | "normal-authorize-hold" => {
+            let install =
+                harmony_update::controller::current_install().expect("normal current_install");
+            let controller = harmony_update::controller::Controller::new(Ok(install.clone()));
+            let loaded = controller.load_pending();
+            if mode != "normal-startup-status" {
+                loaded.clone().expect("normal Controller startup");
+            }
+            controller.handoff_on_full_exit().unwrap(); // No authorization -> no publication.
+            if mode == "normal-authorize-hold" {
+                assert!(!controller.snapshot().staged.as_ref().unwrap().1.armed);
+                controller
+                    .arm(true)
+                    .expect("explicit recovery authorization");
+                controller
+                    .handoff_on_full_exit()
+                    .expect("normal natural-exit handoff");
+                std::fs::write(&args[2], b"authorized helper ready; parent alive").unwrap();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+                while !std::path::Path::new(&args[3]).exists() {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "owned parent release timeout"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            let staged = controller.snapshot().staged;
+            std::fs::write(
+                &args[1],
+                serde_json::to_vec(&serde_json::json!({
+                    "install": install,
+                    "load_error": loaded.err().map(|e| e.to_string()),
+                    "phase": staged.as_ref().map(|(_, p)| &p.phase),
+                    "armed": staged.as_ref().is_some_and(|(_,p)| p.armed)
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
         "identify-current" | "identify-substituted" => {
             if mode == "identify-substituted" {
                 let running = std::env::current_exe().unwrap();

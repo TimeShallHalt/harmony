@@ -1,4 +1,5 @@
 //! Harmony build identity and private release updates. No account credentials.
+pub mod bootstrap;
 mod build_info;
 pub use build_info::BuildInfo;
 pub mod controller;

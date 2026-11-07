@@ -217,6 +217,9 @@ impl Controller {
 pub fn current_install() -> Result<PathBuf> {
     #[cfg(target_os = "linux")]
     {
+        if let Some(install) = super::bootstrap::current_install()? {
+            return Ok(install);
+        }
         let p = std::env::var_os("APPIMAGE")
             .map(PathBuf::from)
             .ok_or(Error::Unsupported)?;

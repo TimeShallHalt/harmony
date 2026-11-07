@@ -26,7 +26,7 @@ pub struct Plan {
     pub armed: bool,
     pub phase: Phase,
 }
-fn location(install: &Path) -> Result<(Dir, Dir, String)> {
+pub(super) fn location(install: &Path) -> Result<(Dir, Dir, String)> {
     let parent = install
         .parent()
         .ok_or(Error::Invalid("installation directory"))?;
@@ -173,6 +173,51 @@ pub fn pending(install: &Path) -> Result<Option<(String, Plan)>> {
     let plan = read_plan(&updates.child(&name, false)?, &target)?;
     Ok(Some((name, plan)))
 }
+// Caller holds updates.lock(). Only the fixed target or known old transaction
+// images are launchable; no executable path is accepted from persisted JSON.
+pub(super) fn launch_image(install: &Path, initial: &str) -> Result<(File, std::path::PathBuf)> {
+    let (root, updates, target) = location(install)?;
+    let Some(name) = pending_name(&updates)? else {
+        let mut file = root.file(&target, false)?;
+        if hash(&mut file, &Cancel::default())? != initial {
+            return Err(Error::Hash);
+        }
+        return Ok((file, install.into()));
+    };
+    let dir = updates.child(&name, false)?;
+    let plan = read_plan(&dir, &target)?;
+    let artifact = validate_manifest(&plan.manifest, &BuildInfo::current().platform_key())?;
+    if root.exists(&target)? {
+        let mut file = root.file(&target, false)?;
+        let digest = hash(&mut file, &Cancel::default())?;
+        let recognized = match plan.phase {
+            Phase::Staged | Phase::Failed => digest == plan.previous_sha256,
+            Phase::Applying => digest == plan.previous_sha256 || digest == artifact.sha256,
+            Phase::Installed => digest == artifact.sha256,
+        };
+        if !recognized {
+            return Err(Error::Conflict);
+        }
+        return Ok((file, install.into()));
+    }
+    if plan.phase != Phase::Applying {
+        return Err(Error::Conflict);
+    }
+    let mut rollback = dir.file("rollback", false)?;
+    if hash(&mut rollback, &Cancel::default())? != plan.previous_sha256 {
+        return Err(Error::Hash);
+    }
+    let old = if dir.exists("displaced")? {
+        "displaced"
+    } else {
+        "rollback"
+    };
+    let mut file = dir.file(old, false)?;
+    if hash(&mut file, &Cancel::default())? != plan.previous_sha256 {
+        return Err(Error::Hash);
+    }
+    Ok((file, dir.path.join(old)))
+}
 pub fn stage(
     install: &Path,
     candidate: &Candidate,
@@ -180,6 +225,10 @@ pub fn stage(
     cancel: &Cancel,
 ) -> Result<String> {
     let artifact = validate_manifest(&candidate.manifest, &BuildInfo::current().platform_key())?;
+    if artifact.format == "elf" {
+        // Packaging opt-in, never a silent reinterpretation of portable input.
+        super::bootstrap::anchor(install).map_err(|_| Error::Unsupported)?;
+    }
     if candidate.asset.name != artifact.name
         || candidate.asset.size != artifact.size
         || candidate.release.tag_name != candidate.manifest.tag
@@ -224,7 +273,7 @@ pub fn stage(
         if hash(&mut file, cancel)? != artifact.sha256 {
             return Err(Error::Hash);
         }
-        validate_executable(&mut file, &artifact.platform)?;
+        validate_artifact(&mut file, &artifact)?;
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -290,9 +339,9 @@ pub fn reconcile(install: &Path) -> Result<()> {
     }
     let artifact = validate_manifest(&plan.manifest, &BuildInfo::current().platform_key())?;
     if !root.exists(&target)? {
-        // No normal shortcut can launch this layout after the evacuation cut.
-        // Preserve every inode, don't execute a path chosen by the journal.
-        return Err(Error::Unsupported);
+        // Only an explicitly installed stable entry makes an absent payload
+        // recoverable. The old portable failure remains unsupported.
+        return recovery_ready(&root, &dir, &target, &plan);
     }
     let installed = hash(&mut root.file(&target, false)?, &Cancel::default())?;
     if installed == artifact.sha256 {
@@ -302,14 +351,24 @@ pub fn reconcile(install: &Path) -> Result<()> {
     recovery_ready(&root, &dir, &target, &plan)
 }
 fn recovery_ready(root: &Dir, dir: &Dir, target: &str, plan: &Plan) -> Result<()> {
-    if !root.exists(target)? {
-        return Err(Error::Unsupported);
-    }
-    if hash(&mut root.file(target, false)?, &Cancel::default())? != plan.previous_sha256 {
-        return Err(Error::Conflict);
-    }
-    if dir.exists("displaced")? {
-        return Err(Error::Conflict);
+    if root.exists(target)? {
+        if hash(&mut root.file(target, false)?, &Cancel::default())? != plan.previous_sha256
+            || dir.exists("displaced")?
+        {
+            return Err(Error::Conflict);
+        }
+    } else {
+        super::bootstrap::anchor(&root.path.join(target)).map_err(|_| Error::Unsupported)?;
+        let old = if dir.exists("displaced")? {
+            "displaced"
+        } else {
+            "rollback"
+        };
+        let mut file = dir.file(old, false)?;
+        if hash(&mut file, &Cancel::default())? != plan.previous_sha256 {
+            return Err(Error::Hash);
+        }
+        super::bootstrap::checked_native(&mut file)?;
     }
     if hash(&mut dir.file("rollback", false)?, &Cancel::default())? != plan.previous_sha256 {
         return Err(Error::Hash);
@@ -354,7 +413,12 @@ pub fn discard(install: &Path) -> Result<()> {
 pub fn activate(install: &Path, expected: &str) -> Result<()> {
     activate_inner(install, expected, || {})
 }
-fn copy_verified(source: &mut File, dir: &Dir, name: &str, expected: &str) -> Result<()> {
+pub(super) fn copy_verified(
+    source: &mut File,
+    dir: &Dir,
+    name: &str,
+    expected: &str,
+) -> Result<()> {
     source
         .seek(SeekFrom::Start(0))
         .map_err(|_| Error::Io("seek backup source"))?;
@@ -370,6 +434,8 @@ fn copy_verified(source: &mut File, dir: &Dir, name: &str, expected: &str) -> Re
         use std::os::unix::fs::PermissionsExt;
         out.set_permissions(std::fs::Permissions::from_mode(0o700))
             .map_err(|_| Error::Io("backup executable permissions"))?;
+        out.sync_all()
+            .map_err(|_| Error::Io("sync executable permissions"))?;
     }
     Ok(())
 }
@@ -386,8 +452,17 @@ fn activate_inner(install: &Path, expected: &str, before_publish: impl FnOnce())
         return Err(Error::Invalid("installation not authorized on full exit"));
     }
     let artifact = validate_manifest(&plan.manifest, &BuildInfo::current().platform_key())?;
-    let current_hash = hash(&mut root.file(&target, false)?, &Cancel::default())?;
-    if plan.phase == Phase::Applying && current_hash == artifact.sha256 {
+    let was_absent = !root.exists(&target)?;
+    let current_hash = if was_absent {
+        if plan.phase != Phase::Applying {
+            return Err(Error::Conflict);
+        }
+        recovery_ready(&root, &dir, &target, &plan)?;
+        plan.previous_sha256.clone()
+    } else {
+        hash(&mut root.file(&target, false)?, &Cancel::default())?
+    };
+    if !was_absent && plan.phase == Phase::Applying && current_hash == artifact.sha256 {
         if hash(&mut dir.file("rollback", false)?, &Cancel::default())? != plan.previous_sha256 {
             return Err(Error::Hash);
         }
@@ -410,9 +485,9 @@ fn activate_inner(install: &Path, expected: &str, before_publish: impl FnOnce())
     if hash(&mut payload, &Cancel::default())? != artifact.sha256 {
         return Err(Error::Hash);
     }
-    validate_executable(&mut payload, &artifact.platform)?;
-    // Back up first, sync and rehash. Never create a window where the launch
-    // target is absent: only the final candidate rename replaces it atomically.
+    validate_artifact(&mut payload, &artifact)?;
+    // Back up first, sync and rehash. The stable entry is never touched; its
+    // normal launch can select verified old bytes while the payload is absent.
     if !dir.exists("rollback")? {
         copy_verified(
             &mut root.file(&target, false)?,
@@ -428,21 +503,30 @@ fn activate_inner(install: &Path, expected: &str, before_publish: impl FnOnce())
     // overwrite=true. First atomically MOVE the actual displaced inode to an
     // owned, unique slot, then validate that inode, then publish NOREPLACE.
     // A concurrently created installation wins; it is never overwritten by an
-    // error/restore path. This deliberately permits a recoverable absent-target
-    // window rather than promising a nonexistent cross-platform rename CAS.
+    // error/restore path. Direct portable entry points cannot recover this gap;
+    // only the separately installed stable-entry layout supports normal launch.
     plan.phase = Phase::Applying;
     write_plan(&dir, &plan)?;
     before_publish();
     if let Err(error) = validate_payload(&dir, &artifact) {
-        plan.phase = Phase::Failed;
+        // Once the payload target is absent, Applying is also the stable
+        // launcher's validated old-image selection. Do not erase that evidence.
+        if !was_absent {
+            plan.phase = Phase::Failed;
+        }
         plan.armed = false;
         write_plan(&dir, &plan)?;
         return Err(error);
     }
-    if !dir.exists("displaced")? {
+    if !was_absent && !dir.exists("displaced")? {
         root.rename(&target, &dir, "displaced", false)?;
     }
-    if hash(&mut dir.file("displaced", false)?, &Cancel::default())? != plan.previous_sha256 {
+    let preserved = if dir.exists("displaced")? {
+        "displaced"
+    } else {
+        "rollback"
+    };
+    if hash(&mut dir.file(preserved, false)?, &Cancel::default())? != plan.previous_sha256 {
         // Preserve the unrecognized displaced image. Restore it only if the
         // launch slot is empty; an unrelated concurrent target always wins.
         let _ = dir.rename("displaced", &root, &target, false);
@@ -490,7 +574,14 @@ fn validate_payload(dir: &Dir, artifact: &release::Artifact) -> Result<()> {
     if hash(&mut payload, &Cancel::default())? != artifact.sha256 {
         return Err(Error::Hash);
     }
-    validate_executable(&mut payload, &artifact.platform)
+    validate_artifact(&mut payload, artifact)
+}
+fn validate_artifact(file: &mut File, artifact: &release::Artifact) -> Result<()> {
+    if artifact.format == "elf" {
+        super::bootstrap::validate_native(file)
+    } else {
+        validate_executable(file, &artifact.platform)
+    }
 }
 #[cfg(test)]
 thread_local! {
@@ -499,7 +590,7 @@ thread_local! {
     pub(super) static AFTER_PUBLISH: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
 }
 pub fn spawn_helper(install: &Path, expected: &str) -> Result<()> {
-    let (_root, updates, target) = location(install)?;
+    let (root, updates, target) = location(install)?;
     let _lock = updates.lock()?;
     let name = pending_name(&updates)?.ok_or(Error::Invalid("no staged update"))?;
     if name != expected {
@@ -510,7 +601,13 @@ pub fn spawn_helper(install: &Path, expected: &str) -> Result<()> {
     if !matches!(plan.phase, Phase::Staged | Phase::Applying) || !plan.armed {
         return Err(Error::Invalid("full-exit install not authorized"));
     }
-    let mut running = match super::image_identity::running(install) {
+    let image_path = if !root.exists(&target)? {
+        super::bootstrap::anchor(install)?;
+        launch_image(install, &plan.previous_sha256)?.1
+    } else {
+        install.to_owned()
+    };
+    let mut running = match super::image_identity::running(&image_path) {
         Ok(image) => image,
         Err(error) => {
             let mut failed = plan.clone();

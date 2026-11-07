@@ -14,6 +14,173 @@ fn owned_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command 
     }
     cmd
 }
+fn layout_names() -> (&'static str, &'static str) {
+    if cfg!(windows) {
+        ("Harmony.exe", "harmony-payload.exe")
+    } else {
+        ("Harmony", "harmony-payload")
+    }
+}
+fn create_owned_layout(tmp: &Temp) -> (std::path::PathBuf, std::path::PathBuf) {
+    let inputs = Temp::new();
+    let program = inputs.0.join("payload-source");
+    let boot = inputs.0.join("bootstrap-source");
+    std::fs::copy(
+        std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap(),
+        &program,
+    )
+    .unwrap();
+    std::fs::copy(
+        std::env::var_os("HARMONY_TEST_BOOTSTRAP")
+            .unwrap_or(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap()),
+        &boot,
+    )
+    .unwrap();
+    let sha = |p: &std::path::Path| format!("{:x}", Sha256::digest(std::fs::read(p).unwrap()));
+    let result = owned_command(&program)
+        .arg("--harmony-create-launch-layout")
+        .arg(&tmp.0)
+        .arg(&boot)
+        .arg(sha(&boot))
+        .arg(&program)
+        .arg(sha(&program))
+        .arg("create-new-layout-v1")
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let (entry, target) = layout_names();
+    (tmp.0.join(entry), tmp.0.join(target))
+}
+#[cfg(target_os = "linux")]
+fn native_payload_fixture() -> Fixture {
+    let mut f = fixture();
+    let mut bytes =
+        std::fs::read(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap()).unwrap();
+    bytes.extend_from_slice(b"owned next-version ELF fixture");
+    let mut manifest: Manifest = serde_json::from_slice(&f.assets[&1]).unwrap();
+    let a = &mut manifest.artifacts[0];
+    a.format = "elf".into();
+    a.name = format!("Harmony-1.0.1-{}.elf", BuildInfo::current().platform_key());
+    a.size = bytes.len() as u64;
+    a.sha256 = format!("{:x}", Sha256::digest(&bytes));
+    f.releases[0].assets[1].name = a.name.clone();
+    f.releases[0].assets[1].size = a.size;
+    f.assets.insert(2, bytes);
+    f.assets.insert(1, serde_json::to_vec(&manifest).unwrap());
+    f.releases[0].assets[0].size = f.assets[&1].len() as u64;
+    f
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "owned native-ELF packaging boundary; use runner"]
+fn native_elf_updates_require_the_explicit_stable_layout() {
+    let tmp = Temp::new();
+    let (entry, install) = create_owned_layout(&tmp);
+    let f = native_payload_fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .expect("native ELF manifest")
+        .unwrap();
+    transaction::stage(&install, &c, &f, &Cancel::default())
+        .expect("native ELF stage in stable layout");
+    let direct = Temp::new();
+    let legacy = direct.install();
+    assert_eq!(
+        transaction::stage(&legacy, &c, &f, &Cancel::default()),
+        Err(Error::Unsupported)
+    );
+    assert_eq!(std::fs::read(&legacy).unwrap(), b"old fixture executable");
+    assert!(entry.exists());
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "actual stable entry -> owned payload -> normal Controller; use runner"]
+fn stable_entry_launches_verified_native_payload_without_appimage_environment() {
+    let tmp = Temp::new();
+    let (entry, install) = create_owned_layout(&tmp);
+    let marker = tmp.0.join("normal-result");
+    let result = owned_command(&entry)
+        .arg("normal-startup")
+        .arg(&marker)
+        .env_remove("APPIMAGE")
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "normal entry failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(marker).unwrap()).unwrap();
+    assert_eq!(value["install"], install.to_str().unwrap());
+    assert!(value["phase"].is_null());
+    assert_eq!(value["armed"], false);
+}
+#[test]
+#[ignore = "explicit new-layout installer, owned executable inputs only; use runner"]
+fn stable_layout_creation_requires_explicit_verified_inputs_and_refuses_migration_in_place() {
+    let inputs = Temp::new();
+    let program = inputs.0.join("payload-source");
+    std::fs::copy(
+        std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap(),
+        &program,
+    )
+    .unwrap();
+    let digest = format!("{:x}", Sha256::digest(std::fs::read(&program).unwrap()));
+    let tmp = Temp::new();
+    let create = |dest: &std::path::Path, expected: &str| {
+        owned_command(&program)
+            .arg("--harmony-create-launch-layout")
+            .arg(dest)
+            .arg(&program)
+            .arg(&digest)
+            .arg(&program)
+            .arg(expected)
+            .arg("create-new-layout-v1")
+            .output()
+            .unwrap()
+    };
+    let result = create(&tmp.0, &digest);
+    assert!(
+        result.status.success(),
+        "explicit new-layout creation unavailable: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let (entry, payload) = layout_names();
+    assert_eq!(
+        std::fs::read(tmp.0.join(entry)).unwrap(),
+        std::fs::read(&program).unwrap()
+    );
+    assert_eq!(
+        std::fs::read(tmp.0.join(payload)).unwrap(),
+        std::fs::read(&program).unwrap()
+    );
+    assert!(tmp.0.join(".harmony-launch/layout.json").is_file());
+    let before = std::fs::read(tmp.0.join(".harmony-launch/layout.json")).unwrap();
+    assert!(
+        !create(&tmp.0, &digest).status.success(),
+        "no in-place migration or clobber"
+    );
+    assert_eq!(
+        std::fs::read(tmp.0.join(".harmony-launch/layout.json")).unwrap(),
+        before
+    );
+    let bad = Temp::new();
+    assert!(!create(&bad.0, &"0".repeat(64)).status.success());
+    assert!(
+        !bad.0.join(entry).exists(),
+        "entry must be published LAST, only after validation"
+    );
+    let occupied = Temp::new();
+    std::fs::write(occupied.0.join("unrelated"), b"keep").unwrap();
+    assert!(!create(&occupied.0, &digest).status.success());
+    assert_eq!(
+        std::fs::read(occupied.0.join("unrelated")).unwrap(),
+        b"keep"
+    );
+}
 fn activate_pending(install: &std::path::Path) -> Result<()> {
     let name = transaction::pending(install)?.ok_or(Error::NotFound)?.0;
     transaction::activate(install, &name)
@@ -1336,6 +1503,17 @@ fn crash_cut_child() {
     };
     let install = std::path::PathBuf::from(path);
     let cut = std::env::var("HARMONY_CRASH_CUT").unwrap();
+    if let Some((point, to)) = cut.split_once(':') {
+        let point = point.to_owned();
+        let to = to.to_owned();
+        safe_fs::RENAME_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |p, name| {
+                if p == point && name == to {
+                    std::process::exit(92);
+                }
+            }))
+        });
+    }
     if cut == "displaced" {
         transaction::AFTER_DISPLACE
             .with(|hook| *hook.borrow_mut() = Some(Box::new(|| std::process::exit(92))));
@@ -1368,11 +1546,217 @@ fn cut_activation(install: &std::path::Path, cut: &str) {
     }
     assert_eq!(cmd.status().unwrap().code(), Some(92));
 }
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "six actual exit cuts + stable normal entry + production Controller/helper; use runner"]
+fn stable_normal_entry_recovers_every_publication_and_durability_cut() {
+    for cut in [
+        "before:displaced",
+        "visible:displaced",
+        "durable:displaced",
+        "before:harmony-payload",
+        "visible:harmony-payload",
+        "durable:harmony-payload",
+    ] {
+        let tmp = Temp::new();
+        let (entry, install) = create_owned_layout(&tmp);
+        let entry_bytes = std::fs::read(&entry).unwrap();
+        let old = std::fs::read(&install).unwrap();
+        let f = native_payload_fixture();
+        let c = check_release(&f, &current_fixture(), &Cancel::default())
+            .unwrap()
+            .unwrap();
+        let txn = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+        transaction::arm(&install, true).unwrap();
+        cut_activation(&install, cut);
+        let published = cut == "visible:harmony-payload" || cut == "durable:harmony-payload";
+        let absent = cut != "before:displaced" && !published;
+        assert_eq!(!install.exists(), absent, "cut {cut}");
+        let marker = tmp.0.join("normal-result");
+        let result = owned_command(&entry)
+            .arg("normal-startup")
+            .arg(&marker)
+            .env_remove("APPIMAGE")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "entry unusable after {cut}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
+        assert_eq!(value["install"], install.to_str().unwrap());
+        assert_eq!(value["armed"], false, "cut {cut} retained authorization");
+        assert_eq!(
+            !install.exists(),
+            absent,
+            "startup cannot publish or blindly restore: {cut}"
+        );
+        assert_eq!(
+            std::fs::read(&entry).unwrap(),
+            entry_bytes,
+            "stable entry must never change"
+        );
+        let p = transaction::pending(&install).unwrap().unwrap().1;
+        if published {
+            assert_eq!(p.phase, transaction::Phase::Installed);
+            assert!(value["phase"].is_null());
+        } else {
+            assert_eq!(p.phase, transaction::Phase::Applying, "never reset journal");
+            assert_eq!(value["phase"], "Applying");
+            let ready = tmp.0.join("ready");
+            let release = tmp.0.join("release");
+            let result_path = tmp.0.join("helper-result");
+            let mut parent = owned_command(&entry)
+                .arg("normal-authorize-hold")
+                .arg(&marker)
+                .arg(&ready)
+                .arg(&release)
+                .env_remove("APPIMAGE")
+                .env("HARMONY_FIXTURE_HELPER_RESULT", &result_path)
+                .spawn()
+                .unwrap();
+            assert_eq!(
+                wait_owned_marker(&ready),
+                "authorized helper ready; parent alive"
+            );
+            assert_eq!(
+                !install.exists(),
+                absent,
+                "helper published before natural exit: {cut}"
+            );
+            assert!(
+                !result_path.exists(),
+                "helper returned before parent exited"
+            );
+            std::fs::write(&release, b"natural owned-process exit").unwrap();
+            assert!(parent.wait().unwrap().success());
+            assert_eq!(
+                wait_owned_marker(&result_path),
+                "Ok(())",
+                "recovery helper at {cut}"
+            );
+            assert_eq!(
+                transaction::pending(&install).unwrap().unwrap().1.phase,
+                transaction::Phase::Installed
+            );
+        }
+        assert_eq!(std::fs::read(&install).unwrap(), f.assets[&2]);
+        assert_eq!(
+            std::fs::read(tmp.0.join(".harmony-updates").join(&txn).join("rollback")).unwrap(),
+            old
+        );
+        // Only this second explicit user launch runs the new payload; neither
+        // startup, authorization nor the helper relaunches it.
+        let result = owned_command(&entry)
+            .arg("normal-startup")
+            .arg(&marker)
+            .env_remove("APPIMAGE")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "next normal launch after {cut}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "stable entry must not silently roll back an Installed selection; use runner"]
+fn stable_entry_rejects_previous_bytes_after_completed_installation() {
+    let tmp = Temp::new();
+    let (entry, install) = create_owned_layout(&tmp);
+    let old = std::fs::read(&install).unwrap();
+    let f = native_payload_fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+    transaction::arm(&install, true).unwrap();
+    activate_pending(&install).unwrap();
+    std::fs::write(&install, old).unwrap();
+    let marker = tmp.0.join("must-not-run");
+    let result = owned_command(&entry)
+        .arg("normal-startup")
+        .arg(&marker)
+        .env_remove("APPIMAGE")
+        .output()
+        .unwrap();
+    assert!(
+        !result.status.success(),
+        "Installed requires NEW authoritative bytes; never silently roll back"
+    );
+    assert!(!marker.exists());
+    assert_eq!(
+        transaction::pending(&install).unwrap().unwrap().1.phase,
+        transaction::Phase::Installed
+    );
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "failed absent-target recovery must still launch verified old app; use runner"]
+fn stable_entry_survives_recovery_payload_failure_without_blind_rollback_or_phase_reset() {
+    let tmp = Temp::new();
+    let (entry, install) = create_owned_layout(&tmp);
+    let f = native_payload_fixture();
+    let c = check_release(&f, &current_fixture(), &Cancel::default())
+        .unwrap()
+        .unwrap();
+    let txn = transaction::stage(&install, &c, &f, &Cancel::default()).unwrap();
+    transaction::arm(&install, true).unwrap();
+    cut_activation(&install, "displaced");
+    let controller = fixture_controller(Ok(install.clone()));
+    controller.load_pending().unwrap();
+    controller.arm(true).unwrap();
+    let payload = tmp.0.join(".harmony-updates").join(txn).join("payload");
+    assert!(
+        transaction::activate_with_hook(&install, || std::fs::remove_file(payload).unwrap())
+            .is_err()
+    );
+    let p = transaction::pending(&install).unwrap().unwrap().1;
+    assert_eq!(
+        p.phase,
+        transaction::Phase::Applying,
+        "absent payload must retain recoverable old selection"
+    );
+    assert!(!p.armed);
+    assert!(
+        !install.exists(),
+        "no blind restore after a failed publication attempt"
+    );
+    let marker = tmp.0.join("failure-status");
+    let result = owned_command(&entry)
+        .arg("normal-startup-status")
+        .arg(&marker)
+        .env_remove("APPIMAGE")
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "old app remains launchable: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(marker).unwrap()).unwrap();
+    assert_eq!(value["phase"], "Applying");
+    assert!(
+        value["load_error"].as_str().is_some(),
+        "real Controller error, not fake success"
+    );
+    assert!(!install.exists());
+}
 #[test]
 #[ignore = "owned evacuation crash cut; documents an unresolved layout blocker"]
 fn evacuation_crash_retains_data_but_normal_shortcut_recovery_is_unsupported() {
     let tmp = Temp::new();
-    let install = tmp.install();
+    let install = tmp.0.join("harmony.exe");
+    std::fs::copy(
+        std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap(),
+        &install,
+    )
+    .unwrap();
+    let old = std::fs::read(&install).unwrap();
     let f = fixture();
     let c = check_release(&f, &current_fixture(), &Cancel::default())
         .unwrap()
@@ -1382,15 +1766,19 @@ fn evacuation_crash_retains_data_but_normal_shortcut_recovery_is_unsupported() {
     cut_activation(&install, "displaced");
     assert!(!install.exists());
     let saved = tmp.0.join(".harmony-updates").join(txn);
-    assert_eq!(
-        std::fs::read(saved.join("displaced")).unwrap(),
-        b"old fixture executable"
-    );
-    assert_eq!(
-        std::fs::read(saved.join("rollback")).unwrap(),
-        b"old fixture executable"
-    );
+    assert_eq!(std::fs::read(saved.join("displaced")).unwrap(), old);
+    assert_eq!(std::fs::read(saved.join("rollback")).unwrap(), old);
     assert_eq!(std::fs::read(saved.join("payload")).unwrap(), f.assets[&2]);
+    assert_eq!(
+        owned_command(&install)
+            .arg("normal-startup")
+            .arg(tmp.0.join("never-launched"))
+            .spawn()
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::NotFound,
+        "preserved REAL portable failure: normal entry is absent, retained bytes are not recovery"
+    );
     let restored = fixture_controller(Ok(install.clone()));
     assert_eq!(restored.load_pending(), Err(Error::Unsupported));
     assert_eq!(

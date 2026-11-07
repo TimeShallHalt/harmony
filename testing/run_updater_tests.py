@@ -56,7 +56,10 @@ def main():
             '\n'.join(name+'="='+version(name,'0.10.' if name=='sha2' else '')+'"' for name in ['serde_json','sha2','semver','libc'])+'\n')
         with (scratch / "Cargo.toml").open("a") as manifest:
             manifest.write('\n[[bin]]\nname="updater-process-fixture"\npath="' + (root / 'testing/updater_process_fixture.rs').as_posix() + '"\n')
+            manifest.write('\n[[bin]]\nname="harmony-bootstrap"\npath="' + (root / 'scripts/harmony_bootstrap.rs').as_posix() + '"\n')
         subprocess.run(["cargo", "build", "--jobs", "2", "--manifest-path", str(scratch / "Cargo.toml"), "--bin", "updater-process-fixture"], env=env, check=True)
+        subprocess.run(["cargo", "build", "--jobs", "2", "--manifest-path", str(scratch / "Cargo.toml"), "--bin", "harmony-bootstrap"], env=env, check=True)
+        env["HARMONY_TEST_BOOTSTRAP"] = str(scratch / "target/debug/harmony-bootstrap")
         env["HARMONY_TEST_PROCESS_FIXTURE"] = str(scratch / "target/debug/updater-process-fixture")
         return checked_tests(["cargo", "test", "--jobs", "2", "--lib", "--manifest-path", str(scratch / "Cargo.toml"), "--", "--test-threads=1", "--include-ignored", *rest], env, scratch,timeout=120)
     if not env.get("VCINSTALLDIR"):
@@ -87,6 +90,12 @@ def main():
     fixture_command[fixture_command.index(str(exe))] = str(fixture)
     fixture_command += ["-A", "dead_code", "-A", "unused_imports"]
     subprocess.run(fixture_command, env=env, cwd=root, check=True, creationflags=priority)
+    bootstrap = scratch / "harmony-bootstrap.exe"
+    bootstrap_command = list(fixture_command)
+    bootstrap_command[bootstrap_command.index(str(root / "testing/updater_process_fixture.rs"))] = str(root / "scripts/harmony_bootstrap.rs")
+    bootstrap_command[bootstrap_command.index(str(fixture))] = str(bootstrap)
+    subprocess.run(bootstrap_command, env=env, cwd=root, check=True, creationflags=priority)
+    env["HARMONY_TEST_BOOTSTRAP"] = str(bootstrap)
     env["HARMONY_TEST_PROCESS_FIXTURE"] = str(fixture)
     subprocess.run(command, env=env, cwd=root, check=True, creationflags=priority)
     return checked_tests([str(exe), "--test-threads=1", "--include-ignored", *rest], env, scratch, cwd=root, timeout=120, creationflags=priority)

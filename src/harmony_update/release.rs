@@ -98,6 +98,7 @@ pub fn validate_manifest(m: &Manifest, platform: &str) -> Result<Artifact> {
     for a in &m.artifacts {
         let (format, extension) = match a.platform.as_str() {
             "windows-x86_64" | "windows-aarch64" => ("exe", "exe"),
+            "linux-x86_64" | "linux-aarch64" if a.format == "elf" => ("elf", "elf"),
             "linux-x86_64" | "linux-aarch64" => ("appimage", "AppImage"),
             _ => return Err(Error::Unsupported),
         };
