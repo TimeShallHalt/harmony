@@ -68,7 +68,7 @@ export { GifTile, GifFavorites } from "gifs.slint";
 export component YapfastWindow inherits Window {
     /// "Yapfast", or "(3) Yapfast" with mentions and DMs waiting, as a browser
     /// tab's title counts them, so the taskbar shows it.
-    in property <string> window-title: "Yapfast";
+    in property <string> window-title: "Harmony";
     title: root.window-title;
     preferred-width: 1120px; preferred-height: 760px;
     min-width: 800px; min-height: 560px;
@@ -79,7 +79,7 @@ export component YapfastWindow inherits Window {
     no-frame: root.own-title-bar;
     /// How far the title bar moves the window's content down: nothing while
     /// the desktop draws it, or in full screen.
-    property <length> title-height: root.own-title-bar && !root.full-screen ? 32px : 0px;
+    property <length> title-height: root.own-title-bar && !root.full-screen ? ClientStyle.title-height : 0px;
     callback move-window();
     callback resize-window(int);
     callback minimize-window();
@@ -1150,6 +1150,16 @@ export component YapfastWindow inherits Window {
     /// and keeps another.
     in property <[ThemeCard]> themes;
     in property <string> theme-id;
+    in property <string> theme-pack-name;
+    in property <string> theme-pack-status;
+    in property <bool> theme-pack-reloadable;
+    in property <bool> theme-pack-has-logo;
+    callback import-theme-pack();
+    callback export-theme-pack();
+    callback reload-theme-pack();
+    callback reset-theme-pack();
+    callback reset-theme-logo();
+    callback edit-theme-pack();
     callback choose-theme(string);
     /// Appearance's theme editor; see AppearanceSettings. Leaving Appearance
     /// or settings cancels it.
@@ -3728,6 +3738,14 @@ export component YapfastWindow inherits Window {
         }
         if root.settings-section == 7: AppearanceSettings {
             themes: root.themes; theme-id: root.theme-id;
+            pack-name: root.theme-pack-name; pack-status: root.theme-pack-status;
+            pack-reloadable: root.theme-pack-reloadable; pack-has-logo: root.theme-pack-has-logo;
+            import-theme-pack => { root.import-theme-pack(); }
+            export-theme-pack => { root.export-theme-pack(); }
+            reload-theme-pack => { root.reload-theme-pack(); }
+            reset-theme-pack => { root.reset-theme-pack(); }
+            reset-theme-logo => { root.reset-theme-logo(); }
+            edit-theme-pack => { root.edit-theme-pack(); }
             editor: root.theme-editor; colours: root.theme-colours;
             theme-name <=> root.theme-name; theme-dark <=> root.theme-dark;
             editing-saved: root.theme-editing-saved; starts: root.theme-starts; start-index: root.theme-start;
@@ -4431,7 +4449,7 @@ export component YapfastWindow inherits Window {
     // tooltips, while Yapfast draws them.
     if root.title-height > 0 && !ClientStyle.enabled: TitleBar {
         x: 0px; y: 0px; width: root.width;
-        place: root.workspace ? root.sidebar-title : "Yapfast";
+        place: root.workspace ? root.sidebar-title : "Harmony";
         focused: root.window-focused; maximized: root.window-maximized;
         move-window => { root.move-window(); }
         minimize-window => { root.minimize-window(); }
@@ -4440,7 +4458,7 @@ export component YapfastWindow inherits Window {
     }
     if root.title-height > 0 && ClientStyle.enabled: WindowBar {
         x: 0px; y: 0px; width: root.width;
-        place: root.workspace ? (root.dms-selected ? "Direct Messages" : root.sidebar-title) : "Yapfast";
+        place: root.workspace ? (root.dms-selected ? "Direct Messages" : root.sidebar-title) : "Harmony";
         focused: root.window-focused; maximized: root.window-maximized;
         move-window => { root.move-window(); }
         minimize-window => { root.minimize-window(); }

@@ -1,6 +1,6 @@
 //! The title bar Yapfast draws in place of the desktop's on Linux: whether it
-//! does, and moving, sizing, minimizing, maximizing and closing the window
-//! from it through winit. Yapfast also uses these actions for its Windows bar.
+//! does, and its native move, resize, minimize, maximize and close actions.
+//! Linux uses winit; Windows uses Win32 move/size commands for its custom bar.
 //!
 //! A desktop that gives its windows title bars, as KDE and GNOME do, draws
 //! one on Yapfast's too unless Yapfast draws its own. A tiling compositor such
@@ -15,7 +15,12 @@
 //! off makes the window larger or smaller than maximized, for which Weston
 //! ends the connection.
 
-use slint::winit_030::winit::window::{ResizeDirection, WindowAttributes};
+#[cfg(not(windows))]
+use slint::winit_030::winit::window::ResizeDirection;
+use slint::winit_030::winit::window::WindowAttributes;
+
+#[cfg(windows)]
+mod windows;
 
 thread_local! {
     /// Windows are made without the desktop's frame, for Yapfast's title bar.
@@ -43,6 +48,7 @@ const FRAMED: [&str; 14] = [
 ];
 
 /// The edges and corners ResizeEdges numbers, in its order.
+#[cfg(not(windows))]
 const DIRECTIONS: [ResizeDirection; 8] = [
     ResizeDirection::East,
     ResizeDirection::North,
@@ -108,22 +114,34 @@ pub(super) fn show(window: &YapfastWindow, system: Option<bool>) {
 pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
     let weak = window.as_weak();
     window.on_move_window(move || {
+        tracing::debug!("client title bar requested window move");
         winit(&weak, |winit| {
-            if let Err(error) = winit.drag_window() {
+            #[cfg(windows)]
+            let result = windows::begin(winit, None);
+            #[cfg(not(windows))]
+            let result = winit.drag_window();
+            if let Err(error) = result {
                 tracing::warn!(%error, "could not move the window");
             }
         });
     });
     let weak = window.as_weak();
     window.on_resize_window(move |direction| {
-        let Some(&direction) = usize::try_from(direction)
-            .ok()
-            .and_then(|index| DIRECTIONS.get(index))
-        else {
-            return;
-        };
+        tracing::debug!(direction, "client resize edge requested window resize");
         winit(&weak, |winit| {
-            if let Err(error) = winit.drag_resize_window(direction) {
+            #[cfg(windows)]
+            let result = windows::begin(winit, Some(direction));
+            #[cfg(not(windows))]
+            let result = {
+                let Some(&direction) = usize::try_from(direction)
+                    .ok()
+                    .and_then(|index| DIRECTIONS.get(index))
+                else {
+                    return;
+                };
+                winit.drag_resize_window(direction)
+            };
+            if let Err(error) = result {
                 tracing::warn!(%error, "could not resize the window");
             }
         });
@@ -179,6 +197,14 @@ fn winit(
         window.window().with_winit_window(act);
     }
 }
+
+#[cfg(test)]
+#[path = "title_bar_tests.rs"]
+mod hit_region_tests;
+
+#[cfg(all(test, windows))]
+#[path = "title_bar_native_tests.rs"]
+mod native_tests;
 
 #[cfg(test)]
 mod tests {

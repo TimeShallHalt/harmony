@@ -1,0 +1,37 @@
+id,feature,area,priority,original,clone,notes
+quests,Quests,account,must,user-requested,absent,Quest-completion badge only; no quest acceptance/progress/reward flow. D/profile.rs
+orbs-shop,Orbs Shop,commerce,must,user-requested,absent,No balance/catalogue/redemption. Server-owned eligibility and entitlements.
+shop,Regular Shop,commerce,must,user-requested,absent,Shop links currently open outside native routing. Gift redemption is not shop parity. D/link.rs; D/gift.rs
+avatar-decorations,Profile Decorations,profiles,must,user-requested,absent,No decoration data/render layer in D/profile.rs or ui/people.slint.
+nameplates,Nameplates,profiles,must,user-requested,absent,No model/parser/list renderer for nameplates.
+name-fonts,Fonts and styles for names,profiles,must,user-requested,absent,Fixed profile typography; global UI fonts are not Discord display-name styles.
+profile-widgets,Profile Widgets,profiles,must,user-requested,absent,Connections display exists but no profile Board widget schema/editor.
+activity-tab,Detailed Activity Tab,profiles,must,user-requested,partial,Current rich activity cards/tab exist; recent-history data fetch absent. D/activity.rs; ui/people.slint
+server-voice-badge,VC Icon on servers,presence,must,user-requested,partial,Own-call server badge and participant voice state exist; server-wide summary absent. src/ui/refresh.rs
+server-stream-badge,Streaming Icon on servers,presence,must,user-requested,partial,Participant LIVE markers exist; general server-wide streaming summary absent. ui/rail.slint
+game-detection,Activity/Game Detection,presence,must,user-requested,partial,Process/custom/Steam/Wine detection exists Windows+Linux. Rich Presence RPC Linux-only. D/game_detection.rs; D/own_activity.rs
+stickers,Stickers,expressions,must,user-requested,partial,Incoming rendering and server administration exist; picker and outgoing sticker_ids absent. D/api.rs; ui/messages.slint
+emoji-art,Consistent Discord-style emoji art and better picker,expressions,must,user-requested,partial,Bundled Discord Twemoji picker/message rendering exists; unsupported glyph/composer fallbacks remain. src/twemoji.rs; src/emoji.rs
+animated-emoji,Animated emojis,expressions,must,user-requested,baseline_source_supported,Animation cache/driver and GIF/APNG/WebP decode wired; subject to user settings. src/ui/emoji_animation.rs
+animated-stickers,Animated stickers,expressions,must,user-requested,baseline_source_supported,Frame rendering and Lottie decoding wired; outgoing sticker workflow missing. C/lottie.rs; ui/messages.slint
+wishlists,Wishlists,profiles,must,user-requested,absent,No wishlist data or editing/profile tab. Needs legitimate service integration.
+clips,Clips,composer,must,user-requested,absent,clip.rs is favourite GIF thumbnail encoding; not user Clips. Generic upload sets is_clip false.
+polls,Polls,composer,must,user-requested,baseline_source_supported,Creation/vote/remove/end flows and API methods exist. C/application/polls.rs; D/api.rs
+apps,App support,composer,must,user-requested,partial,OAuth authorization and component/link rendering exist; commands/custom-id interactions/modals absent. Embedded activities need separate architecture.
+scheduled-messages,Scheduled Messages,composer,must,user-requested,absent,No durable delayed-message queue; server scheduled events are unrelated.
+voice-messages,Voice messages,composer,must,user-requested,absent,No voice-specific recorder/payload/waveform/player; audio is generic file attachment.
+profile-media,Open profile avatar/banner in media viewer,profiles,must,user-requested,absent,Avatar click opens full profile; banner plain image. Generalized viewer source needed. ui/people.slint
+media-viewer,Image/GIF zoom and richer viewer,media,must,user-requested,implemented_pending_gui,11 native production-viewer harness tests pass on Windows for bounded zoom/pan/wheel/navigation/resize/animation. Final application GUI verification and deployment pending. Actual size uses decoded pixels; source may cap detail.
+timezones,Local user timezones,quality-of-life,must,user-requested,absent,Per-user IANA timezone preferences/clocks absent; implement locally without friend-ID upload.
+spotify-listen-along,Spotify Listen Along,music,must,user-requested,absent,Received Spotify activity cards exist but no native playback authorization/controls. Local premium flag spoof not a service guarantee.
+pear-listen-along,Pear Desktop / YouTube Music Listen Along,music,must,user-requested,absent,No current Pear adapter; official API Server plugin supports authenticated local controls. Keep loopback-only and opt-in.
+read-all,Read All Notifications Buttons,quality-of-life,must,user-requested,partial,Conversation/server/folder/category mark-read exists; global bounded deduplicated operation absent. C/application/rooms.rs
+jump-top,Jump to top of channels,quality-of-life,must,user-requested,partial,Home selects first loaded message; first-message-ever fetch operation absent. ui/yapfast.slint
+silent-typing,Silent Typing Support,privacy,must,user-requested,baseline_source_supported,Share typing setting persists and suppresses outbound Command::Typing. Layout.share_typing; src/ui.rs; ui/settings.slint
+game-toggle,Quick Game Activity Toggle,privacy,must,user-requested,partial,Settings and account-wide backend toggle exist; quick account control absent. src/ui/games.rs
+better-volume,Precise extended per-user volume,voice,must,user-requested,partial,Separate voice/stream gains and persistence exist; exact numeric-entry control absent. ui/voice.slint; C/volume.rs
+platform-indicators,Platform Indicators,presence,must,user-requested,partial,Only mobile-only presence distinction retained; desktop/web combinations discarded. D/member_list.rs
+call-timer,Call Time Counter,voice,must,user-requested,baseline_source_supported,Monotonic room call timer exists; window reattachment edge still needs regression. src/ui/call_timer.rs
+nitro-inspired,YABDP4Nitro-inspired enhancements,customization,must,user-requested,needs_split,Local styles/quality choices may be supported individually; no real Nitro entitlement unlock promised. No plugin code copied; OSL license reviewed.
+theme-packs,Deep extensible native theme packs,customization,must,user-requested,implemented_pending_deployment,Versioned native data-only packs implemented. 18 production-module tests pass on Windows and 18 on Linux; isolated Windows GUI import/export/logo-reset/reload verified. No CSS/webview/scripts or idle polling.
+window-controls,Native window dragging and resizing,window,must,user-reported-regression,pending_physical_verification,Windows message-packing defect patched; queue and production hit-region checks pass. Physical gesture test deferred at user request during gaming; no verified window-motion fix or deployment yet.

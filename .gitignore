@@ -18,3 +18,17 @@ __pycache__/
 /deploy/
 /DESIGN.md
 /PRODUCT.md
+
+# Local credentials, runtime data and installed/debug binaries are not source.
+.env
+.env.*
+!.env.example
+!.env.sample
+/data/
+/layout.json
+/session.json
+/credentials.json
+/yapfast.log
+/*.exe
+/*.dll
+/*.pdb

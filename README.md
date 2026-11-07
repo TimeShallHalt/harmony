@@ -1,3 +1,22 @@
+# Harmony
+
+Private development customization of [Yapfast](https://github.com/yapfast/yapfast), a native Rust/Slint Discord client.
+
+- [Customization overview](HARMONY.md)
+- [Native theme packs and authoring](docs/theme-packs.md)
+- [Build, update and verification notes](LOCAL-DEVELOPMENT.md)
+- [Feature backlog](replica/features.csv)
+
+This repository contains the source and development notes, not Discord credentials, account data, local toolchains or compiled application binaries. Upstream licenses and attribution are retained; see [LICENSE](LICENSE).
+
+**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. Physical Windows drag/resize verification remains pending, and the recorded emoji-edge rendering test still fails. See the build notes for the exact test results and platform-verification limits. GitHub Actions are disabled for this private copy to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain intact.
+
+The original upstream README follows. Its downloads and performance measurements describe Yapfast, not a separately verified Harmony release.
+
+---
+
+## Upstream Yapfast README
+
 <p align="center">
   <img src="packaging/icon.svg" width="96" height="96" alt="">
 </p>

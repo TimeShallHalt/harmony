@@ -1,5 +1,9 @@
 # Themes
 
+Harmony also supports data-only native [theme packs](theme-packs.md): semantic
+colors, bounded layout/typography/motion tokens, and a local static PNG logo.
+Existing built-in IDs and palette credits below are unchanged.
+
 Settings → Appearance shows the window in one of the themes Yapfast comes with,
 or one of the person's own. Each is a full set of the colours of the Slint
 global `Theme` (`ui/theme.slint`), plus whether it's dark, which sets the

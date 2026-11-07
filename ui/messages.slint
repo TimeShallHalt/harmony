@@ -1572,7 +1572,7 @@ export component CardView inherits HorizontalLayout {
                     border-width: 1px; border-color: Theme.accent; border-radius: 12px;
                     HorizontalLayout {
                         padding: 16px;
-                        Text { text: "Yapfast can't show this part of the message yet."; color: Theme.secondary; font-size: 14px; wrap: word-wrap; }
+                        Text { text: "Harmony can't show this part of the message yet."; color: Theme.secondary; font-size: 14px; wrap: word-wrap; }
                     }
                 }
             }
@@ -1808,7 +1808,7 @@ export component ImageViewer inherits Rectangle {
     in property <image> viewer-image;
     in property <[image]> viewer-frames;
     in property <[int]> viewer-delays;
-    /// The image's full size in pixels.
+    /// The adapter's reported dimensions, which may describe a capped preview.
     in property <int> viewer-width;
     in property <int> viewer-height;
     in property <string> viewer-name;
@@ -1826,79 +1826,213 @@ export component ImageViewer inherits Rectangle {
     callback copy-text(string);
     callback open-link(string);
     pure callback attachment-link(string, int) -> string;
+    // Actual size measures the decoded still/animation, never metadata that may
+    // describe a larger original than the proxy or decoder supplied.
+    property <int> pixel-width: root.viewer-frames.length > 1 ? root.viewer-frames[0].width : root.viewer-image.width;
+    property <int> pixel-height: root.viewer-frames.length > 1 ? root.viewer-frames[0].height : root.viewer-image.height;
+    property <length> natural-width: max(1, root.pixel-width) * 1px;
+    property <length> natural-height: max(1, root.pixel-height) * 1px;
+    property <bool> has-image: root.pixel-width > 0 && root.pixel-height > 0;
+    property <bool> fitting: true;
+    property <float> requested-zoom: 1;
+    property <float> minimum-zoom: min(0.1, root.fit-zoom);
+    out property <float> fit-zoom: min(1, min(viewport.width / root.natural-width, viewport.height / root.natural-height));
+    out property <float> zoom: root.fitting ? root.fit-zoom : clamp(root.requested-zoom, root.minimum-zoom, 8);
+    out property <string> status: root.has-image
+        ? "Decoded " + root.pixel-width + " × " + root.pixel-height + " px"
+            + (root.viewer-width > root.pixel-width || root.viewer-height > root.pixel-height ? " · Preview" : "")
+            + " · " + round(root.zoom * 100) + "%" + (root.fitting ? " · Fit" : "")
+        : "Image not loaded";
+    out property <image> displayed-frame: shown.source;
+    property <length> requested-pan-x;
+    property <length> requested-pan-y;
+    out property <length> pan-limit-x: max(0px, (root.natural-width * root.zoom - viewport.width) / 2);
+    out property <length> pan-limit-y: max(0px, (root.natural-height * root.zoom - viewport.height) / 2);
+    out property <length> pan-x: clamp(root.requested-pan-x, -root.pan-limit-x, root.pan-limit-x);
+    out property <length> pan-y: clamp(root.requested-pan-y, -root.pan-limit-y, root.pan-limit-y);
+    property <bool> can-pan: root.has-image && (root.pan-limit-x > 0px || root.pan-limit-y > 0px);
+    function clamp-pan() {
+        root.requested-pan-x = root.pan-x;
+        root.requested-pan-y = root.pan-y;
+    }
+    public function pan-by(x: length, y: length) {
+        root.requested-pan-x = clamp(root.pan-x + x, -root.pan-limit-x, root.pan-limit-x);
+        root.requested-pan-y = clamp(root.pan-y + y, -root.pan-limit-y, root.pan-limit-y);
+    }
+    changed zoom => { root.clamp-pan(); }
+    changed width => { root.clamp-pan(); }
+    changed height => { root.clamp-pan(); }
+    changed pixel-width => { root.clamp-pan(); }
+    changed pixel-height => { root.clamp-pan(); }
+
+    // Buttons/keys zoom about the centre; the wheel keeps its image point
+    // under the pointer, except where the image edge must stay in the viewport.
+    function zoom-at(scale: float, anchor-x: length, anchor-y: length) {
+        if root.has-image {
+            let previous-zoom = root.zoom;
+            let previous-x = root.pan-x;
+            let previous-y = root.pan-y;
+            let next-zoom = clamp(scale, root.minimum-zoom, 8);
+            let ratio = next-zoom / previous-zoom;
+            root.requested-zoom = next-zoom;
+            root.fitting = false;
+            root.requested-pan-x = clamp(anchor-x + (previous-x - anchor-x) * ratio, -root.pan-limit-x, root.pan-limit-x);
+            root.requested-pan-y = clamp(anchor-y + (previous-y - anchor-y) * ratio, -root.pan-limit-y, root.pan-limit-y);
+        }
+        viewer-keys.focus();
+    }
+    public function zoom-in() { root.zoom-at(root.zoom * 1.25, 0px, 0px); }
+    public function zoom-out() { root.zoom-at(root.zoom / 1.25, 0px, 0px); }
+    public function fit-image() {
+        root.fitting = true;
+        root.requested-pan-x = 0px; root.requested-pan-y = 0px;
+        viewer-keys.focus();
+    }
+    public function actual-size() { root.zoom-at(1, 0px, 0px); }
+    public function reset-view() { root.fit-image(); }
+    changed viewer-item => { root.reset-view(); }
+    changed viewer-index => { root.reset-view(); }
+
     // What its menu is for, read as it opens, as the arrows change the picture.
     property <string> menu-link;
     property <length> menu-x;
     property <length> menu-y;
-    background: #000000e6;
+    background: Theme.sunken.with-alpha(0.97);
+    clip: true;
     accessible-role: groupbox;
     accessible-label: "Image viewer";
+    accessible-description: "Plus and minus zoom. 0 resets to fit. Drag or Shift+arrows pan when zoomed. Escape closes. Actual size uses one decoded image pixel per logical pixel, separate from application zoom.";
     TouchArea { clicked => { root.close-image(); } }
     viewer-keys := FocusScope {
+        width: parent.width; height: parent.height;
         init => { self.focus(); }
         key-pressed(event) => {
             if event.text == Key.Escape { root.close-image(); return accept; }
+            if event.modifiers.shift && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta {
+                if event.text == Key.LeftArrow { root.pan-by(48px, 0px); return accept; }
+                if event.text == Key.RightArrow { root.pan-by(-48px, 0px); return accept; }
+                if event.text == Key.UpArrow { root.pan-by(0px, 48px); return accept; }
+                if event.text == Key.DownArrow { root.pan-by(0px, -48px); return accept; }
+            }
             if event.text == Key.LeftArrow && root.viewer-position != "" { root.step-image(-1); return accept; }
             if event.text == Key.RightArrow && root.viewer-position != "" { root.step-image(1); return accept; }
+            if event.modifiers.control || event.modifiers.alt || event.modifiers.meta { return reject; }
+            if event.text == "+" || event.text == "=" { root.zoom-in(); return accept; }
+            if event.text == "-" { root.zoom-out(); return accept; }
+            if event.text == "0" { root.reset-view(); return accept; }
             return reject;
         }
-        // Shown at full size, shrunk to fit beside the bars and arrows.
-        property <length> room-width: root.width - 160px;
-        property <length> room-height: root.height - 128px;
-        property <length> natural-width: max(1, root.viewer-width) * 1px;
-        property <length> natural-height: max(1, root.viewer-height) * 1px;
-        property <float> scale: min(1, min(self.room-width / self.natural-width, self.room-height / self.natural-height));
-        Picture {
-            width: viewer-keys.natural-width * viewer-keys.scale; height: viewer-keys.natural-height * viewer-keys.scale;
-            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-            still: root.viewer-image; frames: root.viewer-frames; delays: root.viewer-delays; image-fit: contain;
-            accessible-role: image; accessible-label: root.viewer-name;
-            TouchArea {
+        viewport := Rectangle {
+            x: root.width >= 480px ? 80px : 16px; y: 64px;
+            width: max(1px, root.width - 2 * self.x); height: max(1px, root.height - 168px);
+            clip: true;
+            shown := Picture {
+                width: root.natural-width * root.zoom; height: root.natural-height * root.zoom;
+                x: (parent.width - self.width) / 2 + root.pan-x; y: (parent.height - self.height) / 2 + root.pan-y;
+                still: root.viewer-image; frames: root.viewer-frames; delays: root.viewer-delays; image-fit: contain;
+                accessible-role: image; accessible-label: root.viewer-name;
+            }
+            // Keep the gesture target stationary while the picture moves beneath it.
+            // TouchArea owns the press through release/cancel, including beyond its edge.
+            pan-touch := TouchArea {
+                property <bool> panning;
+                property <bool> started-on-picture;
+                property <length> last-x;
+                property <length> last-y;
+                property <bool> on-picture: self.mouse-x >= shown.x && self.mouse-x <= shown.x + shown.width
+                    && self.mouse-y >= shown.y && self.mouse-y <= shown.y + shown.height;
+                mouse-cursor: self.panning ? MouseCursor.grabbing : root.can-pan && self.on-picture ? MouseCursor.grab : MouseCursor.default;
                 pointer-event(event) => {
-                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                    if event.kind == PointerEventKind.cancel { self.panning = false; }
+                    if event.button == PointerEventButton.left {
+                        if event.kind == PointerEventKind.down {
+                            viewer-keys.focus();
+                            self.started-on-picture = self.on-picture;
+                            self.panning = root.can-pan && self.on-picture;
+                            self.last-x = self.mouse-x; self.last-y = self.mouse-y;
+                        }
+                        if event.kind == PointerEventKind.up { self.panning = false; }
+                    }
+                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.down && self.on-picture {
                         root.menu-link = root.attachment-link(root.viewer-item, root.viewer-index);
                         root.menu-x = self.absolute-position.x + self.mouse-x - root.absolute-position.x;
                         root.menu-y = self.absolute-position.y + self.mouse-y - root.absolute-position.y;
                         if !root.preview || root.menu-link != "" { image-menu.show(); }
                     }
                 }
-            }
-        }
-        HorizontalLayout {
-            y: 0px; height: 64px; padding-left: 20px; padding-right: 12px; spacing: 8px;
-            VerticalLayout {
-                alignment: center; horizontal-stretch: 1;
-                Text { text: root.viewer-name; color: #ffffff; font-size: 15px; font-weight: 700; overflow: elide; }
-                if root.viewer-position != "": Text { text: root.viewer-position; color: #ffffffb3; font-size: 13px; }
-            }
-            if !root.preview: Middle {
-                IconButton {
-                    icon: @image-url("icons/download.svg"); label: "Save " + root.viewer-name; tint: #ffffff;
-                    clicked => { root.save-attachment(root.viewer-item, root.viewer-index); }
+                moved => {
+                    if self.pressed && self.panning {
+                        root.pan-by(self.mouse-x - self.last-x, self.mouse-y - self.last-y);
+                        self.last-x = self.mouse-x; self.last-y = self.mouse-y;
+                    }
                 }
+                scroll-event(event) => {
+                    if event.delta-y == 0 { return reject; }
+                    root.zoom-at(root.zoom * (event.delta-y > 0 ? 1.25 : 0.8),
+                        self.mouse-x - viewport.width / 2, self.mouse-y - viewport.height / 2);
+                    return accept;
+                }
+                clicked => { if !self.started-on-picture { root.close-image(); } }
             }
-            Middle { IconButton { icon: @image-url("icons/x.svg"); label: "Close"; tint: #ffffff; clicked => { root.close-image(); } } }
         }
-        if root.viewer-position != "": Rectangle {
-            x: 20px; y: (parent.height - self.height) / 2; width: 48px; height: 48px; border-radius: 24px;
-            background: previous-touch.has-hover ? #ffffff33 : #ffffff1a;
-            Image { source: @image-url("icons/chevron-left.svg"); width: 28px; height: 28px; colorize: #ffffff; }
-            previous-touch := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.step-image(-1); } }
-            accessible-role: button; accessible-label: "Previous image";
-            accessible-action-default => { root.step-image(-1); }
+        Rectangle {
+            y: 0px; height: 64px; background: Theme.panel;
+            TouchArea { }
+            HorizontalLayout {
+                padding-left: 20px; padding-right: 12px; spacing: 8px;
+                VerticalLayout {
+                    alignment: center; horizontal-stretch: 1;
+                    Text { text: root.viewer-name; color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }
+                    Text {
+                        text: (root.viewer-position != "" ? root.viewer-position + " · " : "") + root.status;
+                        color: Theme.secondary; font-size: 13px; overflow: elide;
+                    }
+                }
+                if !root.preview: Middle {
+                    IconButton {
+                        icon: @image-url("icons/download.svg"); label: "Save " + root.viewer-name;
+                        clicked => { root.save-attachment(root.viewer-item, root.viewer-index); }
+                    }
+                }
+                Middle { IconButton { icon: @image-url("icons/x.svg"); label: "Close"; clicked => { root.close-image(); } } }
+            }
         }
-        if root.viewer-position != "": Rectangle {
-            x: parent.width - self.width - 20px; y: (parent.height - self.height) / 2; width: 48px; height: 48px; border-radius: 24px;
-            background: next-touch.has-hover ? #ffffff33 : #ffffff1a;
-            Image { source: @image-url("icons/chevron-right.svg"); width: 28px; height: 28px; colorize: #ffffff; }
-            next-touch := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.step-image(1); } }
-            accessible-role: button; accessible-label: "Next image";
-            accessible-action-default => { root.step-image(1); }
+        if root.viewer-position != "": IconButton {
+            x: 16px; y: viewport.y + (viewport.height - self.height) / 2;
+            size: 48px; height: 48px; glyph: 28px; radius: 24px; fill: Theme.raised;
+            icon: @image-url("icons/chevron-left.svg"); label: "Previous image";
+            clicked => { root.step-image(-1); }
+        }
+        if root.viewer-position != "": IconButton {
+            x: parent.width - self.width - 16px; y: viewport.y + (viewport.height - self.height) / 2;
+            size: 48px; height: 48px; glyph: 28px; radius: 24px; fill: Theme.raised;
+            icon: @image-url("icons/chevron-right.svg"); label: "Next image";
+            clicked => { root.step-image(1); }
+        }
+        Rectangle {
+            y: parent.height - 96px; height: 96px; background: Theme.panel;
+            TouchArea { }
+            HorizontalLayout {
+                x: (parent.width - self.width) / 2; y: 12px;
+                width: min(360px, max(1px, parent.width - 24px)); height: 36px; spacing: 6px;
+                ActionButton { text: "−"; label: "Zoom out (-)"; small: true; enabled: root.has-image && root.zoom > root.minimum-zoom; clicked => { root.zoom-out(); } }
+                ActionButton { text: "+"; label: "Zoom in (+)"; small: true; enabled: root.has-image && root.zoom < 8; clicked => { root.zoom-in(); } }
+                ActionButton { text: "Fit"; label: "Fit image to window"; small: true; enabled: root.has-image; clicked => { root.fit-image(); } }
+                ActionButton { text: "1:1"; label: "Actual size (100%)"; small: true; enabled: root.has-image; clicked => { root.actual-size(); } }
+                ActionButton { text: "Reset"; label: "Reset view (0)"; small: true; enabled: root.has-image; clicked => { root.reset-view(); } }
+            }
+            Text {
+                x: 12px; y: 58px; width: max(1px, parent.width - 24px); height: 24px;
+                text: "Wheel / + / − zoom · Drag / Shift+arrows pan · 0 reset · Esc close";
+                color: Theme.secondary; font-size: 12px; horizontal-alignment: center; overflow: elide;
+            }
         }
         if root.viewer-note != "": Rectangle {
-            x: (parent.width - self.width) / 2; y: parent.height - self.height - 20px;
-            width: viewer-note-text.preferred-width + 24px; height: 32px; border-radius: 6px; background: #000000b3;
-            viewer-note-text := Text { text: root.viewer-note; color: #ffffffd9; font-size: 13px; }
+            x: (parent.width - self.width) / 2; y: viewport.y + viewport.height - self.height - 12px;
+            width: min(max(1px, parent.width - 32px), viewer-note-text.preferred-width + 24px);
+            height: 32px; border-radius: 6px; background: Theme.raised;
+            TouchArea { }
+            viewer-note-text := Text { text: root.viewer-note; color: Theme.text; font-size: 13px; overflow: elide; }
         }
     }
     image-menu := ViewerMenu {

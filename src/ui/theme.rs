@@ -100,12 +100,16 @@ theme! {
     reply_spine(get_reply_spine, set_reply_spine),
     tooltip(get_tooltip, set_tooltip),
     avatar(get_avatar, set_avatar),
+    mentioned(get_mentioned, set_mentioned),
+    mentioned_hover(get_mentioned_hover, set_mentioned_hover),
 }
 
 /// Yapfast's own colours: layered graphite with a marigold accent. The defaults
 /// in `ui/theme.slint` are these, so the first frame shows them.
 pub const YAP: Theme = Theme {
     dark: true,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0x111215),
     sidebar: rgb(0x17181c),
     panel: rgb(0x121316),
@@ -149,6 +153,8 @@ pub const YAP: Theme = Theme {
 /// web client's CSS) on Yapfast's surfaces, with blurple for the accent.
 const BONFIRE: Theme = Theme {
     dark: true,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0x121214),
     sidebar: rgb(0x121214),
     panel: rgb(0x202024),
@@ -191,6 +197,8 @@ const BONFIRE: Theme = Theme {
 /// Catppuccin's darkest flavour, with mauve for the accent.
 const CATPPUCCIN_MOCHA: Theme = Theme {
     dark: true,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0x11111b),
     sidebar: rgb(0x181825),
     panel: rgb(0x11111b),
@@ -233,6 +241,8 @@ const CATPPUCCIN_MOCHA: Theme = Theme {
 /// Catppuccin's light flavour, with mauve for the accent.
 const CATPPUCCIN_LATTE: Theme = Theme {
     dark: false,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0xdce0e8),
     sidebar: rgb(0xe6e9ef),
     panel: rgb(0xdce0e8),
@@ -275,6 +285,8 @@ const CATPPUCCIN_LATTE: Theme = Theme {
 /// Dracula, with purple for the accent.
 const DRACULA: Theme = Theme {
     dark: true,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0x191a21),
     sidebar: rgb(0x21222c),
     panel: rgb(0x191a21),
@@ -318,6 +330,8 @@ const DRACULA: Theme = Theme {
 /// Night has no shade below nord0, so the rail and sidebar darken it.
 const NORD: Theme = Theme {
     dark: true,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0x242932),
     sidebar: rgb(0x292e39),
     panel: rgb(0x242932),
@@ -360,6 +374,8 @@ const NORD: Theme = Theme {
 /// Gruvbox's dark palette at medium contrast, with orange for the accent.
 const GRUVBOX_DARK: Theme = Theme {
     dark: true,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0x1d2021),
     sidebar: rgb(0x222424),
     panel: rgb(0x1d2021),
@@ -402,6 +418,8 @@ const GRUVBOX_DARK: Theme = Theme {
 /// Tokyo Night, the Night style, with blue for the accent.
 const TOKYO_NIGHT: Theme = Theme {
     dark: true,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0x13131a),
     sidebar: rgb(0x16161e),
     panel: rgb(0x13131a),
@@ -444,6 +462,8 @@ const TOKYO_NIGHT: Theme = Theme {
 /// Rosé Pine's light variant, with rose for the accent.
 const ROSE_PINE_DAWN: Theme = Theme {
     dark: false,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0xdfdad9),
     sidebar: rgb(0xf2e9e1),
     panel: rgb(0xdfdad9),
@@ -486,6 +506,8 @@ const ROSE_PINE_DAWN: Theme = Theme {
 /// Yapfast's own: cherry blossom on rice paper, pink on a pale pink ground.
 const SAKURA: Theme = Theme {
     dark: false,
+    mentioned: rgba(0xf8a5001f),
+    mentioned_hover: rgba(0xf8a50029),
     rail: rgb(0xf6dbe5),
     sidebar: rgb(0xfcecf2),
     panel: rgb(0xf6dbe5),
@@ -826,6 +848,79 @@ impl Theme {
         let muted = MUTED.replace(rgb(self.muted)) != rgb(self.muted);
         mention || text || muted
     }
+}
+
+/// The single applied pack is separate from saved custom palette IDs.
+pub const PACK_ID: &str = "pack:active";
+
+pub fn pack_theme(pack: &super::theme_pack::ThemePack) -> Theme {
+    let mut theme = find(&pack.base).unwrap_or(&BUILT_IN[0]).theme;
+    theme.dark = pack.dark.unwrap_or(theme.dark);
+    for (name, color) in &pack.colors {
+        if let (Some(slot), Some(color)) = (
+            token_index(name).and_then(|index| theme.colour_mut(index)),
+            parse(color),
+        ) {
+            *slot = color;
+        }
+    }
+    theme
+}
+
+pub fn pack_colors(theme: &Theme) -> std::collections::BTreeMap<String, String> {
+    Theme::NAMES
+        .iter()
+        .enumerate()
+        .filter_map(|(i, name)| Some((token(name), hex(theme.colour(i)?))))
+        .collect()
+}
+
+/// Set every override, including absent values. Never replace native defaults'
+/// bindings: a builtin or reset restores the exact presentation defaults.
+pub fn apply_pack_style(window: &YapfastWindow, applied: Option<&super::theme_pack::Applied>) {
+    let style = window.global::<yapfast_ui::ClientStyle>();
+    let pack = applied.map(|saved| &saved.pack);
+    macro_rules! metric {
+        ($($name:ident => $setter:ident),* $(,)?) => {$(
+            style.$setter(pack.and_then(|p| p.layout.$name).unwrap_or(-1.0));
+        )*};
+    }
+    metric! {
+        title_height => set_pack_title_height, title_inset => set_pack_title_inset,
+        rail_tile => set_pack_rail_tile, sidebar_width => set_pack_sidebar_width,
+        header_height => set_pack_header_height, account_height => set_pack_account_height,
+        profile_width => set_pack_profile_width, members_width => set_pack_members_width,
+        composer_height => set_pack_composer_height, composer_padding => set_pack_composer_padding,
+        composer_gutter => set_pack_composer_gutter, message_gap => set_pack_message_gap,
+        message_group_gap => set_pack_message_group_gap, channel_row_height => set_pack_channel_row_height,
+    }
+    style.set_pack_font_family(
+        pack.and_then(|p| p.typography.font_family.as_deref())
+            .unwrap_or("")
+            .into(),
+    );
+    style.set_pack_text_size(pack.and_then(|p| p.typography.text_size).unwrap_or(-1.0));
+    style.set_pack_title_text_size(
+        pack.and_then(|p| p.typography.title_text_size)
+            .unwrap_or(-1.0),
+    );
+    let logo = applied
+        .filter(|p| !p.logo_png.is_empty())
+        .and_then(|p| super::theme_pack::decode_logo(&p.logo_png).ok())
+        .map(|pixels| {
+            let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                pixels.as_raw(),
+                pixels.width(),
+                pixels.height(),
+            );
+            slint::Image::from_rgba8(buffer)
+        })
+        .unwrap_or_default();
+    style.set_title_logo(logo);
+    let tokens = window.global::<yapfast_ui::Theme>();
+    tokens.set_transition_ms(pack.and_then(|p| p.motion.transition_ms).unwrap_or(120) as i32);
+    tokens.set_popup_ms(pack.and_then(|p| p.motion.popup_ms).unwrap_or(100) as i32);
+    tokens.set_reduced_motion(pack.is_some_and(|p| p.motion.reduced_motion));
 }
 
 /// Appearance's cards: each theme's name and the colours its preview draws

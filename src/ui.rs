@@ -48,6 +48,8 @@ mod games;
 mod gifs;
 mod menus;
 mod messages;
+#[cfg(test)]
+mod media_viewer_tests;
 #[cfg(windows)]
 mod move_loop;
 mod pictures;
@@ -58,6 +60,9 @@ mod refresh;
 mod server_settings;
 mod shell;
 mod theme;
+mod theme_pack;
+#[cfg(test)]
+mod theme_pack_ui_tests;
 mod tiles;
 mod title_bar;
 mod yapfast;
@@ -141,7 +146,7 @@ pub fn run(
         })
         .select()
         .context("could not select the Slint desktop backend")?;
-    slint::set_xdg_app_id(crate::icon::APP_ID).context("could not set Yapfast's app ID")?;
+    slint::set_xdg_app_id(crate::icon::APP_ID).context("could not set Harmony's app ID")?;
     let gpu = plan.renderer == graphics::Renderer::Gpu;
     let failed = |error: slint::PlatformError, context: &'static str| -> Result<Exit> {
         let reason = error.to_string();
@@ -163,14 +168,14 @@ pub fn run(
     }
     let window = match yapfast::window() {
         Ok(window) => window,
-        Err(error) => return failed(error, "could not create the Yapfast window"),
+        Err(error) => return failed(error, "could not create the Harmony window"),
     };
     title_bar::show(&window, system_title_bar);
     if let Some(placement) = &placement {
         placement::place(&window, placement);
     }
     if !hidden && let Err(error) = window.show() {
-        return failed(error, "could not show Yapfast");
+        return failed(error, "could not show Harmony");
     }
     if !preview {
         AUTOSTART.set(autostart::SUPPORTED);
@@ -249,7 +254,7 @@ pub fn run(
         Err(error) => failed(error, "Slint's desktop event loop failed"),
         Ok(()) if missing_window.get() => failed(
             "the window did not appear".into(),
-            "Yapfast's window did not appear",
+            "Harmony's window did not appear",
         ),
         Ok(()) if restart => Ok(Exit::Restart),
         Ok(()) => Ok(Exit::Closed),
@@ -1111,6 +1116,10 @@ struct Layout {
     theme: Option<String>,
     /// The person's own themes, in the order Appearance shows them.
     custom_themes: Vec<theme::Custom>,
+    /// A validated native pack and its bounded PNG snapshot. Source is read only
+    /// after an explicit Reload; restoring never polls or opens that path.
+    #[serde(default, deserialize_with = "theme_pack::deserialize_saved")]
+    theme_pack: Option<theme_pack::Applied>,
     /// Closing the window leaves Yapfast in the system tray; on unless turned off.
     close_to_tray: Option<bool>,
     /// Starting Yapfast again on this folder starts another, rather than
@@ -1277,22 +1286,48 @@ impl Layout {
             * sounds::gain(self.each_sound(sound))
     }
 
-    // Appearance checks can apply these preferences without changing global audio gains.
-    fn apply_appearance(&self, window: &YapfastWindow) {
-        // Before the first frame, which the event loop draws. A window made
-        // again, after closing to the tray, keeps the theme this way too.
+    fn selected_theme(&self, window: &YapfastWindow) -> (String, theme::Theme) {
+        if let Some(saved) = &self.theme_pack {
+            return (theme::PACK_ID.to_owned(), theme::pack_theme(&saved.pack));
+        }
         let default_theme = window
             .global::<ClientStyle>()
             .get_enabled()
             .then_some("bonfire");
         let (id, chosen) =
             theme::chosen(self.theme.as_deref().or(default_theme), &self.custom_themes);
+        (id.to_owned(), chosen)
+    }
+
+    // Appearance checks can apply these preferences without changing global audio gains.
+    fn apply_appearance(&self, window: &YapfastWindow) {
+        theme::apply_pack_style(window, self.theme_pack.as_ref());
+        let (id, chosen) = self.selected_theme(window);
         chosen.apply(window);
         window.set_theme_id(id.into());
         window.set_themes(theme::cards(&self.custom_themes));
-        if let Some(width) = self.sidebar_width {
-            window.set_sidebar_width(width);
-        }
+        window.set_theme_pack_name(
+            self.theme_pack
+                .as_ref()
+                .map(|saved| saved.pack.name.as_str())
+                .unwrap_or("")
+                .into(),
+        );
+        window.set_theme_pack_reloadable(
+            self.theme_pack
+                .as_ref()
+                .is_some_and(|saved| saved.source.is_some()),
+        );
+        window.set_theme_pack_has_logo(
+            self.theme_pack
+                .as_ref()
+                .is_some_and(|saved| !saved.logo_png.is_empty()),
+        );
+        // Personal drag/text-size choices are never overwritten by an imported pack.
+        window.set_sidebar_width(
+            self.sidebar_width
+                .unwrap_or(window.global::<ClientStyle>().get_sidebar_width()),
+        );
     }
 
     fn apply(&self, window: &YapfastWindow) {
@@ -1424,15 +1459,16 @@ impl Layout {
         row
     }
 
-    /// A lost layout only costs the person their arrangement; it never stops Yapfast.
+    /// Pack actions must know whether storage succeeded before changing the UI.
+    fn try_write(&self, root: &std::path::Path) -> std::result::Result<(), String> {
+        std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(self).map_err(|e| e.to_string())?;
+        theme_pack::write_atomic(&root.join(LAYOUT), &bytes)
+    }
+
+    /// Other arrangement changes remain best-effort, now without truncation risk.
     fn write(&self, root: &std::path::Path) {
-        let result = std::fs::create_dir_all(root).and_then(|()| {
-            std::fs::write(
-                root.join(LAYOUT),
-                serde_json::to_vec(self).expect("layout serializes"),
-            )
-        });
-        if let Err(error) = result {
+        if let Err(error) = self.try_write(root) {
             tracing::warn!(%error, "could not store the window layout");
         }
     }
@@ -2225,7 +2261,7 @@ impl Adapter {
             Ok(handle) => self.dialog = Some(handle),
             Err(error) => {
                 tracing::error!(%error, "could not open the file dialog");
-                self.app.state.notice = Some("Yapfast could not open a file dialog.".into());
+                self.app.state.notice = Some("Harmony could not open a file dialog.".into());
             }
         }
     }

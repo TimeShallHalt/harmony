@@ -1,20 +1,26 @@
-import { Theme, Middle } from "../theme.slint";
+import { Theme } from "../theme.slint";
+import { ClientStyle } from "style.slint";
 
-// Use the existing move/resize/close callbacks, including close-to-tray.
+// Keep the native window callbacks, including the existing close-to-tray policy.
 component CaptionButton inherits Rectangle {
     in property <image> icon;
     in property <string> label;
     in property <bool> close;
+    in property <bool> focused;
     callback clicked;
-    width: 36px;
-    background: pointer.has-hover || focus.has-focus ? (root.close ? Theme.danger : Theme.hover) : transparent;
+    width: ClientStyle.caption-width;
+    property <bool> highlighted: pointer.has-hover || focus.has-focus;
+    background: self.highlighted ? (root.close ? Theme.danger : Theme.hover) : transparent;
+    animate background { duration: Theme.quick; }
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.clicked(); }
     forward-focus: focus;
     Image {
-        source: root.icon; width: 12px; height: 12px;
-        colorize: root.close && pointer.has-hover ? Theme.on-danger : Theme.secondary;
+        source: root.icon;
+        width: ClientStyle.caption-icon-size; height: ClientStyle.caption-icon-size;
+        colorize: root.close && root.highlighted ? Theme.on-danger
+            : root.highlighted ? Theme.text : root.focused ? Theme.secondary : Theme.faint;
     }
     focus := FocusScope {
         key-pressed(event) => {
@@ -33,7 +39,36 @@ export component WindowBar inherits Rectangle {
     callback minimize-window;
     callback maximize-window;
     callback close-window;
-    height: 32px; background: Theme.rail;
+    height: ClientStyle.title-height;
+    background: Theme.rail;
+    // Validated pack snapshots supply pixels, never a URL or executable vector.
+    if ClientStyle.title-logo.width > 0: Image {
+        x: ClientStyle.title-inset; y: 4px;
+        width: min(100px, ClientStyle.title-brand-width - ClientStyle.title-inset);
+        height: parent.height - 8px; image-fit: contain;
+        source: ClientStyle.title-logo;
+        accessible-role: image; accessible-label: "Theme logo";
+    }
+    if ClientStyle.title-logo.width == 0: Text {
+        x: ClientStyle.title-inset; width: ClientStyle.title-brand-width - ClientStyle.title-inset;
+        height: parent.height;
+        text: "Harmony"; font-size: ClientStyle.title-text-size; font-weight: 700;
+        color: root.focused ? Theme.text : Theme.muted;
+        vertical-alignment: center; overflow: elide;
+    }
+    Text {
+        x: max(ClientStyle.title-brand-width, 3 * ClientStyle.caption-width);
+        width: max(0px, parent.width - 2 * self.x); height: parent.height;
+        text: root.place == "Harmony" ? "" : root.place;
+        font-size: ClientStyle.title-text-size; font-weight: 500;
+        color: root.focused ? Theme.secondary : Theme.faint;
+        horizontal-alignment: center; vertical-alignment: center; overflow: elide;
+    }
+    Rectangle {
+        y: parent.height - ClientStyle.title-rule; height: ClientStyle.title-rule;
+        background: Theme.outline;
+    }
+    // Noninteractive wordmark and location remain draggable, as does empty space.
     property <bool> armed;
     TouchArea {
         pointer-event(event) => {
@@ -43,30 +78,26 @@ export component WindowBar inherits Rectangle {
             }
         }
         moved => {
-            if root.armed && (abs(self.mouse-x - self.pressed-x) > 3px || abs(self.mouse-y - self.pressed-y) > 3px) {
+            if root.armed && (abs(self.mouse-x - self.pressed-x) > ClientStyle.title-drag-threshold || abs(self.mouse-y - self.pressed-y) > ClientStyle.title-drag-threshold) {
                 root.armed = false; root.move-window();
             }
         }
         double-clicked => { root.maximize-window(); }
     }
     HorizontalLayout {
-        x: (parent.width - self.width) / 2; width: min(label.preferred-width + 26px, parent.width - 240px);
-        height: parent.height; spacing: 8px;
-        Middle { width: 16px; Image { source: @image-url("../icons/message-circle.svg"); width: 16px; height: 16px; colorize: Theme.secondary; } }
-        label := Text {
-            text: root.place; font-size: 12px; font-weight: 600;
-            color: root.focused ? Theme.secondary : Theme.faint;
-            vertical-alignment: center; overflow: elide;
-        }
-    }
-    HorizontalLayout {
         alignment: end; spacing: 0px;
-        CaptionButton { icon: @image-url("../icons/minus.svg"); label: "Minimize"; clicked => { root.minimize-window(); } }
+        CaptionButton {
+            icon: @image-url("../icons/minus.svg"); label: "Minimize"; focused: root.focused;
+            clicked => { root.minimize-window(); }
+        }
         CaptionButton {
             icon: root.maximized ? @image-url("../icons/restore.svg") : @image-url("../icons/square.svg");
-            label: root.maximized ? "Restore" : "Maximize";
+            label: root.maximized ? "Restore" : "Maximize"; focused: root.focused;
             clicked => { root.maximize-window(); }
         }
-        CaptionButton { icon: @image-url("../icons/x.svg"); label: "Close"; close: true; clicked => { root.close-window(); } }
+        CaptionButton {
+            icon: @image-url("../icons/x.svg"); label: "Close"; close: true; focused: root.focused;
+            clicked => { root.close-window(); }
+        }
     }
 }

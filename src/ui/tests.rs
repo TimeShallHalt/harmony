@@ -7690,6 +7690,74 @@ fn yapfast_defaults_to_bonfire_and_keeps_saved_appearance_choices() {
 }
 
 #[test]
+fn harmony_window_starts_with_the_branded_title_and_shared_chrome_metrics() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = YapfastWindow::new().unwrap();
+    assert_eq!(window.get_window_title(), "Harmony");
+    let style = window.global::<ClientStyle>();
+    assert_eq!(style.get_title_height(), 32.0);
+    assert_eq!(style.get_caption_width(), 36.0);
+    // The comparison mode shares the same inset but retains its larger targets.
+    style.set_enabled(false);
+    assert_eq!(style.get_title_height(), 32.0);
+    assert_eq!(style.get_caption_width(), 44.0);
+}
+
+#[test]
+fn harmony_wordmark_remains_draggable_and_edges_keep_native_resize_actions() {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    i_slint_backend_testing::init_no_event_loop();
+    let window = YapfastWindow::new().unwrap();
+    window.set_own_title_bar(true);
+    let moves = Rc::new(Cell::new(0));
+    let seen = moves.clone();
+    window.on_move_window(move || seen.set(seen.get() + 1));
+    let edges = Rc::new(RefCell::new(Vec::new()));
+    let seen = edges.clone();
+    window.on_resize_window(move |direction| seen.borrow_mut().push(direction));
+    window.show().unwrap();
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(800., 760.));
+    let button = PointerEventButton::Left;
+    let start = slint::LogicalPosition::new(30., 16.);
+    window.window().dispatch_event(WindowEvent::PointerPressed {
+        position: start,
+        button,
+    });
+    let moved = slint::LogicalPosition::new(40., 16.);
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerMoved { position: moved });
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerReleased {
+            position: moved,
+            button,
+        });
+    assert_eq!(
+        moves.get(),
+        1,
+        "the Harmony wordmark does not swallow dragging"
+    );
+    for x in [1., 799.] {
+        let position = slint::LogicalPosition::new(x, 200.);
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerPressed { position, button });
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerReleased { position, button });
+    }
+    assert_eq!(
+        *edges.borrow(),
+        [7, 0],
+        "west and east keep winit directions"
+    );
+    window.hide().unwrap();
+}
+
+#[test]
 fn yapfast_caption_buttons_keep_the_existing_window_actions() {
     use slint::platform::{PointerEventButton, WindowEvent};
     i_slint_backend_testing::init_no_event_loop();

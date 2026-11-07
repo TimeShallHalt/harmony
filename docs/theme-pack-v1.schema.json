@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harmony.local/theme-pack-v1.schema.json",
+  "title": "Harmony native theme pack v1",
+  "description": "Data only; maximum input 65536 bytes. Runtime also enforces UTF-8 byte lengths and safe local PNG containment/symlink/device rules. Do not add a $schema key to a pack: unknown pack keys are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "1–80 UTF-8 bytes; not whitespace-only; no Unicode control characters."
+    },
+    "base": {
+      "enum": [
+        "yap",
+        "bonfire",
+        "catppuccin-mocha",
+        "dracula",
+        "nord",
+        "gruvbox-dark",
+        "tokyo-night",
+        "catppuccin-latte",
+        "rose-pine-dawn",
+        "sakura"
+      ]
+    },
+    "dark": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rail": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "sidebar": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "panel": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "chat": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "stage": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "raised": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "field": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "sunken": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "hover": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "active": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "row-hover": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "line": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "edge": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "outline": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "outline-chat": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "outline-field": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "text": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "secondary": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "muted": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "faint": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "accent": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "accent-hover": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "on-accent": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "accent-soft": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "danger": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "danger-hover": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "on-danger": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "live": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "loud": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "link": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "button-default": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "button-default-hover": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "mentioned": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "mentioned-hover": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "overlay": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "shimmer": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "reply-spine": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "tooltip": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        "avatar": {
+          "type": "string",
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title-height": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 24,
+          "maximum": 64
+        },
+        "title-inset": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 40
+        },
+        "rail-tile": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 32,
+          "maximum": 48
+        },
+        "sidebar-width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 180,
+          "maximum": 380
+        },
+        "header-height": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 36,
+          "maximum": 80
+        },
+        "account-height": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 48,
+          "maximum": 96
+        },
+        "profile-width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 240,
+          "maximum": 420
+        },
+        "members-width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 180,
+          "maximum": 360
+        },
+        "composer-height": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 40,
+          "maximum": 96
+        },
+        "composer-padding": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 4,
+          "maximum": 32
+        },
+        "composer-gutter": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 32
+        },
+        "message-gap": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 16
+        },
+        "message-group-gap": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 40
+        },
+        "channel-row-height": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 24,
+          "maximum": 48
+        }
+      }
+    },
+    "typography": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "font-family": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "1–80 UTF-8 bytes, not blank. Unicode letters/numbers, ASCII spaces, hyphen and underscore only. Installed or bundled font family, never a path or URL."
+        },
+        "text-size": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 10,
+          "maximum": 24
+        },
+        "title-text-size": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 10,
+          "maximum": 20
+        }
+      }
+    },
+    "motion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transition-ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "popup-ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "reduced-motion": {
+          "type": "boolean"
+        }
+      }
+    },
+    "logo": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9_. /-]+\\.png$",
+      "description": "Safe relative forward-slash PNG path, at most 160 ASCII bytes. No empty/dot/dot-dot/hidden segments, trailing dot/space, Windows device names, symlinks/junctions, UNC, backslash or colon. Static PNG only; 1–262144 bytes, 1–512 pixels on either axis; decoder allocation limit 4 MiB."
+    }
+  },
+  "required": [
+    "version",
+    "name",
+    "base"
+  ]
+}

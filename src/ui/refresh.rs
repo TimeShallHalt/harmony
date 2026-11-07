@@ -1714,7 +1714,7 @@ impl Adapter {
                 match &role.members {
                     None => "Loading...",
                     Some(members) if members.is_empty() => {
-                        "Yapfast hasn't seen anyone with this role yet."
+                        "Harmony hasn't seen anyone with this role yet."
                     }
                     Some(_) => "",
                 }
@@ -1824,7 +1824,7 @@ impl Adapter {
             "Find Invite"
         };
         let status = if join.form.is_some() {
-            "You joined. This server asks new members to fill in a form before they can talk, which Yapfast can't show yet. Finish it in Discord's web app."
+            "You joined. This server asks new members to fill in a form before they can talk, which Harmony can't show yet. Finish it in Discord's web app."
         } else if join.captcha.is_some() {
             "Discord asks for a captcha first. Solve it in your browser."
         } else if join.joining {
@@ -2059,7 +2059,7 @@ impl Adapter {
                     lines.push(format!("Afterward, Discord sends you to {host}."));
                 }
                 Some(url) => lines.push(format!(
-                    "Afterward, Discord hands its answer to {url}, which Yapfast won't open."
+                    "Afterward, Discord hands its answer to {url}, which Harmony won't open."
                 )),
                 None => {}
             }
@@ -2703,7 +2703,7 @@ impl Adapter {
             } else if !query.is_empty() {
                 "No conversations match."
             } else {
-                "There's nowhere to forward to yet. Yapfast forwards Matrix messages only into encrypted conversations."
+                "There's nowhere to forward to yet. Harmony forwards Matrix messages only into encrypted conversations."
             }
             .into(),
         );
@@ -3088,7 +3088,7 @@ impl Adapter {
             } else if discord_room && room.is_some_and(|room| room.read_only || room.locked) {
                 "You can't send messages in this Discord channel."
             } else if discord_room && !state.discord_online {
-                "Discord is disconnected. Yapfast is reconnecting."
+                "Discord is disconnected. Harmony is reconnecting."
             } else if discord_only {
                 ""
             } else if discord_room {
@@ -4433,8 +4433,8 @@ fn permission_names(bits: u64) -> String {
     let more = (bits & !named).count_ones();
     let more = match (more, names.is_empty()) {
         (0, _) => None,
-        (1, true) => Some("1 permission Yapfast can't name".to_owned()),
-        (count, true) => Some(format!("{count} permissions Yapfast can't name")),
+        (1, true) => Some("1 permission Harmony can't name".to_owned()),
+        (count, true) => Some(format!("{count} permissions Harmony can't name")),
         (1, false) => Some("1 more permission".to_owned()),
         (count, false) => Some(format!("{count} more permissions")),
     };

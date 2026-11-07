@@ -203,7 +203,7 @@ In rough order. The browser covers these until then.
 - [Mirroring into Matrix](#mirroring-into-matrix).
 - The blocked on the friends page, beside Online and All.
 - Blocking and unblocking from a profile.
-- Animated custom emoji, which show their first frame.
+
 - Copying custom emoji: copied text has their private code points, not
   `:name:`.
 - A custom status's end while Yapfast is closed, or set from a device whose

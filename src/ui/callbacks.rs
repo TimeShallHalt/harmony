@@ -1397,6 +1397,45 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         }
     });
     let state = adapter.clone();
+    window.on_import_theme_pack(move || {
+        appearance::pack_dialog(&state, false);
+    });
+    let state = adapter.clone();
+    window.on_export_theme_pack(move || {
+        appearance::pack_dialog(&state, true);
+    });
+    let state = adapter.clone();
+    let weak = window.as_weak();
+    window.on_reload_theme_pack(move || {
+        if let Some(window) = weak.upgrade() {
+            let result = state.borrow_mut().reload_theme_pack(&window);
+            appearance::pack_status(&window, result, "Theme pack reloaded and saved");
+        }
+    });
+    let state = adapter.clone();
+    let weak = window.as_weak();
+    window.on_reset_theme_pack(move || {
+        if let Some(window) = weak.upgrade() {
+            let result = state.borrow_mut().reset_theme_pack(&window);
+            appearance::pack_status(&window, result, "Theme pack reset to its base theme");
+        }
+    });
+    let state = adapter.clone();
+    let weak = window.as_weak();
+    window.on_reset_theme_logo(move || {
+        if let Some(window) = weak.upgrade() {
+            let result = state.borrow_mut().reset_theme_logo(&window);
+            appearance::pack_status(&window, result, "Titlebar logo reset to Harmony");
+        }
+    });
+    let state = adapter.clone();
+    let weak = window.as_weak();
+    window.on_edit_theme_pack(move || {
+        if let Some(window) = weak.upgrade() {
+            state.borrow_mut().edit_theme_pack(&window);
+        }
+    });
+    let state = adapter.clone();
     let weak = window.as_weak();
     window.on_choose_theme(move |id| {
         if let Some(window) = weak.upgrade() {
@@ -2816,7 +2855,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
             window.set_meter_note(SharedString::from(if !meter::AVAILABLE {
                 "The level meter isn't available on this system yet."
             } else if meter.failed() {
-                "Yapfast can't read this microphone. Check that it's connected, or choose another."
+                "Harmony can't read this microphone. Check that it's connected, or choose another."
             } else {
                 ""
             }));
@@ -2841,7 +2880,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
                     if !yapfast_core::discord_audio::AVAILABLE {
                         "Discord voice and its level aren't available on this system yet."
                     } else if meter.failed() {
-                        "Yapfast can't read this microphone. Check that it's connected, or choose another."
+                        "Harmony can't read this microphone. Check that it's connected, or choose another."
                     } else {
                         ""
                     },
