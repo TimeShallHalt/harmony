@@ -25,6 +25,12 @@ fn main() {
                 .write_all(&vec![b'x'; args[1].to_str().unwrap().parse().unwrap()])
                 .unwrap();
         }
+        "chunk-and-sleep" => {
+            use std::io::Write;
+            std::io::stdout().write_all(b"MZ").unwrap();
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(10));
+        }
         "fail" => std::process::exit(7),
         "handoff" => {
             harmony_update::transaction::spawn_helper(std::path::Path::new(&args[1])).unwrap();

@@ -72,7 +72,8 @@ struct BoundedWriter<'a> {
 impl Write for BoundedWriter<'_> {
     fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
         if self.cancel.check().is_err() {
-            return Err(std::io::ErrorKind::Interrupted.into());
+            // write_all retries Interrupted forever. Cancellation is terminal.
+            return Err(std::io::ErrorKind::ConnectionAborted.into());
         }
         if b.len() as u64 > self.limit.saturating_sub(self.written) {
             self.exceeded = true;

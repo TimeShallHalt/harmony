@@ -21,6 +21,7 @@ def main():
     scratch.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["CARGO_BUILD_JOBS"] = "2"
+    env["RUSTFLAGS"] = "-C codegen-units=2"
     priority = subprocess.BELOW_NORMAL_PRIORITY_CLASS if sys.platform == "win32" else 0
     if sys.platform != "win32":
         os.nice(10)  # All isolated Linux compiler/test children inherit nice.
@@ -61,20 +62,11 @@ def main():
     harness.write_text(source)
     exe = scratch / "harmony-updater-tests.exe"
     command = ["rustc", "--edition=2024", "--test", str(harness), "-L", f"dependency={deps}", "-C", "target-feature=+crt-static", "-C", "codegen-units=1", "-o", str(exe)]
-    chosen = {}
+    from updater_cached_deps import Cache
+    cache=Cache(args.deps_root)
     for name in ["serde_json", "serde", "sha2", "semver"]:
-        libraries = sorted(deps.glob(f"lib{name}-*.rlib"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if name == "serde" and "serde_json" in chosen:
-            def core(p):
-                fp = args.deps_root / ".fingerprint" / p.stem.removeprefix("lib").replace("serde_json-", "serde_json-") / ("lib-" + name + ".json")
-                return next(d[3] for d in json.loads(fp.read_text())["deps"] if d[1] == "serde_core")
-            json_fp = args.deps_root / ".fingerprint" / chosen["serde_json"].stem.removeprefix("lib") / "lib-serde_json.json"
-            wanted = next(d[3] for d in json.loads(json_fp.read_text())["deps"] if d[1] == "serde_core")
-            libraries = [p for p in libraries if core(p) == wanted]
-        if not libraries:
-            raise SystemExit(f"No coherent cached {name}; ask the build owner to prepare it")
-        chosen[name] = libraries[0]
-        command += ["--extern", f"{name}={libraries[0]}"]
+        library=cache.lib(name, "0.10." if name=="sha2" else "1." if name=="semver" else None)
+        command += ["--extern", f"{name}={library}"]
     fixture = scratch / "updater-process-fixture.exe"
     fixture_command = [arg for arg in command if arg != "--test"]
     fixture_command[fixture_command.index(str(harness))] = str(root / "testing/updater_process_fixture.rs")

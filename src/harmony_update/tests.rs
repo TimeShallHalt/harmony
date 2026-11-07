@@ -398,6 +398,51 @@ fn staging_size_mismatch_and_cancellation_never_arm_an_update() {
     assert!(transaction::pending(&install).unwrap().is_none());
 }
 #[test]
+#[ignore = "owned provider/race subprocess; use testing/run_updater_tests.py"]
+fn cancel_between_check_and_chunk_is_nonretryable_and_cleans_provider_and_busy() {
+    use std::{process::Command, time::{Duration, Instant}};
+    if std::env::var_os("HARMONY_CANCEL_RACE_CHILD").is_none() {
+        let mut cmd=Command::new(std::env::current_exe().unwrap());
+        cmd.args(["--exact", "harmony_update::tests::cancel_between_check_and_chunk_is_nonretryable_and_cleans_provider_and_busy", "--include-ignored", "--nocapture"])
+            .env("HARMONY_CANCEL_RACE_CHILD", "1");
+        #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_4000); }
+        let mut child=cmd.spawn().unwrap();
+        let deadline=Instant::now()+Duration::from_secs(3);
+        loop {
+            if let Some(status)=child.try_wait().unwrap() { assert!(status.success()); break; }
+            if Instant::now()>deadline {
+                child.kill().unwrap(); child.wait().unwrap();
+                panic!("write_all spun after cancellation instead of timely provider/busy cleanup");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        return;
+    }
+    struct Race(Fixture);
+    impl Transport for Race {
+        fn releases(&self,c:&Cancel)->Result<Vec<Release>> { self.0.releases(c) }
+        fn asset(&self,id:u64,w:&mut dyn Write,limit:u64,c:&Cancel)->Result<()> {
+            if id!=2 { return self.0.asset(id,w,limit,c); }
+            let cancel=c.clone();
+            gh::BEFORE_WRITE.with(|hook| *hook.borrow_mut()=Some(Box::new(move || cancel.0.store(true,Ordering::Release))));
+            let mut cmd=Command::new(std::env::var_os("HARMONY_TEST_PROCESS_FIXTURE").unwrap());
+            cmd.arg("chunk-and-sleep");
+            #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_4000); }
+            let result=gh::run_command(cmd,w,limit,c,Duration::from_secs(1),Error::Network);
+            assert_eq!(result,Err(Error::Cancelled),"runner must translate the writer cancellation truthfully");
+            result
+        }
+    }
+    let tmp=Temp::new(); let install=tmp.install();
+    let controller=fixture_controller(Ok(install.clone())); let start=Instant::now();
+    assert_eq!(controller.check(&Race(fixture()),true),Err(Error::Cancelled));
+    assert!(start.elapsed()<Duration::from_secs(2));
+    assert!(!controller.busy());
+    assert!(transaction::pending(&install).unwrap().is_none());
+    assert_eq!(std::fs::read(install).unwrap(),b"old fixture executable");
+    controller.check(&fixture(),false).unwrap();
+}
+#[test]
 fn filesystem_locks_exclude_other_update_transactions() {
     let tmp = Temp::new();
     let dir = safe_fs::Dir::open(&tmp.0).unwrap();
@@ -659,6 +704,29 @@ fn staging_is_owned_and_not_writable_by_other_users() {
         "another user must not be able to write update staging"
     );
     assert_eq!(std::fs::read(install).unwrap(), b"old fixture executable");
+}
+#[cfg(windows)]
+#[test]
+fn windows_object_inherit_only_write_grants_are_rejected_on_actual_child_files() {
+    let tmp=Temp::new();
+    let staging=tmp.0.join("owned-staging");
+    std::fs::create_dir(&staging).unwrap();
+    let output=std::process::Command::new("icacls.exe").arg(&staging)
+        .args(["/grant", "*S-1-1-0:(OI)(IO)W"]).output().unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stdout));
+    // This ACE doesn't grant effective directory writes. NTFS does turn it
+    // into an effective write ACE on the child; inspect those actual objects.
+    let dir=safe_fs::Dir::open(&staging).unwrap();
+    for name in ["payload","plan.json","helper.exe"] {
+        let path=staging.join(name); std::fs::write(&path,b"fixture").unwrap();
+        assert!(dir.file(name,false).is_err(),"accepted inherited child write ACL: {name}");
+    }
+    assert!(safe_fs::Dir::open(&tmp.0).unwrap().child("owned-staging",false).is_err(),"unsafe prospective inheritance must also fail before creating data");
+    let safe=safe_fs::Dir::open(&tmp.0).unwrap().child("safe-staging",true).unwrap();
+    for name in ["payload","plan.json","helper.exe"] {
+        drop(safe.file(name,true).unwrap());
+        assert!(safe.file(name,false).is_ok(),"private valid child rejected");
+    }
 }
 #[cfg(windows)]
 #[test]

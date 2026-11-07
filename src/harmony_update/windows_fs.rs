@@ -133,6 +133,7 @@ pub fn open(
         {
             return Err(Error::Invalid("multiply linked update file"));
         }
+        private(&file)?; // Validate the actual child DACL, including inherited grants.
     }
     Ok(file)
 }
@@ -255,9 +256,12 @@ pub fn private(file: &File) -> Result<()> {
         let p = ace as *const u8;
         let kind = unsafe { *p };
         let flags = unsafe { *p.add(1) };
-        if flags & 8 != 0 || matches!(kind, 1 | 6 | 10 | 12) {
+        if matches!(kind, 1 | 6 | 10 | 12) {
             continue;
-        } // inherit-only / deny ACEs
+        } // Denies cannot grant writes. Inherit-only ALLOWs can grant child writes.
+        // Reject unsafe inheritance before creating a child as well as the
+        // effective grants on each real file. Do not model only directory rights.
+        let _ = flags;
         let size = unsafe { std::ptr::read_unaligned(p.add(2).cast::<u16>()) };
         if size < 8 {
             return Err(Error::Invalid("staging ACL entry"));

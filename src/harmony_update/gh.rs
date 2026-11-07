@@ -76,6 +76,12 @@ pub fn api_command(endpoint: &str, binary: bool) -> Result<Command> {
     }
     Ok(cmd)
 }
+#[cfg(test)]
+thread_local! {
+    // Injection seam: schedule cancellation after the runner's check, before
+    // delivering the chunk to the real staging writer. No synthetic I/O.
+    pub(super) static BEFORE_WRITE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+}
 pub fn run_command(
     mut cmd: Command,
     output: &mut dyn Write,
@@ -130,9 +136,11 @@ pub fn run_command(
                     if count > limit {
                         return Err(Error::Size);
                     }
+                    #[cfg(test)]
+                    BEFORE_WRITE.with(|hook| { if let Some(hook) = hook.borrow_mut().take() { hook(); } });
                     output
                         .write_all(&b)
-                        .map_err(|_| Error::Io("write update download"))?;
+                        .map_err(|_| if cancel.check().is_err() { Error::Cancelled } else { Error::Io("write update download") })?;
                 }
                 Ok(Err(())) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(Error::Network);
