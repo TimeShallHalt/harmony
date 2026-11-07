@@ -29,6 +29,8 @@ mod graphics;
 #[cfg(feature = "desktop")]
 mod icon;
 #[cfg(feature = "desktop")]
+mod harmony_update;
+#[cfg(feature = "desktop")]
 mod instance;
 #[cfg(feature = "desktop")]
 mod notify;
@@ -74,6 +76,10 @@ fn fix_mmap_threshold() {
 }
 
 fn main() -> Result<()> {
+    #[cfg(feature = "desktop")]
+    if let Some(result) = harmony_update::cli_main(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
+        return result.map_err(anyhow::Error::new);
+    }
     fix_mmap_threshold();
     // A stream worker starts nothing else: no UI, runtime or TLS.
     #[cfg(feature = "discord")]

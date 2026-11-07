@@ -1,0 +1,81 @@
+import { Theme, Label } from "theme.slint";
+import { SettingsTitle, SettingsHeading, SettingsSwitch } from "settings.slint";
+import { ActionButton } from "controls.slint";
+
+// One native, window-independent model. Rust restores it when the tray window
+// is recreated. No strings or credentials are obtained from the account.
+export global HarmonyUpdates {
+    in-out property <string> running-info;
+    in-out property <string> status: "Not checked.";
+    in-out property <string> offered-build;
+    in-out property <string> staged-build;
+    in-out property <bool> busy;
+    in-out property <bool> available;
+    in-out property <bool> staged;
+    in-out property <bool> may-arm;
+    in-out property <bool> may-discard;
+    in-out property <bool> armed;
+    in-out property <bool> check-on-startup: true;
+    in-out property <bool> download-automatically;
+    callback check;
+    callback download;
+    callback cancel;
+    callback arm(bool);
+    callback discard;
+    callback copy-diagnostics;
+    callback preferences-changed(bool, bool);
+}
+export component AboutUpdatesSettings inherits VerticalLayout {
+    in property <bool> preview;
+    spacing: 16px;
+    if root.preview: Label { text: "Preview: build information and manual metadata checks only. Download/install controls are disabled."; }
+    SettingsTitle { text: "About & Updates"; }
+    SettingsHeading { text: "RUNNING HARMONY BUILD"; }
+    Text { text: HarmonyUpdates.running-info; color: Theme.text; font-size: 14px; wrap: word-wrap; accessible-label: "Running build information"; }
+    HorizontalLayout {
+        alignment: start;
+        ActionButton { text: "Copy diagnostics"; icon: @image-url("icons/copy.svg"); clicked => { HarmonyUpdates.copy-diagnostics(); } }
+    }
+    Label { text: "Diagnostics contain only version/build, commit, platform, architecture, upstream and license. They exclude credentials, account IDs, messages, paths and raw provider errors."; }
+    Rectangle { height: 1px; background: Theme.edge; }
+    SettingsHeading { text: "PRIVATE HARMONY RELEASES"; }
+    Label { text: "Requires the official GitHub CLI (gh) installed and signed in separately to github.com with access to TimeShallHalt/harmony. Harmony does not request, embed or copy a personal access token. No published release is treated as a real no-update result, not a successful download."; }
+    SettingsSwitch {
+        text: "Check for updates on startup";
+        description: "At most once per 24 hours, only on a natural app start. No background polling or automatic restart.";
+        controlled: true; checked: HarmonyUpdates.check-on-startup;
+        toggled(value) => { HarmonyUpdates.preferences-changed(value, HarmonyUpdates.download-automatically); }
+    }
+    SettingsSwitch {
+        text: "Download verified updates automatically";
+        description: "Optional. Stage a compatible update after a startup check; installation always requires Install on full exit. Nothing ends your call.";
+        controlled: true; checked: HarmonyUpdates.download-automatically;
+        toggled(value) => { HarmonyUpdates.preferences-changed(HarmonyUpdates.check-on-startup, value); }
+    }
+    Text { text: HarmonyUpdates.status; color: Theme.text; font-size: 14px; wrap: word-wrap; accessible-label: "Update status"; }
+    if HarmonyUpdates.available && !HarmonyUpdates.staged: Label { text: HarmonyUpdates.offered-build; }
+    if HarmonyUpdates.staged: Label { text: HarmonyUpdates.staged-build; }
+    // Rows remain usable at a narrow settings width; never one long toolbar.
+    HorizontalLayout {
+        alignment: start; spacing: 8px;
+        ActionButton { text: "Check for updates"; enabled: !HarmonyUpdates.busy && !HarmonyUpdates.staged; clicked => { HarmonyUpdates.check(); } }
+        ActionButton { text: "Cancel"; enabled: HarmonyUpdates.busy; clicked => { HarmonyUpdates.cancel(); } }
+    }
+    if HarmonyUpdates.available && !HarmonyUpdates.staged: HorizontalLayout {
+        alignment: start;
+        ActionButton { text: "Download & verify"; primary: true; enabled: !root.preview && !HarmonyUpdates.busy; clicked => { HarmonyUpdates.download(); } }
+    }
+    if HarmonyUpdates.staged: VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            alignment: start;
+            ActionButton { text: HarmonyUpdates.armed ? "Do not install on exit" : "Install on full exit"; primary: !HarmonyUpdates.armed; enabled: !root.preview && !HarmonyUpdates.busy && HarmonyUpdates.may-arm; clicked => { HarmonyUpdates.arm(!HarmonyUpdates.armed); } }
+        }
+        HorizontalLayout {
+            alignment: start;
+            ActionButton { text: "Discard staged update"; enabled: !root.preview && !HarmonyUpdates.busy && HarmonyUpdates.may-discard; clicked => { HarmonyUpdates.discard(); } }
+        }
+    }
+    Label { text: "A full quit is not close-to-tray. After you authorize installation, a native helper waits for the process to exit, rechecks size/SHA-256/platform, keeps a rollback, then replaces only the app executable. It never relaunches Harmony. Account data is untouched."; }
+    Label { text: "SHA-256 verifies integrity, not publisher identity independently of GitHub. Private repository access and the official gh bridge are the current trust boundary; release signing is not implemented."; }
+}
