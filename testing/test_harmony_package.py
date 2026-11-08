@@ -12,6 +12,8 @@ class HarmonyPackageTests(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.assertIn('examples', mod.SOURCE_DIRECTORIES)
+        for name in ('flake.nix', 'flake.lock', 'CONTRIBUTING.md'):
+            self.assertIn(name, mod.SOURCE_FILES)
 
     def test_identity_must_match_clean_committed_running_build(self):
         spec = importlib.util.spec_from_file_location('harmony_package', ROOT/'scripts/package-harmony.py')
