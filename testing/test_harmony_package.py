@@ -6,6 +6,26 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 class HarmonyPackageTests(unittest.TestCase):
+    def test_source_snapshot_keeps_bytes_on_native_windows(self):
+        import tempfile
+        import zipfile
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('release_package', ROOT/'scripts/release_package.py')
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)/'input'
+            root.mkdir()
+            (root/'Cargo.toml').write_bytes(b'fixture source bytes\n')
+            temporary=Path(folder)/'stage'
+            temporary.mkdir()
+            output=Path(folder)/'source.zip'
+            with patch.object(mod,'ROOT',root), patch.object(mod.subprocess,'check_output',side_effect=[b'Cargo.toml\0',b'1700000000\n']):
+                mod.source_snapshot({'packages':[]},'Fixture',temporary,output)
+            with zipfile.ZipFile(output) as archive:
+                self.assertEqual(archive.read('Fixture-source/Cargo.toml'),b'fixture source bytes\n')
+
     def test_notice_hash_inputs_disable_checkout_newline_conversion(self):
         import subprocess
         value = subprocess.check_output(['git','check-attr','text','--','packaging/licenses/SPDX-MIT.txt'],cwd=ROOT,text=True)

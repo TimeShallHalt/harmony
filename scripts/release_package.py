@@ -63,7 +63,14 @@ def source_snapshot(metadata, base, temporary, destination):
     # a nightly's Linux and Windows jobs, zip the same snapshot.
     committed = int(subprocess.check_output(["git", "log", "-1", "--format=%ct"], cwd=ROOT, timeout=30))
     for path in source.rglob("*"):
-        os.utime(path, (committed, committed), follow_symlinks=False)
+        if path.is_symlink():
+            raise ValueError("Source snapshot staging must contain regular files/directories, not symlinks")
+        if os.utime in os.supports_follow_symlinks:
+            os.utime(path, (committed, committed), follow_symlinks=False)
+        else:
+            # Native Windows Python cannot set follow_symlinks=False. These
+            # are controlled, freshly copied non-link staging entries.
+            os.utime(path, (committed, committed))
     zip_directory(source, destination)
     return rtc is not None
 
