@@ -2,6 +2,7 @@
 source snapshot each release carries, and the dependencies' licenses and
 notices each package holds."""
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -72,6 +73,8 @@ def dependency_notices(metadata, package, licenses, skia_archive, skia_source, w
     licenses, and returns the crates' entries for THIRD-PARTY.json, with
     paths relative to package."""
     dependencies = []
+    supplement_path = ROOT / "packaging/dependency-licenses.json"
+    supplements = json.loads(supplement_path.read_text(encoding="utf-8")) if supplement_path.is_file() else {}
     licenses.mkdir()
     font_notices = licenses / "fonts"
     font_notices.mkdir()
@@ -93,9 +96,23 @@ def dependency_notices(metadata, package, licenses, skia_archive, skia_source, w
             name = f"{index}-{path.name}"
             shutil.copy2(path, target / name)
             copied.append((target / name).relative_to(package).as_posix())
+        provenance = []
+        if not copied:
+            for index, notice in enumerate(supplements.get(item["name"] + "-" + item["version"], [])):
+                source = (ROOT / "packaging" / notice["path"]).resolve()
+                if not source.is_relative_to((ROOT / "packaging/licenses").resolve()) or digest(source) != notice["sha256"]:
+                    raise ValueError("Supplemental dependency notice path/hash mismatch")
+                target.mkdir(exist_ok=True)
+                destination = target / (f"supplemental-{index}-" + source.name)
+                shutil.copy2(source, destination)
+                copied.append(destination.relative_to(package).as_posix())
+                provenance.append(notice)
+            if not copied:
+                raise ValueError(f"Missing original or supplemental license notice: {item['name']} {item['version']}")
         dependencies.append({
             "name": item["name"], "version": item["version"], "license": item["license"],
             "source": item["source"], "repository": item["repository"], "license_files": copied,
+            "supplemental_license_sources": provenance,
         })
     with tarfile.open(skia_archive) as native:
         for member in native.getmembers():
