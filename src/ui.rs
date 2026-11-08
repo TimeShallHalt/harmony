@@ -36,6 +36,7 @@ use yapfast_core::{
 use crate::drop::Drag;
 use crate::{autostart, custom_emoji, emoji, emoji_text, graphics, zoom};
 
+mod about;
 mod appearance;
 mod away;
 mod browser;
@@ -68,9 +69,6 @@ mod theme_pack;
 mod theme_pack_ui_tests;
 mod tiles;
 mod title_bar;
-mod updater_info;
-#[cfg(test)]
-mod updater_info_tests;
 mod viewer_picture;
 mod yapfast;
 
@@ -195,7 +193,6 @@ pub fn run(
     prepare(&window);
     let adapter = Adapter::new(Arc::new(runtime), root, &window)?;
     bind_callbacks(&window, &adapter);
-    updater_info::startup(&window, &adapter, preview);
     watch_window(&window, &adapter);
     adapter.borrow_mut().watch_away();
     adapter.borrow_mut().watch_talk_key(&window);
@@ -265,15 +262,7 @@ pub fn run(
             "Harmony's window did not appear",
         ),
         Ok(()) if restart => Ok(Exit::Restart),
-        Ok(()) => {
-            if !preview && let Err(error) = adapter.harmony_updates.handoff_on_full_exit() {
-                if let Ok(install) = crate::harmony_update::controller::current_install() {
-                    let _ = crate::harmony_update::transaction::record_helper_failure(&install);
-                }
-                tracing::warn!(%error, "update helper handoff failed; no restart attempted");
-            }
-            Ok(Exit::Closed)
-        },
+        Ok(()) => Ok(Exit::Closed),
     }
 }
 
@@ -1146,8 +1135,6 @@ struct Layout {
     system_title_bar: Option<bool>,
     /// Where the window was when Yapfast last ran, and how big.
     window: Option<placement::Placement>,
-    /// Native Harmony update policy/backoff only; no credentials in layout.
-    harmony_updates: crate::harmony_update::controller::Preferences,
 }
 
 /// Yapfast's sounds start as they're made: 12 dB under full scale at the loudest.
@@ -1859,8 +1846,6 @@ struct Adapter {
     link_code: Option<(String, slint::Image)>,
     /// What the GIF picker's grid shows.
     gifs: gifs::Shown,
-    /// Survives dropping/recreating a tray window; events, never idle polling.
-    harmony_updates: Arc<crate::harmony_update::controller::Controller>,
     /// A Discord link handed to this start before Discord is online.
     pending_link: Option<String>,
 }
@@ -2067,7 +2052,6 @@ impl Adapter {
                 #[cfg(feature = "discord")]
                 link_code: None,
                 gifs: gifs::Shown::default(),
-                harmony_updates: Arc::new(crate::harmony_update::controller::Controller::new(crate::harmony_update::controller::current_install())),
                 pending_link: None,
             })
         }))

@@ -33,9 +33,7 @@ live-preview = ["desktop", "yapfast-ui/live-preview"]
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# Both are already pinned in Cargo.lock; streamed updater integrity and SemVer.
-sha2 = "0.10"
-semver = "1"
+
 slint = { workspace = true, optional = true }
 # Reject an unpinned native source build if the prepared Skia archive is unavailable.
 skia-safe = { version = "=0.157.0", default-features = false, features = ["binary-cache", "no-compile"], optional = true }

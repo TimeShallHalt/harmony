@@ -1,0 +1,59 @@
+//! Read-only About page. No worker, timer, network or installation callbacks.
+use super::*;
+
+pub(super) fn bind(window: &YapfastWindow) {
+    window
+        .global::<HarmonyAbout>()
+        .set_running_info(crate::build_info::BuildInfo::current().diagnostics().into());
+    let weak = window.as_weak();
+    window
+        .global::<HarmonyAbout>()
+        .on_copy_diagnostics(move || {
+            if let Some(window) = weak.upgrade() {
+                window
+                    .invoke_copy_text(crate::build_info::BuildInfo::current().diagnostics().into());
+            }
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actual_adapter_about_reports_running_build_and_copies_only_public_diagnostics() {
+        i_slint_backend_testing::init_no_event_loop();
+        let dir = tempfile::tempdir().unwrap();
+        let window = YapfastWindow::new().unwrap();
+        let adapter = Adapter::new(
+            Arc::new(BackgroundRuntime::new().unwrap()),
+            dir.path().into(),
+            &window,
+        )
+        .unwrap();
+        bind_callbacks(&window, &adapter);
+        let expected = crate::build_info::BuildInfo::current().diagnostics();
+        assert_eq!(window.global::<HarmonyAbout>().get_running_info(), expected);
+        assert!(expected.contains("Updater not included in this build."));
+        assert!(!expected.contains(&dir.path().display().to_string()));
+        let copied = Rc::new(RefCell::new(String::new()));
+        let sink = copied.clone();
+        window.on_copy_text(move |text| *sink.borrow_mut() = text.to_string());
+        window.global::<HarmonyAbout>().invoke_copy_diagnostics();
+        assert_eq!(*copied.borrow(), expected);
+        drop(window);
+        let restored = YapfastWindow::new().unwrap();
+        bind_callbacks(&restored, &adapter);
+        assert_eq!(
+            restored.global::<HarmonyAbout>().get_running_info(),
+            expected
+        );
+    }
+
+    #[test]
+    fn obsolete_update_consent_is_ignored_not_reenabled_or_preserved() {
+        let layout: Layout = serde_json::from_str(r#"{"harmony_updates":{"consent_version":1,"check_on_startup":true,"download_automatically":true,"check_interval_hours":1}}"#).unwrap();
+        let saved = serde_json::to_value(layout).unwrap();
+        assert!(saved.get("harmony_updates").is_none());
+    }
+}

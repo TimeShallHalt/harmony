@@ -32,14 +32,7 @@ pub fn appimage(exe: &Path) -> Option<PathBuf> {
 /// Puts Yapfast's entry and icon in the person's data folder when it runs
 /// from an AppImage, unless a package or an AppImage manager already did.
 pub fn install() {
-    let Some(image) = std::env::current_exe().ok().and_then(|exe| {
-        let entry = crate::harmony_update::controller::normal_entry().ok()?;
-        if entry != exe {
-            Some(entry)
-        } else {
-            appimage(&exe)
-        }
-    }) else {
+    let Some(image) = std::env::current_exe().ok().and_then(|exe| appimage(&exe)) else {
         return;
     };
     let Some(data) = xdg_home("XDG_DATA_HOME", ".local/share") else {
