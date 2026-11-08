@@ -1,6 +1,7 @@
 import { AccountPopover } from "yapfast/account-popover.slint";
 import { ClientStyle } from "yapfast/style.slint";
 import { WindowBar } from "yapfast/window-bar.slint";
+import { AboutUpdatesSettings } from "about_updates.slint";
 import { Palette } from "std-widgets.slint";
 import { ListView, Autoscroll, AutoscrollMarker } from "scrollview.slint";
 // The UI's typeface, Atkinson Hyperlegible Next; ExtraBold serves weight 900.
@@ -53,6 +54,7 @@ import { BrowseRow, BrowseScreen } from "browse.slint";
 
 // Rust sees these, besides YapfastWindow.
 export { ClientStyle } from "yapfast/style.slint";
+export { HarmonyUpdates } from "about_updates.slint";
 export { Theme, Badges, Popup } from "theme.slint";
 export { Autoscroll } from "scrollview.slint";
 export { PersonRow, CallLink, ShareScreen } from "voice.slint";
@@ -3744,6 +3746,7 @@ export component YapfastWindow inherits Window {
             edit-profile => { root.settings-open = false; root.edit-profile(); }
             sign-out => { root.settings-open = false; root.logout(); }
         }
+        if root.settings-section == 9: AboutUpdatesSettings { preview: root.preview; }
         if root.settings-section == 7: AppearanceSettings {
             themes: root.themes; theme-id: root.theme-id;
             pack-name: root.theme-pack-name; pack-status: root.theme-pack-status;

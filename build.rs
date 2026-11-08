@@ -13,7 +13,11 @@ use std::{
 #[path = "src/emoji_font_tables.rs"]
 mod emoji_font_tables;
 
+#[path = "scripts/harmony_build_stamp.rs"]
+mod harmony_build_stamp;
+
 fn main() {
+    harmony_build_stamp::emit();
     println!("cargo:rerun-if-changed=packaging/windows");
     println!("cargo:rerun-if-env-changed=SKIA_BINARIES_URL");
     println!("cargo:rerun-if-changed=vendor/twemoji/72x72");
