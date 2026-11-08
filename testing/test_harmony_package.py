@@ -6,6 +6,13 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 class HarmonyPackageTests(unittest.TestCase):
+    def test_corresponding_source_includes_compiled_theme_fixture_assets(self):
+        spec = importlib.util.spec_from_file_location('release_package', ROOT/'scripts/release_package.py')
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertIn('examples', mod.SOURCE_DIRECTORIES)
+
     def test_identity_must_match_clean_committed_running_build(self):
         spec = importlib.util.spec_from_file_location('harmony_package', ROOT/'scripts/package-harmony.py')
         assert spec is not None and spec.loader is not None
