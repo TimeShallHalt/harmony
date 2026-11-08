@@ -36,11 +36,12 @@ mod tests {
         assert_eq!(window.global::<HarmonyAbout>().get_running_info(), expected);
         assert!(expected.contains("Updater not included in this build."));
         assert!(!expected.contains(&dir.path().display().to_string()));
-        let copied = Rc::new(RefCell::new(String::new()));
-        let sink = copied.clone();
-        window.on_copy_text(move |text| *sink.borrow_mut() = text.to_string());
         window.global::<HarmonyAbout>().invoke_copy_diagnostics();
-        assert_eq!(*copied.borrow(), expected);
+        let copied = i_slint_core::window::WindowInner::from_pub(window.window())
+            .context()
+            .platform()
+            .clipboard_text(i_slint_core::platform::Clipboard::DefaultClipboard);
+        assert_eq!(copied.as_deref(), Some(expected.as_str()));
         drop(window);
         let restored = YapfastWindow::new().unwrap();
         bind_callbacks(&restored, &adapter);
