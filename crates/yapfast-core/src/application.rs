@@ -44,6 +44,7 @@ mod reactions;
 mod rooms;
 mod scheduled_event;
 mod server;
+mod server_activity;
 mod server_settings;
 mod session;
 mod threads;

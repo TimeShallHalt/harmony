@@ -1,0 +1,29 @@
+import { Theme } from "theme.slint";
+
+export component ServerActivityIndicators inherits Rectangle {
+    in property <int> voice-members;
+    in property <int> live-streams;
+    in property <bool> own-call;
+    out property <bool> voice-visible: root.own-call || root.voice-members > 0;
+    out property <bool> live-visible: root.live-streams > 0;
+    out property <string> summary: (root.own-call ? "You are in a call. " : "")
+        + "Last received: " + root.voice-members + " voice participants, " + root.live-streams + " live streams. Only received state, not server totals.";
+    width: 48px; height: 20px;
+    visible: root.voice-visible || root.live-visible;
+    accessible-role: text; accessible-label: root.summary;
+    if root.voice-visible: Rectangle {
+        accessible-role: image;
+        accessible-label: root.voice-members > 0 ? "Received voice activity" : "Current call";
+        x: parent.width - 20px; width: 20px; height: 20px; border-radius: 10px; background: Theme.rail;
+        Rectangle {
+            x: 2px; y: 2px; width: 16px; height: 16px; border-radius: 8px; background: Theme.live;
+            Image { source: @image-url("icons/volume-2-bold.svg"); width: 12px; height: 12px; colorize: #ffffff; }
+        }
+    }
+    if root.live-visible: Rectangle {
+        accessible-role: image; accessible-label: "Received streaming activity";
+        x: 0px; y: 2px; width: 27px; height: 16px; border-radius: 5px;
+        background: Theme.danger; border-width: 2px; border-color: Theme.rail;
+        Text { text: "LIVE"; color: Theme.on-danger; font-size: 8px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}

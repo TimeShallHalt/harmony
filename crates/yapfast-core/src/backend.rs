@@ -39,6 +39,24 @@ impl Backend {
         )
     }
 
+    /// Anonymous, store-free command transport for native Adapter fixtures.
+    /// Never runs chat::run, reads credentials, or starts service/device actors.
+    #[cfg(feature = "test-fixtures")]
+    pub fn anonymous_fixture(
+        runtime: Arc<BackgroundRuntime>,
+    ) -> (Self, UnboundedReceiver<Command>) {
+        let (commands, receiver) = mpsc::unbounded_channel();
+        let actor = runtime.spawn(std::future::pending());
+        (
+            Self {
+                commands,
+                _actor: actor,
+                _runtime: runtime,
+            },
+            receiver,
+        )
+    }
+
     /// Return the command on failure so the application can clear pending state.
     pub fn send(&self, command: Command) -> Result<(), Command> {
         self.commands.send(command).map_err(|error| error.0)

@@ -4124,7 +4124,10 @@ pub(super) fn rail_rows(
     while let Some(server) = servers.next() {
         let Some(folder) = &server.folder else {
             let (unread, mentions) = marks(server);
+            let (voice_members, live_streams) = state.received_server_activity(server);
             rows.push(ServerRow {
+                voice_members: voice_members as i32,
+                live_streams: live_streams as i32,
                 call: in_call(server),
                 ..server_row(server, selected(server), unread, mentions)
             });
@@ -4156,7 +4159,15 @@ pub(super) fn rail_rows(
             }
             names.join(", ")
         });
+        let (voice_members, live_streams) = inside
+            .iter()
+            .map(|server| state.received_server_activity(server))
+            .fold((0, 0), |(voice, streams), (more_voice, more_streams)| {
+                (voice + more_voice, streams + more_streams)
+            });
         rows.push(ServerRow {
+            voice_members: voice_members as i32,
+            live_streams: live_streams as i32,
             id: folder.id.as_str().into(),
             name: name.into(),
             selected: inside.iter().any(|server| selected(server)),
@@ -4183,7 +4194,10 @@ pub(super) fn rail_rows(
             let last = inside.len() - 1;
             for (index, server) in inside.into_iter().enumerate() {
                 let (unread, mentions) = marks(server);
+                let (voice_members, live_streams) = state.received_server_activity(server);
                 rows.push(ServerRow {
+                    voice_members: voice_members as i32,
+                    live_streams: live_streams as i32,
                     nested: true,
                     last: index == last,
                     tint,

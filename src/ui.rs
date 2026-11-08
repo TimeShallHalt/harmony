@@ -69,6 +69,8 @@ mod theme_pack;
 mod theme_pack_ui_tests;
 mod tiles;
 mod title_bar;
+#[cfg(test)]
+mod update2_tests;
 mod viewer_picture;
 mod yapfast;
 
