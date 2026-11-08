@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_FILES = ("Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain.toml", "README.md", "LICENSE", ".gitignore", "CONTRIBUTING.md", "HARMONY.md", "LOCAL-DEVELOPMENT.md", "flake.nix", "flake.lock", ".envrc", "HARMONY-UPDATES.md", "replica/workstreams/update1-no-updater.md")
+SOURCE_FILES = ("Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain.toml", "README.md", "LICENSE", ".gitignore", ".gitattributes", "CONTRIBUTING.md", "HARMONY.md", "LOCAL-DEVELOPMENT.md", "flake.nix", "flake.lock", ".envrc", "HARMONY-UPDATES.md", "replica/workstreams/update1-no-updater.md")
 SOURCE_DIRECTORIES = (".cargo", "src", "ui", "packaging", "crates", "scripts", "nix", "vendor", "testing", "docs", "examples")
 
 

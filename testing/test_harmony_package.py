@@ -6,6 +6,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 class HarmonyPackageTests(unittest.TestCase):
+    def test_notice_hash_inputs_disable_checkout_newline_conversion(self):
+        import subprocess
+        value = subprocess.check_output(['git','check-attr','text','--','packaging/licenses/SPDX-MIT.txt'],cwd=ROOT,text=True)
+        self.assertTrue(value.rstrip().endswith(': unset'), value)
+
     def test_corresponding_source_includes_compiled_theme_fixture_assets(self):
         spec = importlib.util.spec_from_file_location('release_package', ROOT/'scripts/release_package.py')
         assert spec is not None and spec.loader is not None
