@@ -79,11 +79,40 @@ pub fn build_strike(
     glyphs: &[(char, Vec<u8>)],
     also: &[(u32, char)],
 ) -> Vec<u8> {
+    build_strikes(family, &[(strike, glyphs)], also)
+}
+
+/// Multiple prefiltered bitmap strikes. Keep the published strike first so the
+/// picture index still points at the original artwork, not a text-size preview.
+/// Skia/DirectWrite point-samples a CBDT glyph when scaling it down: a transparent
+/// margin prevents clipping, but cannot antialias an undersampled curved edge.
+/// Native-size, alpha-filtered strikes fix that at the font/raster boundary.
+pub fn build_strikes(
+    family: &str,
+    strikes: &[(&Strike, &[(char, Vec<u8>)])],
+    also: &[(u32, char)],
+) -> Vec<u8> {
+    let (strike, glyphs) = strikes[0];
     let count = u16::try_from(glyphs.len() + 1).expect("fewer than 65535 glyphs");
     let advance = units(i32::from(strike.advance), strike);
+    let mut bitmaps = vec![0, 3, 0, 0];
+    let mut locations = vec![0, 3, 0, 0];
+    put32(&mut locations, strikes.len() as u32);
+    let mut indices = Vec::new();
+    for (strike, glyphs) in strikes {
+        let mut index = cblc(strike, glyphs);
+        let start = 8 + 48 * strikes.len() + indices.len();
+        index[8..12].copy_from_slice(&(start as u32).to_be_bytes());
+        // The index subtable's imageDataOffset refers to the shared CBDT table.
+        index[68..72].copy_from_slice(&(bitmaps.len() as u32).to_be_bytes());
+        locations.extend_from_slice(&index[8..56]);
+        indices.extend_from_slice(&index[56..]);
+        bitmaps.extend_from_slice(&cbdt(strike, glyphs)[4..]);
+    }
+    locations.extend(indices);
     let tables: [([u8; 4], Vec<u8>); 10] = [
-        (*b"CBDT", cbdt(strike, glyphs)),
-        (*b"CBLC", cblc(strike, glyphs)),
+        (*b"CBDT", bitmaps),
+        (*b"CBLC", locations),
         (*b"OS/2", os2(advance, glyphs)),
         (*b"cmap", cmap(glyphs, also)),
         (*b"head", head(strike, advance)),

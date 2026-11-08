@@ -85,6 +85,7 @@ fn fingerprint(value: &impl Hash) -> u64 {
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
 struct Known {
     presence: Presence,
+    observation: Option<super::PresenceObservation>,
     /// Their custom status, else what they're doing, on one line.
     activity: Option<String>,
     activities: Activities,
@@ -105,6 +106,9 @@ struct VoiceEntry {
 
 /// The account's servers and voice channels, kept current from gateway events.
 pub(super) struct Tracker {
+    /// Shared receipt cursor for both independently published presence paths.
+    pub(super) observation: super::PresenceObservation,
+    presence_retirements: Arc<HashMap<String, super::PresenceObservation>>,
     pub(super) me: String,
     /// This gateway session, from READY; a voice state of this account with
     /// another is on another client.
@@ -189,6 +193,8 @@ fn premium_type(user: &Value) -> u8 {
 impl Tracker {
     pub(super) fn from_ready(me: String, ready: &Value, names: Arc<RwLock<Names>>) -> Self {
         let mut tracker = Self {
+            observation: super::PresenceObservation::source(),
+            presence_retirements: Arc::default(),
             me,
             session: ready["session_id"].as_str().map(str::to_owned),
             premium: premium_type(&ready["user"]),
@@ -305,7 +311,21 @@ impl Tracker {
     }
 
     /// Applies one dispatched event; returns whether anything visible changed.
+    pub(super) fn begin_receive(&mut self) {
+        self.observation.receipt = self
+            .observation
+            .receipt
+            .checked_add(1)
+            .expect("gateway receipt order exhausted");
+    }
+
     pub(super) fn apply(&mut self, event: &Event, data: &Value) -> bool {
+        self.begin_receive();
+        self.apply_received(event, data)
+    }
+
+    /// The session already assigned the common receipt before member dispatch.
+    pub(super) fn apply_received(&mut self, event: &Event, data: &Value) -> bool {
         let unreads = self.unreads.apply(event, data, &self.me, &self.my_roles);
         self.apply_servers(event, data) || unreads
     }
@@ -415,11 +435,24 @@ impl Tracker {
                 true
             }
             Event::RelationshipAdd | Event::RelationshipUpdate => {
+                let id = data["id"].as_str().or_else(|| data["user"]["id"].as_str());
+                let was_friend =
+                    id.is_some_and(|id| self.friends.iter().any(|friend| friend == id));
                 self.relationship(data);
+                if let Some(id) =
+                    id.filter(|id| was_friend && !self.friends.iter().any(|friend| friend == id))
+                {
+                    Arc::make_mut(&mut self.presence_retirements)
+                        .insert(id.to_owned(), self.observation.clone());
+                }
                 true
             }
             Event::RelationshipRemove => {
                 let id = data["id"].as_str().or_else(|| data["user_id"].as_str());
+                if let Some(id) = id.filter(|id| self.friends.iter().any(|friend| friend == id)) {
+                    Arc::make_mut(&mut self.presence_retirements)
+                        .insert(id.to_owned(), self.observation.clone());
+                }
                 self.friends.retain(|friend| Some(friend.as_str()) != id);
                 self.blocked.retain(|blocked| Some(blocked.as_str()) != id);
                 self.ignored.retain(|ignored| Some(ignored.as_str()) != id);
@@ -567,9 +600,23 @@ impl Tracker {
                 let Some(id) = data["id"].as_str() else {
                     return false;
                 };
+                let people = self
+                    .private
+                    .iter()
+                    .find(|private| private.id == id && !private.group)
+                    .map(|private| private.recipients.clone())
+                    .unwrap_or_default();
                 self.private.retain(|private| private.id != id);
                 if *event != Event::ChannelDelete {
                     self.put_private(data);
+                }
+                for user in people {
+                    if !self.private.iter().any(|private| {
+                        private.id == id && !private.group && private.recipients.contains(&user)
+                    }) {
+                        Arc::make_mut(&mut self.presence_retirements)
+                            .insert(user, self.observation.clone());
+                    }
                 }
                 true
             }
@@ -1085,13 +1132,15 @@ impl Tracker {
         true
     }
 
-    /// Learns someone's presence; returns whether it changed.
+    /// Learns an exact contact observation, including a newly received same value.
+    /// Its identity survives snapshot coalescing and metadata-only list rebuilding.
     fn presence(&mut self, user: Option<&str>, data: &Value) -> bool {
         let Some(user) = user else {
             return false;
         };
         let presence = Known {
             presence: Presence::parse(data),
+            observation: Some(self.observation.clone()),
             activity: member_list::activity(&data["activities"]),
             activities: activity::activities(&data["activities"]),
         };
@@ -1122,6 +1171,7 @@ impl Tracker {
                     group: heading.clone(),
                     tag: names.server_tag(user).cloned(),
                     presence: known.presence,
+                    presence_observation: known.observation,
                     color: None,
                     activity: known.activity,
                     activities: known.activities,
@@ -1422,6 +1472,7 @@ impl Tracker {
                     nickname,
                     avatar: names.avatar(None, user),
                     presence: known.map(|known| known.presence),
+                    presence_observation: known.and_then(|known| known.observation.clone()),
                     activity: known.and_then(|known| known.activity.clone()),
                     activities: known
                         .map(|known| known.activities.clone())
@@ -1606,6 +1657,7 @@ impl Tracker {
             call,
             ringing,
             presence: known.map(|known| known.presence),
+            presence_observation: known.and_then(|known| known.observation.clone()),
             activity: known.and_then(|known| known.activity.clone()),
             activities: known
                 .map(|known| known.activities.clone())
@@ -1786,6 +1838,8 @@ impl Tracker {
         let people = self.people(&names, &mut kept);
         self.kept = kept;
         Snapshot {
+            presence_observation: Some(self.observation.clone()),
+            presence_retirements: self.presence_retirements.clone(),
             status: Status::Online,
             user_id: Some(self.me.clone()),
             account: names.user_name(&self.me).map(|name| Account {
@@ -2114,9 +2168,16 @@ mod tests {
             tracker.apply(&Event::PresenceUpdate, &away),
             "Ann's DM shows it"
         );
+        let earlier = tracker
+            .snapshot()
+            .conversations
+            .iter()
+            .find(|dm| dm.id == "20")
+            .unwrap()
+            .clone();
         assert!(
-            !tracker.apply(&Event::PresenceUpdate, &away),
-            "the same again changes nothing"
+            tracker.apply(&Event::PresenceUpdate, &away),
+            "a genuinely later same-value receipt must publish"
         );
         let snapshot = tracker.snapshot();
         let dm = snapshot
@@ -2126,6 +2187,17 @@ mod tests {
             .unwrap();
         assert_eq!(dm.presence, Some(Presence::Idle));
         assert_eq!(dm.activity.as_deref(), Some("making tea"));
+        assert_eq!(
+            (dm.presence, &dm.activity),
+            (earlier.presence, &earlier.activity)
+        );
+        assert!(
+            dm.presence_observation
+                .as_ref()
+                .unwrap()
+                .newer_than(earlier.presence_observation.as_ref().unwrap()),
+            "unchanged displayed presence carries strictly newer same-source authority"
+        );
         let group = snapshot
             .conversations
             .iter()
@@ -2165,12 +2237,25 @@ mod tests {
             &json!({"guild_id": "10", "user": {"id": "2"}, "status": "dnd"})
         ));
         assert_eq!(presence(&mut tracker), Some(Presence::DoNotDisturb));
+        let earlier = tracker.snapshot().conversations[0]
+            .presence_observation
+            .clone()
+            .unwrap();
         assert!(
-            !tracker.apply(
+            tracker.apply(
                 &Event::PresenceUpdate,
                 &json!({"guild_id": "11", "user": {"id": "2"}, "status": "dnd"})
             ),
-            "another server's copy changes nothing"
+            "another received server copy has genuinely newer authority"
+        );
+        assert_eq!(presence(&mut tracker), Some(Presence::DoNotDisturb));
+        assert!(
+            tracker.snapshot().conversations[0]
+                .presence_observation
+                .as_ref()
+                .unwrap()
+                .newer_than(&earlier),
+            "stable displayed value must not suppress its newer receipt"
         );
         assert!(!tracker.apply(
             &Event::PresenceUpdate,

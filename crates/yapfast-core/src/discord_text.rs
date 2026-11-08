@@ -37,6 +37,24 @@ use crate::{
     network::Network,
 };
 
+/// Preserve gateway receipt provenance through the real member-to-core adapter.
+pub fn received_members(
+    room: String,
+    members: Vec<ListedMember>,
+    observation: Option<yapfast_discord::service::PresenceObservation>,
+) -> Event {
+    let observations = members
+        .iter()
+        .filter_map(|member| Some((member.user_id.clone(), member.presence_observation.clone()?)))
+        .collect();
+    Event::DiscordMembers {
+        room,
+        members: members.into_iter().map(render::chat_member).collect(),
+        observations,
+        observation,
+    }
+}
+
 mod account;
 mod audit_log;
 mod channels;

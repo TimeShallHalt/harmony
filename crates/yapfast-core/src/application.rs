@@ -35,6 +35,7 @@ mod new_post;
 mod oauth;
 mod place_search;
 mod places;
+mod platforms;
 mod polls;
 mod preview;
 mod profile_editor;
@@ -367,6 +368,8 @@ pub enum ViewerSource {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProfileView {
     pub profile: Profile,
+    /// Latest received contact evidence, independent of the cached status dot.
+    pub platform_presence: Option<chat::Presence>,
     pub large: bool,
     /// The rest of a Discord profile is on its way.
     pub loading: bool,
@@ -2030,6 +2033,11 @@ type TimelineArc = Arc<Vec<Arc<ChatMessage>>>;
 #[derive(Default)]
 pub struct Application {
     pub state: AppState,
+    /// Received evidence for contacts whose profiles have been opened. Retained
+    /// across card close/reopen, never persisted or sourced from profile fetches.
+    platform_presences: HashMap<String, Option<chat::Presence>>,
+    #[cfg(feature = "discord")]
+    platform_observations: HashMap<String, yapfast_discord::service::PresenceObservation>,
     /// Request ownership is not part of clonable presentation state.
     original: Option<OriginalView>,
     profile_original: Option<profile_media::ProfileOriginal>,
@@ -2458,10 +2466,14 @@ fn shelved(messages: &[Arc<ChatMessage>]) -> Vec<Arc<ChatMessage>> {
 
 impl Application {
     pub fn dispatch(&mut self, action: Action) -> Vec<Effect> {
+        let platform_owner = self.state.discord_user.clone();
         let media_request = self.profile_media_request();
         // A keystroke in the composer shows no picture that wasn't on screen.
         let composing = matches!(action, Action::SetDraft(_) | Action::MentionQuery(_));
         let mut effects = self.dispatch_action(action);
+        if platform_owner.is_some() && platform_owner != self.state.discord_user {
+            self.clear_received_platforms();
+        }
         self.sync_original();
         effects.extend(self.send_pending_message());
         effects.extend(self.show_panel_profile());
@@ -2475,7 +2487,16 @@ impl Application {
     pub fn apply(&mut self, event: Event) -> Vec<Effect> {
         let media_request = self.profile_media_request();
         let media_account = self.state.discord_user.clone();
+        #[cfg(feature = "discord")]
+        let platform_snapshot = matches!(&event, Event::Discord(_));
+        #[cfg(not(feature = "discord"))]
+        let platform_snapshot = false;
         let mut effects = self.apply_event(event);
+        if platform_snapshot && !self.state.discord_online
+            || media_account.is_some() && media_account != self.state.discord_user
+        {
+            self.clear_received_platforms();
+        }
         if media_account != self.state.discord_user {
             self.forget_profile_media_authority();
         }
@@ -3563,10 +3584,55 @@ impl Application {
             Event::Profile { user, result } => self.show_fetched_profile(user, result),
             Event::KeptProfile { user, profile } => self.show_kept_profile(user, profile),
             Event::BadgeLevels { user, badges } => self.show_badge_levels(&user, badges),
+            #[cfg(feature = "discord")]
+            Event::DiscordMembers {
+                room,
+                mut members,
+                observations,
+                observation,
+            } => {
+                if self.received_member_platforms(&room, &mut members, observations, observation) {
+                    // Presentation and the legacy status-dot route stay unchanged.
+                    self.state.members = Some(Ok(members));
+                }
+            }
             Event::Members { room, members } => {
                 // A list that came stays when a later check finds none came.
                 let listed = members.is_err() && matches!(self.state.members, Some(Ok(_)));
                 if self.state.selected.as_ref() == Some(&room) && !listed {
+                    if let Ok(current) = &members {
+                        for (id, presence) in &mut self.platform_presences {
+                            let member = current.iter().find(|member| &member.id == id);
+                            let previously_listed = self
+                                .state
+                                .members
+                                .as_ref()
+                                .and_then(|members| members.as_ref().ok())
+                                .is_some_and(|members| {
+                                    members.iter().any(|member| &member.id == id)
+                                });
+                            if member.is_some() || previously_listed {
+                                *presence = member.and_then(|member| member.presence);
+                            }
+                        }
+                        for view in [&mut self.state.profile, &mut self.state.panel_profile]
+                            .into_iter()
+                            .flatten()
+                        {
+                            let member = current.iter().find(|member| member.id == view.profile.id);
+                            let previously_listed = self
+                                .state
+                                .members
+                                .as_ref()
+                                .and_then(|members| members.as_ref().ok())
+                                .is_some_and(|members| {
+                                    members.iter().any(|member| member.id == view.profile.id)
+                                });
+                            if member.is_some() || previously_listed {
+                                view.platform_presence = member.and_then(|member| member.presence);
+                            }
+                        }
+                    }
                     self.state.members = Some(members);
                 }
             }

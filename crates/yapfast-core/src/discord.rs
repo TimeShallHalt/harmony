@@ -204,6 +204,7 @@ pub fn server_tag(tag: Option<yapfast_discord::message::Tag>) -> Option<chat::Se
 pub fn presence(presence: yapfast_discord::member_list::Presence) -> chat::Presence {
     use yapfast_discord::member_list::Presence as Discord;
     match presence {
+        Discord::Clients(clients) => chat::Presence::Clients(clients),
         Discord::Online => chat::Presence::Online,
         Discord::Mobile => chat::Presence::Mobile,
         Discord::Idle => chat::Presence::Idle,

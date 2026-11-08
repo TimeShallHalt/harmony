@@ -101,7 +101,9 @@ impl Application {
         }
         let fetch = room.network == Network::Discord && !self.state.preview;
         let (room, profile) = (room.id.clone(), dm_profile(room, person.clone()));
+        let platform_presence = self.profile_platform_presence(&person, profile.presence);
         self.state.panel_profile = Some(ProfileView {
+            platform_presence,
             profile,
             large: false,
             loading: fetch,
@@ -405,6 +407,18 @@ impl Application {
         snapshot: Arc<yapfast_discord::service::Snapshot>,
     ) -> Vec<Effect> {
         self.state.discord_online = snapshot.status == yapfast_discord::service::Status::Online;
+        if self.discord.as_ref().is_some_and(|earlier| {
+            match (
+                &earlier.presence_observation,
+                &snapshot.presence_observation,
+            ) {
+                (Some(a), Some(b)) => !a.same_source(b),
+                (Some(_), None) => true,
+                _ => false,
+            }
+        }) {
+            self.clear_received_platforms();
+        }
         if let Some(account) = &snapshot.account {
             self.state.account_username =
                 Some(account.username.clone()).filter(|name| !name.is_empty());
@@ -464,6 +478,72 @@ impl Application {
                     activities: friend.activities.clone(),
                 })
                 .collect();
+        }
+        // Collection identity is only a rendering optimization, not freshness.
+        // Compare this exact contact's observation, shared through metadata-only
+        // rebuilds; DM and friend entries have the same tracker provenance.
+        let contacts: HashSet<String> = self
+            .platform_presences
+            .keys()
+            .cloned()
+            .chain(snapshot.presence_retirements.keys().cloned())
+            .chain(
+                self.state
+                    .profile
+                    .iter()
+                    .chain(&self.state.panel_profile)
+                    .map(|view| view.profile.id.clone()),
+            )
+            .collect();
+        for id in contacts {
+            let friend = |snapshot: &Snapshot| {
+                snapshot
+                    .friend_list
+                    .iter()
+                    .find(|friend| friend.user_id == id)
+                    .map(|friend| (friend.presence, friend.presence_observation.clone()))
+            };
+            let dm = |snapshot: &Snapshot| {
+                snapshot
+                    .conversations
+                    .iter()
+                    .find(|dm| !dm.group && dm.person.as_deref() == Some(id.as_str()))
+                    .map(|dm| (dm.presence, dm.presence_observation.clone()))
+            };
+            let current_friend = friend(&snapshot);
+            let current_dm = dm(&snapshot);
+            let retirement = snapshot.presence_retirements.get(&id);
+            let observations = [
+                (current_friend != earlier.and_then(friend)).then_some(current_friend),
+                (current_dm != earlier.and_then(dm)).then_some(current_dm),
+                (retirement != earlier.and_then(|s| s.presence_retirements.get(&id)))
+                    .then(|| Some((None, retirement.cloned()))),
+            ];
+            // Reconcile both collections by original received order. A friend
+            // retirement must not hide a genuinely later coalesced DM receipt.
+            // Retirements are independent evidence even when a relationship-only
+            // re-add leaves both final collection tuples unchanged. Track these
+            // ids before first profile open too, so cached tuples cannot revive.
+            for presence in observations.into_iter().flatten() {
+                let (presence, observation) = presence
+                    .unwrap_or_else(|| (None, snapshot.presence_retirements.get(&id).cloned()));
+                if !platforms::accept_observation(
+                    &mut self.platform_observations,
+                    &id,
+                    observation.as_ref(),
+                ) {
+                    continue;
+                }
+                let presence = presence.map(discord::presence);
+                self.platform_presences.insert(id.clone(), presence);
+                for view in [&mut self.state.profile, &mut self.state.panel_profile]
+                    .into_iter()
+                    .flatten()
+                    .filter(|view| view.profile.id == id)
+                {
+                    view.platform_presence = presence;
+                }
+            }
         }
         self.state.custom_status =
             snapshot

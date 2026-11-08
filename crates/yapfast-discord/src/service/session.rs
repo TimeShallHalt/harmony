@@ -30,6 +30,25 @@ use crate::{
     token,
 };
 
+/// Common receipt boundary used by the real gateway dispatcher and anonymous
+/// fixtures. Member publication can precede the tracker's coalesced snapshot.
+pub(super) fn receive_contacts(
+    tracker: &mut Tracker,
+    lists: &mut MemberLists,
+    event: &Event,
+    data: &Value,
+) -> bool {
+    tracker.begin_receive();
+    match event {
+        Event::PresenceUpdate => {
+            lists.presence(tracker, data);
+            false
+        }
+        Event::GuildMemberListUpdate => lists.update(tracker, data),
+        _ => false,
+    }
+}
+
 /// What outlasts a session: the handle's channels and what Yapfast has on screen.
 pub(super) struct Shared {
     pub(super) snapshots: watch::Sender<Arc<Snapshot>>,
@@ -553,6 +572,9 @@ impl Session<'_> {
     /// Takes in a dispatched event; an error ends the session.
     async fn event(&mut self, dispatch: Dispatch) -> Result<()> {
         let (event, data) = (&dispatch.event, &dispatch.data);
+        if receive_contacts(&mut self.tracker, &mut self.shared.lists, event, data) {
+            self.publisher.changed();
+        }
         // A server update that no join or stream waits for moves one
         // under way.
         let awaited = match event {
@@ -571,12 +593,6 @@ impl Session<'_> {
                         user,
                         data["note"].as_str().unwrap_or_default(),
                     );
-                }
-            }
-            Event::PresenceUpdate => self.shared.lists.presence(&self.tracker, data),
-            Event::GuildMemberListUpdate => {
-                if self.shared.lists.update(&self.tracker, data) {
-                    self.publisher.changed();
                 }
             }
             Event::GuildMembersChunk | Event::RateLimited => {
@@ -620,7 +636,7 @@ impl Session<'_> {
             let guild = data["guild_id"].as_str().map(str::to_owned);
             let _ = self.shared.live.send(Live::Notify { guild, message });
         }
-        if applied.unwrap_or_else(|| self.tracker.apply(event, data)) {
+        if applied.unwrap_or_else(|| self.tracker.apply_received(event, data)) {
             self.publisher.changed();
             self.ask_previews();
         }

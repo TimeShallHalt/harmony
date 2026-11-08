@@ -19,11 +19,13 @@ matrix = ["dep:keyring", "dep:matrix-sdk", "dep:matrix-sdk-ui", "dep:matrix-sdk-
 discord = ["dep:yapfast-discord", "dep:rand", "dep:base64", "dep:nnnoiseless", "dep:deep_filter", "dep:ndarray", "dep:x264-src", "dep:ffmpeg-src", "dep:thorvg-sys"]
 # Sample states other crates' tests start from, such as a Discord server
 # whose member menu they check.
-test-fixtures = []
+test-fixtures = ["yapfast-discord?/test-fixtures"]
 
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+# Bundled IANA rules keep device-local contact clocks portable and DST-aware.
+chrono-tz = { version = "=0.10.4", default-features = false, features = ["std"] }
 # A Go Live stream's preview goes to Discord as a data URI.
 base64 = { version = "0.22", optional = true }
 # DeepFilterNet 3, through its Rust implementation libDF on tract: Discord

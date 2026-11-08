@@ -47,6 +47,7 @@ pub mod experiment;
 pub mod frames;
 pub mod leveling;
 pub mod links;
+pub mod local_timezones;
 pub mod logging;
 #[cfg(feature = "discord")]
 mod lottie;

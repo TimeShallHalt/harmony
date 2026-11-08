@@ -404,6 +404,8 @@ impl Adapter {
     /// The window closed: what only it used stops with it. The models stay, so
     /// the next window shows them without building them again.
     pub(super) fn detach(&mut self) {
+        self.call_timer.detach();
+        self.timezone_clock.stop();
         self.meter = None;
         #[cfg(feature = "discord")]
         {

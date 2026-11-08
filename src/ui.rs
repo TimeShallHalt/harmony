@@ -68,9 +68,24 @@ mod theme_pack;
 #[cfg(test)]
 mod theme_pack_ui_tests;
 mod tiles;
+mod timezones;
 mod title_bar;
 #[cfg(test)]
 mod update2_tests;
+#[cfg(test)]
+mod update3_acceptance_tests;
+#[cfg(test)]
+mod update3_controls_tests;
+#[cfg(test)]
+mod update3_emoji_tests;
+#[cfg(test)]
+mod update3_ordering_tests;
+#[cfg(test)]
+mod update3_tests;
+#[cfg(test)]
+mod update3_timezone_tests;
+#[cfg(test)]
+mod update3_volume_controls_tests;
 mod viewer_picture;
 mod yapfast;
 
@@ -1097,6 +1112,8 @@ struct Layout {
     soundboard_muted_people: std::collections::BTreeSet<String>,
     /// Others see when this account is typing; on unless turned off.
     share_typing: Option<bool>,
+    /// Device-local contact annotations scoped by provider-qualified account.
+    local_timezones: yapfast_core::local_timezones::Preferences,
     /// Desktop notifications, and whether they say what messages say; on unless
     /// turned off.
     notifications: Option<bool>,
@@ -1685,6 +1702,9 @@ struct Adapter {
     call_timer: call_timer::CallTimer,
     /// Ticks ActivityClock while a profile on screen times an activity.
     activity_clock: slint::Timer,
+    timezone_clock: slint::Timer,
+    #[cfg(test)]
+    timezone_now: Option<std::time::SystemTime>,
     navigation: Navigation,
     /// Whether the forward dialog was open at the last refresh.
     forwarding: bool,
@@ -1979,6 +1999,9 @@ impl Adapter {
                 away: away::Away::default(),
                 call_timer: call_timer::CallTimer::default(),
                 activity_clock: slint::Timer::default(),
+                timezone_clock: slint::Timer::default(),
+                #[cfg(test)]
+                timezone_now: None,
                 navigation: Navigation::default(),
                 forwarding: false,
                 selection_version: 0,
@@ -2274,6 +2297,7 @@ impl Adapter {
     }
 
     fn stop_backend(&mut self) {
+        self.call_timer.observe(None);
         if let Some(events) = self.events.take() {
             events.abort();
         }
@@ -2281,6 +2305,14 @@ impl Adapter {
     }
 
     fn execute(&mut self, effects: Vec<Effect>) {
+        // Local leave/disconnect actions retire a call; only received Voice
+        // transitions can start one. A retained room name has no authority.
+        if !matches!(
+            self.app.state.voice.phase,
+            voice::Phase::Connected | voice::Phase::Reconnecting
+        ) {
+            self.call_timer.observe(None);
+        }
         for effect in effects {
             match effect {
                 Effect::Start(start) => {
@@ -2325,6 +2357,7 @@ impl Adapter {
                             let window = adapter.borrow().window.upgrade();
                             let mut adapter = adapter.borrow_mut();
                             adapter.app.stopped();
+                            adapter.call_timer.observe(None);
                             adapter.backend = None;
                             if let Some(window) = window {
                                 adapter.refresh(&window);
@@ -2336,6 +2369,7 @@ impl Adapter {
                             tracing::error!(%error, "could not connect backend events to Slint");
                             self.backend = None;
                             self.app.stopped();
+                            self.call_timer.observe(None);
                         }
                     }
                 }
@@ -2579,7 +2613,39 @@ impl Adapter {
     /// Applies a backend event; the caller shows what it can have changed after.
     fn apply(&mut self, event: Event) -> Reach {
         let reach = Reach::of(&event);
+        let voice_event = matches!(&event, Event::Voice(_));
+        let owner = (
+            self.app.state.account.clone(),
+            self.app.state.discord_user.clone(),
+        );
+        let discord_was_online = self.app.state.discord_online;
         let effects = self.app.apply(event);
+        let replaced = owner
+            != (
+                self.app.state.account.clone(),
+                self.app.state.discord_user.clone(),
+            );
+        let disconnected = discord_was_online
+            && !self.app.state.discord_online
+            && self
+                .app
+                .state
+                .voice
+                .room
+                .as_deref()
+                .is_some_and(|room| room.starts_with("discord:"));
+        if replaced || disconnected {
+            self.call_timer.observe(None);
+        } else if voice_event {
+            let voice = &self.app.state.voice;
+            let timed = matches!(
+                voice.phase,
+                voice::Phase::Connected | voice::Phase::Reconnecting
+            )
+            .then_some(voice.room.as_deref())
+            .flatten();
+            self.call_timer.observe(timed);
+        }
         // What it set off, such as opening a DM that just started, can change
         // anything; a sound changes nothing on screen.
         let reach = if effects

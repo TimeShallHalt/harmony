@@ -63,7 +63,7 @@ export struct RoomRow {
     /// "dnd" or "offline", empty when unknown; and their custom status or what
     /// they're doing, or a group DM's size, and the address of the picture of
     /// the status's custom emoji.
-    presence: string,
+    presence: string, platforms: string,
     detail: string, detail-emoji: string,
     /// The server voice channel a one-to-one Discord DM's other person is
     /// in, by room id, with its name and its server's; the room is empty
@@ -1169,6 +1169,7 @@ export component RoomList inherits Rectangle {
                         + (room.presence == "dnd" ? ", do not disturb" : room.presence == "mobile" ? ", online on mobile" : room.presence != "" ? ", " + room.presence : "")
                         + (room.voice-room != "" ? ", in " + room.voice-channel + " in " + room.voice-server : "")
                         + (room.detail != "" ? ", " + room.detail : "")
+                        + (room.platforms != "" ? ", received platforms: " + room.platforms : "")
                         + (room.pinned ? ", pinned" : "") + (room.muted ? ", muted" : "")
                         + (room.locked ? ", locked" : "") + (room.call ? ", in a call" : "") + (room.badge != "" ? ", " + room.badge + " mentions" : room.unread ? ", unread" : "");
                     icon: room.icon; person: room.direct; initial: room.initial; tint: room.tint;

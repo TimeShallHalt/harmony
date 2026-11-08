@@ -11,36 +11,92 @@ use super::{Adapter, YapfastWindow};
 #[derive(Default)]
 pub(super) struct CallTimer {
     since: Option<(String, Instant)>,
+    attached: Option<slint::Weak<YapfastWindow>>,
     timer: Timer,
+    clock: Clock,
+}
+
+#[derive(Clone, Default)]
+struct Clock {
+    #[cfg(test)]
+    now: Option<std::rc::Rc<std::cell::Cell<Instant>>>,
+}
+impl Clock {
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(now) = &self.now {
+            return now.get();
+        }
+        Instant::now()
+    }
+}
+
+#[cfg(test)]
+impl CallTimer {
+    pub(super) fn use_clock(&mut self, now: std::rc::Rc<std::cell::Cell<Instant>>) {
+        self.clock.now = Some(now);
+    }
+    pub(super) fn origin(&self) -> Option<(String, Instant)> {
+        self.since.clone()
+    }
+    pub(super) fn running(&self) -> bool {
+        self.timer.running()
+    }
+}
+
+impl CallTimer {
+    /// Apply EVERY actual voice transition, before any rendering/batching.
+    pub(super) fn observe(&mut self, room: Option<&str>) {
+        if self.since.as_ref().map(|(room, _)| room.as_str()) == room {
+            return;
+        }
+        self.detach();
+        self.since = room.map(|room| (room.to_owned(), self.clock.now()));
+    }
+    /// Detach only the renderer; the monotonic voice lifetime continues.
+    pub(super) fn detach(&mut self) {
+        self.timer.stop();
+        self.attached = None;
+    }
 }
 
 impl Adapter {
-    /// Starts timing the call in `room` once it connects, and stops when it
-    /// ends; a call that moves to another room starts again.
+    /// Rendering never creates or changes a call lifetime.
     pub(super) fn time_call(&mut self, window: &YapfastWindow, room: Option<&str>) {
-        let same = match (&self.call_timer.since, room) {
-            (Some((timed, _)), Some(room)) => timed == room,
-            (None, None) => true,
-            _ => false,
-        };
-        if same {
-            return;
-        }
-        let Some(room) = room else {
-            self.call_timer.since = None;
-            self.call_timer.timer.stop();
+        let started = self
+            .call_timer
+            .since
+            .as_ref()
+            .filter(|(timed, _)| Some(timed.as_str()) == room)
+            .map(|(_, started)| *started);
+        let Some(started) = started else {
+            self.call_timer.detach();
             window.set_voice_time(Default::default());
             return;
         };
-        let started = Instant::now();
-        self.call_timer.since = Some((room.to_owned(), started));
-        window.set_voice_time(elapsed(Duration::ZERO).into());
+        let attached = self
+            .call_timer
+            .attached
+            .as_ref()
+            .and_then(slint::Weak::upgrade);
+        if self.call_timer.timer.running()
+            && attached
+                .as_ref()
+                .is_some_and(|old| std::ptr::eq(old.window(), window.window()))
+        {
+            return;
+        }
+        self.call_timer.attached = Some(window.as_weak());
+        let clock = self.call_timer.clock.clone();
+        window.set_voice_time(elapsed(clock.now().saturating_duration_since(started)).into());
         let window = window.as_weak();
         self.call_timer
             .timer
             .start(TimerMode::Repeated, Duration::from_secs(1), move || {
                 if let Some(window) = window.upgrade() {
-                    window.set_voice_time(elapsed(started.elapsed()).into());
+                    window.set_voice_time(
+                        elapsed(clock.now().saturating_duration_since(started)).into(),
+                    );
                 }
             });
     }

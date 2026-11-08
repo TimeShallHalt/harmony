@@ -173,6 +173,7 @@ impl Application {
 
     /// Call after the event stream closes. Error details from the last event survive.
     pub fn stopped(&mut self) {
+        self.clear_received_platforms();
         self.state.viewer = None;
         self.original = None;
         self.profile_original = None;

@@ -240,7 +240,9 @@ async fn shows_the_example_environment() {
     let mut live = discord.live();
     discord.view(&guild, Some(&general));
     let members = live_where(&mut live, |event| match event {
-        Live::Members { channel, members } if channel == general => Some(members),
+        Live::Members {
+            channel, members, ..
+        } if channel == general => Some(members),
         _ => None,
     })
     .await;

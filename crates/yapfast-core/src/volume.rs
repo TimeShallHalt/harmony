@@ -20,6 +20,19 @@ use tokio::sync::watch;
 /// Twice as loud, as Discord allows.
 pub const MAX: f32 = 2.0;
 
+/// Parse an exact entry on the same safe 0–200% scale as the voice/stream
+/// sliders. Reject instead of silently clamping or accepting non-finite gains.
+pub fn parse_percentage(text: &str) -> Result<i32, &'static str> {
+    let text = text.trim();
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("Enter a whole percentage from 0 to 200.");
+    }
+    text.parse::<i32>()
+        .ok()
+        .filter(|value| (0..=200).contains(value))
+        .ok_or("Enter a whole percentage from 0 to 200.")
+}
+
 /// The gain of a slider at `value`, from 0 to 200, as Discord's volume
 /// sliders map it: below 100 on a power curve, `(value / 100)^2.8`, so 50 is
 /// about -17 dB; above it 6 dB more for each 100, so 200 is about twice as
@@ -83,6 +96,9 @@ fn volumes(kind: Kind) -> &'static RwLock<HashMap<String, f32>> {
 
 /// Sets how loud `person` sounds; the default gain forgets the choice.
 pub fn set(kind: Kind, person: &str, volume: f32) {
+    if !volume.is_finite() {
+        return;
+    }
     let volume = volume.clamp(0.0, MAX);
     {
         let mut volumes = volumes(kind).write().unwrap();
@@ -186,6 +202,39 @@ mod tests {
 
     /// Held by the tests that set the speakers' volume or depend on it.
     static SPEAKERS_SET: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn exact_entry_is_a_whole_percentage_not_a_lossy_float_or_silent_clamp() {
+        assert_eq!(parse_percentage("137"), Ok(137));
+        assert_eq!(parse_percentage(" 0 "), Ok(0));
+        assert_eq!(parse_percentage("200"), Ok(200));
+        for invalid in [
+            "",
+            "-1",
+            "201",
+            "NaN",
+            "inf",
+            "13.7",
+            "100%",
+            "1e2",
+            "999999999999999999999",
+        ] {
+            assert!(parse_percentage(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn nonfinite_gain_does_not_replace_a_valid_independent_gain() {
+        let person = "update3-nonfinite";
+        set(Kind::Voice, person, 0.5);
+        set(Kind::Stream, person, 0.18);
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            set(Kind::Voice, person, invalid);
+            set(Kind::Stream, person, invalid);
+            assert_eq!(get(Kind::Voice, person), 0.5);
+            assert_eq!(get(Kind::Stream, person), 0.18);
+        }
+    }
 
     #[test]
     fn remembers_each_persons_voice_and_stream() {

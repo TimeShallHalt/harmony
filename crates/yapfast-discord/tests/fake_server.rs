@@ -1428,7 +1428,9 @@ async fn reads_history_and_member_lists() {
     let mut live = discord.live();
     discord.view(&guild, Some(&general));
     let members = live_where(&mut live, |event| match event {
-        Live::Members { channel, members } if channel == general => Some(members),
+        Live::Members {
+            channel, members, ..
+        } if channel == general => Some(members),
         _ => None,
     })
     .await;
@@ -1460,7 +1462,9 @@ async fn reads_history_and_member_lists() {
     // without asking Discord again, and so does going back.
     discord.view(&guild, Some(&lounge));
     let shared = live_where(&mut live, |event| match event {
-        Live::Members { channel, members } if channel == lounge => Some(members),
+        Live::Members {
+            channel, members, ..
+        } if channel == lounge => Some(members),
         _ => None,
     })
     .await;
@@ -1490,14 +1494,18 @@ async fn reads_history_and_member_lists() {
     .await;
     discord.view(&guild, Some(&lounge));
     let own = live_where(&mut live, |event| match event {
-        Live::Members { channel, members } if channel == lounge => Some(members),
+        Live::Members {
+            channel, members, ..
+        } if channel == lounge => Some(members),
         _ => None,
     })
     .await;
     assert_eq!(own, members);
     discord.view(&guild, Some(&general));
     let again = live_where(&mut live, |event| match event {
-        Live::Members { channel, members } if channel == general => Some(members),
+        Live::Members {
+            channel, members, ..
+        } if channel == general => Some(members),
         _ => None,
     })
     .await;
@@ -1521,7 +1529,9 @@ async fn reads_history_and_member_lists() {
     ] {
         discord.set_status(status).await.unwrap();
         let shown = live_where(&mut live, |event| match event {
-            Live::Members { channel, members } if channel == general => Some(members),
+            Live::Members {
+                channel, members, ..
+            } if channel == general => Some(members),
             _ => None,
         })
         .await;
@@ -2049,7 +2059,9 @@ async fn lists_dms_and_notifies() {
     // A group DM lists everyone in it, with friends' presence.
     discord.view(PRIVATE, Some(&weekend));
     let members = live_where(&mut live, |event| match event {
-        Live::Members { channel, members } if channel == weekend => Some(members),
+        Live::Members {
+            channel, members, ..
+        } if channel == weekend => Some(members),
         _ => None,
     })
     .await;
@@ -4567,7 +4579,10 @@ async fn acts_from_a_members_menu() {
     let listed =
         |live: Live,
          check: &dyn Fn(Option<&yapfast_discord::member_list::ListedMember>) -> bool| {
-            let Live::Members { channel, members } = live else {
+            let Live::Members {
+                channel, members, ..
+            } = live
+            else {
                 return None;
             };
             (channel == general && check(members.iter().find(|member| member.user_id == dave)))

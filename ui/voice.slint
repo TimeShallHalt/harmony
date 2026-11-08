@@ -1,4 +1,5 @@
 import { ScrollView, ListView } from "scrollview.slint";
+import { ExactVolume } from "personal-controls.slint";
 import { Theme, Middle, Label, Tip, Popup } from "theme.slint";
 import { ActionButton, IconButton, Avatar, CallButton, VolumeSlider, MenuItem } from "controls.slint";
 import { EmojiCell, EmojiFace } from "messages.slint";
@@ -1346,19 +1347,24 @@ export component VolumeMenu inherits Rectangle {
     /// A person, whether it's their stream, the volume, and whether it's
     /// the last of a drag.
     callback volume-changed(string, bool, int, bool);
+    callback parse-volume(string) -> int;
     background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 8px;
     drop-shadow-blur: 24px; drop-shadow-color: #00000080; drop-shadow-offset-y: 8px;
     accessible-role: groupbox; accessible-label: root.volume-name + "'s volume";
     volume-content := VerticalLayout {
         padding: 12px; spacing: 12px;
         Text { text: root.volume-name; color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }
-        VolumeSlider {
+        ExactVolume {
+            parse(text) => { return root.parse-volume(text); }
+            target: root.volume-person;
             label: "User volume";
             value <=> root.voice-volume;
             changed(volume) => { root.volume-changed(root.volume-person, false, volume, false); }
             committed(volume) => { root.volume-changed(root.volume-person, false, volume, true); }
         }
-        if root.volume-live: VolumeSlider {
+        if root.volume-live: ExactVolume {
+            parse(text) => { return root.parse-volume(text); }
+            target: root.volume-person;
             label: "Stream volume";
             value <=> root.stream-volume;
             changed(volume) => { root.volume-changed(root.volume-person, true, volume, false); }

@@ -100,6 +100,111 @@ pub struct Account {
     pub has_email: bool,
 }
 
+/// Anonymous access to the actual dispatcher, member lists and tracker. No
+/// service, store, socket, account credentials or background task is created.
+/// A current-thread time driver owns only the member-list's inert stale timer.
+#[cfg(feature = "test-fixtures")]
+pub struct ContactSnapshotFixture {
+    tracker: tracker::Tracker,
+    lists: member_lists::MemberLists,
+    live: broadcast::Receiver<Live>,
+    _clock: tokio::runtime::Runtime,
+}
+
+#[cfg(feature = "test-fixtures")]
+impl ContactSnapshotFixture {
+    pub fn new(ready: &Value) -> Self {
+        let clock = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let _entered = clock.enter();
+        let names = Default::default();
+        let tracker = tracker::Tracker::from_ready(
+            ready["user"]["id"].as_str().unwrap().to_owned(),
+            ready,
+            Arc::clone(&names),
+        );
+        let (sender, live) = broadcast::channel(64);
+        let lists = member_lists::MemberLists::new(Vec::new(), sender, names, Presence::Online);
+        drop(_entered);
+        Self {
+            tracker,
+            lists,
+            live,
+            _clock: clock,
+        }
+    }
+
+    pub fn receive(&mut self, event: crate::event::Event, data: &Value) -> bool {
+        session::receive_contacts(&mut self.tracker, &mut self.lists, &event, data);
+        let changed = self.tracker.apply_received(&event, data);
+        match event {
+            crate::event::Event::UserUpdate => self.lists.user_changed(&self.tracker, data),
+            crate::event::Event::GuildMemberUpdate | crate::event::Event::GuildMemberRemove => {
+                self.lists.member_changed(&self.tracker, data)
+            }
+            _ => {}
+        }
+        changed
+    }
+
+    pub fn snapshot(&mut self) -> Snapshot {
+        self.tracker.snapshot()
+    }
+
+    pub fn select_members(&mut self, guild: &str, channel: &str, readers: &str) {
+        self.lists
+            .fixture_show(guild.into(), channel.into(), readers.into());
+    }
+
+    pub fn member_event(&mut self) -> Option<Live> {
+        let mut last = None;
+        while let Ok(event) = self.live.try_recv() {
+            last = Some(event);
+        }
+        last
+    }
+}
+
+/// Gateway receipt order within one tracker lifetime. Assigned before dispatch
+/// to either the member list or tracker, never when either publishes a copy.
+/// Neither persisted nor derived from a wall clock or Application consumption.
+#[derive(Clone, Debug)]
+pub struct PresenceObservation {
+    source: Arc<()>,
+    receipt: u64,
+}
+
+impl PresenceObservation {
+    fn source() -> Self {
+        Self {
+            source: Arc::new(()),
+            receipt: 0,
+        }
+    }
+
+    pub fn same_source(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.source, &other.source)
+    }
+
+    pub fn newer_than(&self, other: &Self) -> bool {
+        self.same_source(other) && self.receipt > other.receipt
+    }
+}
+impl PartialEq for PresenceObservation {
+    fn eq(&self, other: &Self) -> bool {
+        self.same_source(other) && self.receipt == other.receipt
+    }
+}
+impl Eq for PresenceObservation {}
+impl std::hash::Hash for PresenceObservation {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&Arc::as_ptr(&self.source), state);
+        std::hash::Hash::hash(&self.receipt, state);
+    }
+}
+
 /// A DM or group DM, as the DM list shows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Conversation {
@@ -146,6 +251,9 @@ pub struct Conversation {
     /// Not saved, since it's stale by the next start.
     #[serde(skip)]
     pub presence: Option<Presence>,
+    /// Exact received observation, independent of names, avatars and list identity.
+    #[serde(skip)]
+    pub presence_observation: Option<PresenceObservation>,
     #[serde(skip)]
     pub activity: Option<String>,
     #[serde(skip)]
@@ -202,6 +310,9 @@ pub struct Friend {
     /// when Discord says. Not saved, since it's stale by the next start.
     #[serde(skip)]
     pub presence: Option<Presence>,
+    /// Exact received observation, independent of names, avatars and list identity.
+    #[serde(skip)]
+    pub presence_observation: Option<PresenceObservation>,
     #[serde(skip)]
     pub activity: Option<String>,
     #[serde(skip)]
@@ -277,8 +388,15 @@ const INDEX_NOT_READY: u64 = 110000;
 /// parts, the connection and voice, to show on the next start.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Snapshot {
+    /// Current gateway lifetime/receipt; live provenance is never cached.
+    #[serde(skip)]
+    pub presence_observation: Option<PresenceObservation>,
     #[serde(skip)]
     pub status: Status,
+    /// Exact receipts for contact/one-to-one DM removals, not the later
+    /// snapshot watermark. Shared until an actual removal changes the map.
+    #[serde(skip)]
+    pub presence_retirements: Arc<HashMap<String, PresenceObservation>>,
     pub user_id: Option<String>,
     pub account: Option<Account>,
     /// Each server and this account's marks in it, each shared between
@@ -418,6 +536,7 @@ pub enum Live {
     Members {
         channel: String,
         members: Vec<ListedMember>,
+        observation: Option<PresenceObservation>,
     },
     /// The account's favourite GIFs, all of them, as another client or this
     /// one changed them.

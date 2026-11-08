@@ -1,3 +1,4 @@
+import { PlatformIndicators, TimezoneEditor } from "personal-controls.slint";
 import { ClientStyle } from "yapfast/style.slint";
 import { ScrollView, ListView } from "scrollview.slint";
 import { Theme, Middle, Label, Tip, BadgeTip } from "theme.slint";
@@ -10,7 +11,7 @@ export struct MemberRow {
     id: string, name: string, initial: string, tint: color, picture: image, heading: string,
     /// Discord's presence: "online", "mobile" (online only on a phone), "idle",
     /// "dnd" or "offline"; empty for Matrix.
-    presence: string,
+    presence: string, platforms: string,
     /// The name's colour, from a coloured Discord role.
     color: color, has-color: bool,
     /// A custom status or what they're doing, under the name, and the
@@ -99,7 +100,7 @@ export component MemberPanel inherits Rectangle {
                     Text { text: member.heading; color: #81828a; font-size: 14px; font-weight: 500; vertical-alignment: center; }
                 }
                 Rectangle {
-                  height: 42px; border-radius: 8px;
+                  height: member.platforms != "" ? 78px : 42px; border-radius: 8px;
                   background: member.id == root.selected ? #97979f33 : member-pointer.has-hover ? #97979f1f : transparent;
                   accessible-role: button;
                   accessible-label: member.name + ", " + member.id + ", show profile";
@@ -143,6 +144,7 @@ export component MemberPanel inherits Rectangle {
                                 accessible-role: image; accessible-label: "Timed out";
                             }
                         }
+                        if member.platforms != "": PlatformIndicators { received: member.platforms; }
                         if member.activity != "" || member.activity-emoji != "": StatusText {
                             text: member.activity; emoji-url: member.activity-emoji; font-size: 12px;
                             opacity: member.presence == "offline" ? 0.5 : 1;
@@ -203,6 +205,7 @@ export struct ProfileConnectionRow { kind: string, name: string, url: string, si
 
 export struct ProfileData {
     avatar-media: bool, banner-media: bool,
+    local-timezone-owner: string, local-timezone: string, local-time: string,
     id: string, name: string, initial: string, tint: color, picture: image,
     /// The colours of the profile's theme, a Nitro setting, which tint the
     /// card's gradient and border; the card is plain without them.
@@ -214,7 +217,7 @@ export struct ProfileData {
     /// The banner picture, else its colour.
     banner: image, accent: color, has-accent: bool,
     /// As in MemberRow.
-    presence: string, activity: string, activity-emoji: string,
+    presence: string, platforms: string, activity: string, activity-emoji: string,
     /// What they're doing, in full: games, music, streams.
     activities: [ActivityRow],
     /// The badges Discord shows beside the handle, in its order.
@@ -709,10 +712,15 @@ export component ProfileCard inherits Rectangle {
                             }
                             if root.data.tag != "": Middle { ServerTagChip { text: root.data.tag; badge: root.data.tag-badge; font-weight: 400; chip-height: 24px; pad: 8px; radius: 8px; fill: #97979f1f; outline: #97979f0a; outline-width: 1px; } }
                         }
+                        if root.data.platforms != "": PlatformIndicators { received: root.data.platforms; }
                         if root.data.activity != "" || root.data.activity-emoji != "": StatusText {
                             text: root.data.activity; emoji-url: root.data.activity-emoji;
                             color: Theme.secondary; font-size: 14px; wrap: word-wrap; max-height: 40px;
                         }
+                    }
+                    if !root.preview && root.data.id != "": TimezoneEditor {
+                        owner: root.data.local-timezone-owner; contact: root.data.id;
+                        saved: root.data.local-timezone; clock: root.data.local-time;
                     }
                     // The full profile's actions: the friend button, the message
                     // button and the menu, as Discord sets them under the name.

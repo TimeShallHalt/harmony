@@ -196,6 +196,7 @@ fn show_emoji(adapter: &Rc<RefCell<Adapter>>, window: &YapfastWindow, query: &st
 
 pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
     super::games::bind(window, adapter);
+    super::timezones::bind(window, adapter);
     super::gifs::bind(window, adapter);
     super::polls::bind(window, adapter);
     super::call_link::bind(window, adapter);
@@ -1623,6 +1624,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
             state.borrow().play(sound);
         }
     });
+    window.on_parse_volume(|text| yapfast_core::volume::parse_percentage(&text).unwrap_or(-1));
     window.on_volume_of(|person, stream| {
         let kind = if stream {
             yapfast_core::volume::Kind::Stream
@@ -1633,14 +1635,18 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     });
     let state = adapter.clone();
     window.on_volume_changed(move |person, stream, value, done| {
+        if person.is_empty() || !(0..=200).contains(&value) {
+            return;
+        }
         let kind = if stream {
             yapfast_core::volume::Kind::Stream
         } else {
             yapfast_core::volume::Kind::Voice
         };
-        // Within a step of the default is the default, as Discord snaps it.
+        // Only the displayed default percentage denotes the default gain.
+        // A neighbouring accepted whole entry (stream 55) must round-trip.
         let default = kind.default_gain();
-        let volume = if (value as f32 - yapfast_core::volume::to_slider(default)).abs() < 1.0 {
+        let volume = if value == yapfast_core::volume::to_slider(default).round() as i32 {
             default
         } else {
             yapfast_core::volume::from_slider(value as f32)

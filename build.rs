@@ -85,12 +85,19 @@ fn pack_twemoji() {
         .enumerate()
         .map(|(index, (_, bytes))| (glyph_at(index), bytes))
         .collect();
-    let font = emoji_font_tables::build_strike(
-        &emoji_font_tables::TWEMOJI,
-        "Yapfast Twemoji",
-        &glyphs,
-        &also,
+    // Small text is filtered once at build time, not point-sampled from the
+    // 72px artwork by DirectWrite. Retain that original first for the picker.
+    let small: Vec<_> = [16u8, 20, 32]
+        .into_iter()
+        .map(|ppem| small_strike(ppem, &glyphs))
+        .collect();
+    let mut strikes = vec![(&emoji_font_tables::TWEMOJI, glyphs.as_slice())];
+    strikes.extend(
+        small
+            .iter()
+            .map(|(strike, glyphs)| (strike, glyphs.as_slice())),
     );
+    let font = emoji_font_tables::build_strikes("Yapfast Twemoji", &strikes, &also);
     // An entry is where its name starts, u32, and how long it is, u16, then where
     // its picture starts and how long it is, u32 each.
     const ENTRY: usize = 14;
@@ -165,6 +172,64 @@ fn with_margin(png: &[u8]) -> Vec<u8> {
     writer.write_image_data(&data).expect("encoding a picture");
     writer.finish().expect("encoding a picture");
     out
+}
+
+/// A text-size strike of the same artwork, area-filtered with premultiplied
+/// alpha. Resampling straight RGBA darkens its transparent/coloured boundary.
+fn small_strike(
+    ppem: u8,
+    glyphs: &[(char, Vec<u8>)],
+) -> (emoji_font_tables::Strike, Vec<(char, Vec<u8>)>) {
+    use image::{ImageEncoder, imageops};
+    let scaled = |px: f32| (px * f32::from(ppem) / 53.0).round();
+    let side = scaled(80.0) as u32;
+    let strike = emoji_font_tables::Strike {
+        ppem,
+        side: side as u8,
+        bearing_x: scaled(-3.0) as i8,
+        bearing_y: scaled(58.0) as i8,
+        advance: scaled(74.0) as u8,
+    };
+    let glyphs = glyphs
+        .iter()
+        .map(|(glyph, png)| {
+            // Filter the transparent margin too. Cropping it before a resize makes
+            // the filter clamp opaque edge pixels, reproducing the flat cut.
+            let mut original = image::load_from_memory(png)
+                .expect("a glyph PNG")
+                .into_rgba8();
+            for pixel in original.pixels_mut() {
+                for channel in 0..3 {
+                    pixel[channel] =
+                        ((u32::from(pixel[channel]) * u32::from(pixel[3]) + 127) / 255) as u8;
+                }
+            }
+            let mut filtered =
+                imageops::resize(&original, side, side, imageops::FilterType::Triangle);
+            for pixel in filtered.pixels_mut() {
+                let alpha = u32::from(pixel[3]);
+                for channel in 0..3 {
+                    pixel[channel] = if alpha == 0 {
+                        0
+                    } else {
+                        ((u32::from(pixel[channel]) * 255 + alpha / 2) / alpha).min(255) as u8
+                    };
+                }
+            }
+            let bitmap = filtered;
+            let mut png = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut png)
+                .write_image(
+                    bitmap.as_raw(),
+                    bitmap.width(),
+                    bitmap.height(),
+                    image::ExtendedColorType::Rgba8,
+                )
+                .expect("a filtered glyph PNG");
+            (*glyph, png)
+        })
+        .collect();
+    (strike, glyphs)
 }
 
 fn glyph_at(index: usize) -> char {

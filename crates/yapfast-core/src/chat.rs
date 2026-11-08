@@ -822,6 +822,8 @@ pub struct MentionGroup {
 /// Whether a Discord member is around, as their status dot shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Presence {
+    #[cfg(feature = "discord")]
+    Clients(yapfast_discord::member_list::ClientPresence),
     Online,
     /// Online, and only on a phone.
     Mobile,
@@ -3860,6 +3862,15 @@ pub enum Event {
     Members {
         room: String,
         members: Result<Vec<ChatMember>, &'static str>,
+    },
+    /// Received Discord members with per-person receipt provenance and the
+    /// list receipt (for removals). Metadata republication does not restamp it.
+    #[cfg(feature = "discord")]
+    DiscordMembers {
+        room: String,
+        members: Vec<ChatMember>,
+        observations: HashMap<String, yapfast_discord::service::PresenceObservation>,
+        observation: Option<yapfast_discord::service::PresenceObservation>,
     },
     /// The send queue accepted or refused a message; delivery shows on its timeline item.
     SendResult {

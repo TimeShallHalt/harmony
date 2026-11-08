@@ -53,6 +53,7 @@ import { PostTag, PostRow, PostTagChoice, ForumPanel } from "forum.slint";
 import { BrowseRow, BrowseScreen } from "browse.slint";
 
 // Rust sees these, besides YapfastWindow.
+export { LocalTimezones } from "personal-controls.slint";
 export { ClientStyle } from "yapfast/style.slint";
 export { HarmonyAbout } from "about_updates.slint";
 export { Theme, Badges, Popup } from "theme.slint";
@@ -1296,6 +1297,7 @@ export component YapfastWindow inherits Window {
     callback stop-arranging;
     // Someone's volumes, from a right click on them in a call, as percentages.
     callback volume-of(string, bool) -> int;
+    callback parse-volume(string) -> int;
     /// A person, whether it's their stream, the volume, and whether it's
     /// the last of a drag, which is when it's remembered.
     callback volume-changed(string, bool, int, bool);
@@ -2160,6 +2162,7 @@ export component YapfastWindow inherits Window {
             width: voice-menu.menu-width; height: self.content-height;
             volume-person: root.volume-person; volume-name: root.volume-name; volume-live: root.volume-live;
             voice-volume <=> root.voice-volume; stream-volume <=> root.stream-volume;
+            parse-volume(text) => { return root.parse-volume(text); }
             volume-changed(person, stream, volume, last) => { root.volume-changed(person, stream, volume, last); }
         }
         voice-menu-content := ContextMenu {

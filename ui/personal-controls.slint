@@ -1,0 +1,101 @@
+import { TextField, ActionButton, VolumeSlider } from "controls.slint";
+import { Theme } from "theme.slint";
+
+export global LocalTimezones {
+    // Empty means a confirmed local commit; errors keep the old preference.
+    callback save(string, string, string) -> string;
+    callback reset(string, string) -> string;
+}
+
+export component TimezoneEditor inherits VerticalLayout {
+    in property <string> owner;
+    in property <string> contact;
+    in property <string> saved;
+    in property <string> clock;
+    in-out property <string> entry: root.saved;
+    out property <string> error;
+    spacing: 6px;
+    public function focus-entry() { field.focus-input(); }
+    public function submit() {
+        if root.owner != "" && root.contact != "" {
+            root.error = LocalTimezones.save(root.owner, root.contact, root.entry);
+        } else { root.error = "Sign in to save a local timezone for this contact."; }
+    }
+    public function reset() {
+        if root.owner != "" && root.contact != "" {
+            root.error = LocalTimezones.reset(root.owner, root.contact);
+            if root.error == "" { root.entry = ""; }
+        }
+    }
+    changed owner => { root.entry = root.saved; root.error = ""; }
+    changed contact => { root.entry = root.saved; root.error = ""; }
+    changed saved => { root.entry = root.saved; root.error = ""; }
+    Text { text: "Local timezone · only on this device"; color: Theme.secondary; font-size: 12px; wrap: word-wrap; }
+    Text { text: root.clock; color: Theme.text; font-size: 12px; wrap: word-wrap; accessible-label: root.clock; }
+    field := TextField {
+        text <=> root.entry; label: "Contact's local IANA timezone";
+        placeholder: "Europe/London"; text-size: 13px; min-height: 32px;
+        enabled: root.owner != "";
+        accepted => { root.submit(); }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        ActionButton { text: "Save timezone"; small: true; enabled: root.owner != ""; clicked => { root.submit(); } }
+        ActionButton { text: "Reset"; small: true; enabled: root.owner != ""; clicked => { root.reset(); } }
+    }
+    if root.error != "": Text { text: root.error; color: Theme.danger; font-size: 12px; wrap: word-wrap; }
+}
+
+export component PlatformIndicators inherits Text {
+    in property <string> received;
+    out property <string> label: root.received == "" ? "" : "Received platforms: " + root.received;
+    visible: root.received != "";
+    text: root.received; color: Theme.muted; font-size: 11px; wrap: word-wrap;
+    accessible-role: text; accessible-label: root.label;
+}
+
+// Numeric entry deliberately shares the slider's safe gain scale, not an
+// unbounded gain. Only Enter/Set commits, so partially typed text never plays.
+export component ExactVolume inherits VerticalLayout {
+    in property <string> target;
+    in property <string> label;
+    in-out property <int> value: 100;
+    in-out property <string> entry: root.value;
+    out property <string> error;
+    callback parse(string) -> int;
+    callback changed(int);
+    callback committed(int);
+    spacing: 6px;
+    public function focus-entry() { field.focus-input(); }
+    public function submit() {
+        let parsed = root.parse(root.entry);
+        if parsed < 0 || parsed > 200 {
+            root.error = "Enter a whole percentage from 0 to 200.";
+        } else {
+            root.error = "";
+            root.value = parsed;
+            root.entry = parsed;
+            root.committed(parsed);
+        }
+    }
+    changed value => { root.entry = root.value; }
+    changed target => { root.entry = root.value; root.error = ""; }
+    VolumeSlider {
+        label: root.label; value <=> root.value;
+        changed(value) => { root.error = ""; root.changed(value); }
+        committed(value) => { root.committed(value); }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        field := TextField {
+            text <=> root.entry; label: root.label + " exact percentage, 0 to 200";
+            placeholder: "0–200"; text-size: 13px; min-height: 32px;
+            accepted => { root.submit(); }
+        }
+        Text { text: "%"; color: Theme.secondary; vertical-alignment: center; }
+        ActionButton { text: "Set"; small: true; clicked => { root.submit(); } }
+    }
+    if root.error != "": Text {
+        text: root.error; color: Theme.danger; font-size: 12px; wrap: word-wrap;
+    }
+}

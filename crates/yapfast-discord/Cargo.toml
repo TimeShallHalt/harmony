@@ -11,6 +11,10 @@ license = "GPL-3.0-or-later"
 # crate on every `cargo test` for none.
 doctest = false
 
+[features]
+# Store-free production tracker access for narrowly selected native fixtures.
+test-fixtures = []
+
 [dependencies]
 chrono.workspace = true
 # Voice's transport encryption, and DAVE. ChaCha's stream also encrypts the

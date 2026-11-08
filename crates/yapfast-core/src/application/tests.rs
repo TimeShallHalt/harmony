@@ -1,5 +1,8 @@
 use super::{preview::preview_room, *};
 
+#[cfg(all(feature = "discord", feature = "test-fixtures"))]
+mod platform_ordering;
+
 #[path = "viewer_lifecycle_tests.rs"]
 mod viewer_lifecycle;
 
@@ -1967,6 +1970,7 @@ fn a_discord_dms_menu_manages_its_person_and_notifications() {
                 avatar: String::new(),
                 nickname: Some("Annie".into()),
                 presence: None,
+                presence_observation: None,
                 activity: None,
                 activities: Default::default(),
             }]
@@ -4200,6 +4204,7 @@ fn discord_friends_are_listed_and_messaged() {
         avatar: format!("{id}.png"),
         nickname: None,
         presence,
+        presence_observation: None,
         activity: None,
         activities: Default::default(),
     };
@@ -4927,6 +4932,7 @@ fn discord_dialogs_stop_waiting_when_the_backend_cant_answer() {
         loading: true,
         kept: false,
         note: None,
+        platform_presence: None,
     });
     app.stopped();
     let editor = app.state.status_editor.as_ref().expect("still open");
@@ -5928,6 +5934,7 @@ fn discord_dms(extra: Vec<yapfast_discord::service::Conversation>) -> Applicatio
         avatar: String::new(),
         nickname: None,
         presence: None,
+        presence_observation: None,
         activity: None,
         activities: Default::default(),
     };

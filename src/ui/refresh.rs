@@ -670,6 +670,7 @@ impl Adapter {
                     picture_url: friend.avatar.as_deref().unwrap_or_default().into(),
                     presence: presence_name(Some(friend.presence.unwrap_or(Presence::Offline)))
                         .into(),
+                    platforms: received_platforms(state, friend.presence),
                     activity,
                     activity_emoji,
                     voice_room: voice.map_or("", |place| place.room).into(),
@@ -875,6 +876,7 @@ impl Adapter {
                     .into(),
                     detail,
                     detail_emoji,
+                    platforms: received_platforms(state, room.presence),
                     voice_room: voice.map_or("", |place| place.room).into(),
                     voice_channel: voice.map_or("", |place| place.channel).into(),
                     voice_server: voice.map_or("", |place| place.server).into(),
@@ -1651,6 +1653,7 @@ impl Adapter {
                         tag_badge: tag_badge(&member.tag),
                         timed_out: member.timed_out_until.is_some_and(|until| until > now),
                         presence: presence_name(member.presence).into(),
+                        platforms: received_platforms(state, member.presence),
                         color: role_color(member.color),
                         has_color: member.color.is_some(),
                         // One line under the name, as Discord shows it.
@@ -2308,6 +2311,7 @@ impl Adapter {
                 joined: fallback.and_then(|fallback| fallback.joined.clone()),
                 ..Default::default()
             },
+            platform_presence: None,
             large: false,
             loading: false,
             kept: false,
@@ -3856,6 +3860,8 @@ impl Adapter {
             // was as it was when it opened.
             if let Some(room) = state.selected_room() {
                 data.presence = presence_name(room.presence.or(view.profile.presence)).into();
+                // Platform evidence already comes from the reconciled view.
+
                 if let Some(activity) = &room.activity {
                     let (emoji, activity) = if names_an_activity(activity, &room.activities) {
                         (None, "")
@@ -3875,6 +3881,7 @@ impl Adapter {
         let Some(view) = &state.profile else {
             window.set_profile_member(SharedString::default());
             self.tick_activities(window);
+            self.tick_timezones(window);
             return;
         };
         window.set_profile_large(view.large);
@@ -3888,6 +3895,7 @@ impl Adapter {
             window.set_profile(data);
         }
         self.tick_activities(window);
+        self.tick_timezones(window);
     }
 
     /// The image viewer: the full image once it arrives, the preview until then.

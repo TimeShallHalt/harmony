@@ -1,4 +1,5 @@
 import { ScrollView, ListView } from "scrollview.slint";
+import { PlatformIndicators } from "personal-controls.slint";
 import { Theme, Middle, Label, Popup } from "theme.slint";
 import { ActionButton, IconButton, Avatar, TextField, StatusText, VoiceSpot } from "controls.slint";
 import { DiscordBadge } from "discord.slint";
@@ -151,7 +152,7 @@ export component RequestsHeading inherits HorizontalLayout {
 export struct FriendRow {
     id: string, name: string, initial: string, tint: color, picture: image,
     /// As in MemberRow: "online", "mobile", "idle", "dnd" or "offline".
-    presence: string,
+    presence: string, platforms: string,
     /// Their custom status or what they're doing, and the address of its
     /// custom emoji's picture.
     activity: string, activity-emoji: string,
@@ -173,7 +174,7 @@ export component FriendItem inherits Rectangle {
     property <bool> has-activity: root.friend.activity != "" || root.friend.activity-emoji != "";
     property <string> status: root.friend.presence == "dnd" ? "Do Not Disturb" : root.friend.presence == "idle" ? "Idle" : root.friend.presence == "online" || root.friend.presence == "mobile" ? "Online" : "Offline";
     property <brush> surface: pointer.has-hover ? Theme.hover : Theme.chat;
-    height: 62px; border-radius: 8px;
+    height: root.friend.platforms != "" ? 78px : 62px; border-radius: 8px;
     background: pointer.has-hover ? Theme.hover : transparent;
     accessible-role: button;
     accessible-label: root.friend.name + ", " + root.status + (root.in-voice ? ", in " + root.friend.voice-channel + " in " + root.friend.voice-server : "") + (root.friend.activity != "" ? ", " + root.friend.activity : "") + ", message";
@@ -219,6 +220,7 @@ export component FriendItem inherits Rectangle {
                     }
                     StatusText { text: root.friend.activity; emoji-url: root.friend.activity-emoji; }
                 }
+                if root.friend.platforms != "": PlatformIndicators { received: root.friend.platforms; }
                 if !root.in-voice && !root.has-activity: Text { text: root.status; color: Theme.muted; font-size: 13px; overflow: elide; }
             }
             Middle {

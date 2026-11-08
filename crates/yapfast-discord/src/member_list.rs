@@ -34,6 +34,7 @@ pub struct ListedMember {
     /// The server tag they wear by their name.
     pub tag: Option<Tag>,
     pub presence: Presence,
+    pub presence_observation: Option<crate::service::PresenceObservation>,
     /// The RGB colour of their highest coloured role.
     pub color: Option<u32>,
     /// Their custom status, else what they're doing, as Discord shows it.
@@ -60,25 +61,108 @@ pub enum Presence {
     /// Offline or invisible.
     #[default]
     Offline,
+    /// Each client status actually delivered by the gateway. Unknown clients
+    /// and absent client_status are not guessed from the overall status.
+    Clients(ClientPresence),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ClientStatus {
+    Online,
+    Idle,
+    DoNotDisturb,
+}
+impl ClientStatus {
+    fn parse(value: &Value) -> Option<Self> {
+        match value.as_str()? {
+            "online" => Some(Self::Online),
+            "idle" => Some(Self::Idle),
+            "dnd" => Some(Self::DoNotDisturb),
+            _ => None,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Online => "online",
+            Self::Idle => "idle",
+            Self::DoNotDisturb => "dnd",
+        }
+    }
+}
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct ClientPlatforms {
+    pub desktop: Option<ClientStatus>,
+    pub web: Option<ClientStatus>,
+    pub mobile: Option<ClientStatus>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ClientPresence {
+    pub status: ClientStatus,
+    pub platforms: ClientPlatforms,
+}
+impl ClientPresence {
+    pub fn base(self) -> Presence {
+        match self.status {
+            ClientStatus::Idle => Presence::Idle,
+            ClientStatus::DoNotDisturb => Presence::DoNotDisturb,
+            ClientStatus::Online
+                if self.platforms.mobile == Some(ClientStatus::Online)
+                    && self.platforms.desktop != Some(ClientStatus::Online)
+                    && self.platforms.web != Some(ClientStatus::Online) =>
+            {
+                Presence::Mobile
+            }
+            ClientStatus::Online => Presence::Online,
+        }
+    }
+    pub fn summary(self) -> String {
+        [
+            ("Desktop", self.platforms.desktop),
+            ("Web", self.platforms.web),
+            ("Mobile", self.platforms.mobile),
+        ]
+        .into_iter()
+        .filter_map(|(name, status)| status.map(|status| format!("{name} ({})", status.label())))
+        .collect::<Vec<_>>()
+        .join(" · ")
+    }
 }
 
 impl Presence {
-    /// Reads a presence object: its status, and from `client_status` whether
-    /// they're online only on a phone, which Discord marks with a phone.
+    pub fn clients(self) -> Option<ClientPlatforms> {
+        match self {
+            Self::Clients(presence) => Some(presence.platforms),
+            _ => None,
+        }
+    }
+    pub fn base(self) -> Self {
+        match self {
+            Self::Clients(presence) => presence.base(),
+            other => other,
+        }
+    }
+    /// An offline event cannot keep stale device flags alive. Absent data stays
+    /// unknown, rather than being manufactured as a desktop session.
     pub fn parse(presence: &Value) -> Self {
-        let clients = &presence["client_status"];
-        match presence["status"].as_str() {
-            Some("online")
-                if clients["mobile"] == "online"
-                    && clients["desktop"] != "online"
-                    && clients["web"] != "online" =>
-            {
-                Self::Mobile
+        let Some(status) = ClientStatus::parse(&presence["status"]) else {
+            return Self::Offline;
+        };
+        let value = &presence["client_status"];
+        let platforms = ClientPlatforms {
+            desktop: ClientStatus::parse(&value["desktop"]),
+            web: ClientStatus::parse(&value["web"]),
+            mobile: ClientStatus::parse(&value["mobile"]),
+        };
+        if platforms != ClientPlatforms::default() {
+            Self::Clients(ClientPresence { status, platforms })
+        } else {
+            match status {
+                ClientStatus::Online => Self::Online,
+                ClientStatus::Idle => Self::Idle,
+                ClientStatus::DoNotDisturb => Self::DoNotDisturb,
             }
-            Some("online") => Self::Online,
-            Some("idle") => Self::Idle,
-            Some("dnd") => Self::DoNotDisturb,
-            _ => Self::Offline,
         }
     }
 }
@@ -89,6 +173,8 @@ struct Person {
     /// Shared with [`Names`] while it knows them.
     roles: Arc<[String]>,
     presence: Presence,
+    #[serde(skip)]
+    observation: Option<crate::service::PresenceObservation>,
     activity: Option<String>,
     /// Not saved: a game is over by the next start, and the line above
     /// says enough until Discord sends the presence again.
@@ -116,6 +202,8 @@ pub struct MemberList {
     /// is asked for again.
     #[serde(skip)]
     heard: Option<Instant>,
+    #[serde(skip)]
+    observation: Option<crate::service::PresenceObservation>,
     /// Whether Discord has sent the list yet.
     #[serde(default)]
     synced: bool,
@@ -135,6 +223,7 @@ impl MemberList {
             channel,
             readers,
             heard: None,
+            observation: None,
             synced: false,
             rows: Vec::new(),
             counts: HashMap::new(),
@@ -189,6 +278,15 @@ impl MemberList {
     /// Returns whether this list changed. Updates to other lists, such as the
     /// one of a channel shown before, are left out.
     pub fn apply(&mut self, data: &Value, names: &mut Names) -> bool {
+        self.apply_received(data, names, None)
+    }
+
+    pub(crate) fn apply_received(
+        &mut self,
+        data: &Value,
+        names: &mut Names,
+        observation: Option<crate::service::PresenceObservation>,
+    ) -> bool {
         if data["guild_id"] != self.guild.as_str() || data["id"] != self.readers.as_str() {
             return false;
         }
@@ -223,7 +321,15 @@ impl MemberList {
                         .as_array()
                         .into_iter()
                         .flatten()
-                        .map(|item| row(&self.guild, item, names, &mut self.people))
+                        .map(|item| {
+                            row(
+                                &self.guild,
+                                item,
+                                names,
+                                &mut self.people,
+                                observation.clone(),
+                            )
+                        })
                         .collect();
                     // Fewer items than asked for: the list ends there.
                     let ended = items.len() <= end.saturating_sub(start);
@@ -241,11 +347,23 @@ impl MemberList {
                     self.rows.extend(tail);
                 }
                 (Some("INSERT"), Some(index), _) => {
-                    let row = row(&self.guild, &op["item"], names, &mut self.people);
+                    let row = row(
+                        &self.guild,
+                        &op["item"],
+                        names,
+                        &mut self.people,
+                        observation.clone(),
+                    );
                     self.rows.insert(index.min(self.rows.len()), row);
                 }
                 (Some("UPDATE"), Some(index), _) => {
-                    let row = row(&self.guild, &op["item"], names, &mut self.people);
+                    let row = row(
+                        &self.guild,
+                        &op["item"],
+                        names,
+                        &mut self.people,
+                        observation.clone(),
+                    );
                     if let Some(slot) = self.rows.get_mut(index) {
                         *slot = row;
                     }
@@ -261,6 +379,7 @@ impl MemberList {
         }
         self.rows.truncate(ROWS);
         self.heard = Some(Instant::now());
+        self.observation = observation;
         let rows = &self.rows;
         self.people.retain(|user, _| {
             rows.iter()
@@ -271,6 +390,18 @@ impl MemberList {
 
     /// Applies a PRESENCE_UPDATE to a listed member; returns whether it changed.
     pub fn presence(&mut self, data: &Value) -> bool {
+        self.presence_received(data, None)
+    }
+
+    pub(crate) fn observation(&self) -> Option<crate::service::PresenceObservation> {
+        self.observation.clone()
+    }
+
+    pub(crate) fn presence_received(
+        &mut self,
+        data: &Value,
+        observation: Option<crate::service::PresenceObservation>,
+    ) -> bool {
         if data["guild_id"] != self.guild.as_str() {
             return false;
         }
@@ -283,10 +414,12 @@ impl MemberList {
         let presence = Presence::parse(data);
         let activity = activity(&data["activities"]);
         let activities = activities(&data["activities"]);
-        let changed = person.presence != presence
+        let changed = person.observation != observation
+            || person.presence != presence
             || person.activity != activity
             || person.activities != activities;
         person.presence = presence;
+        person.observation = observation;
         person.activity = activity;
         person.activities = activities;
         changed
@@ -324,6 +457,7 @@ impl MemberList {
                         role_icon: server.and_then(|server| server.role_icon(&person.roles)),
                         tag: names.server_tag(user).cloned(),
                         presence: person.presence,
+                        presence_observation: person.observation,
                         color: server.and_then(|server| server.color(&person.roles)),
                         activity: person.activity,
                         activities: person.activities,
@@ -354,7 +488,13 @@ impl MemberList {
 
 /// One row from an item: a group heading, or a member, whose name, roles and
 /// presence it learns.
-fn row(guild: &str, item: &Value, names: &mut Names, people: &mut HashMap<String, Person>) -> Row {
+fn row(
+    guild: &str,
+    item: &Value,
+    names: &mut Names,
+    people: &mut HashMap<String, Person>,
+    observation: Option<crate::service::PresenceObservation>,
+) -> Row {
     if let Some(group) = item["group"]["id"].as_str() {
         return Row::Group(group.to_owned());
     }
@@ -369,6 +509,7 @@ fn row(guild: &str, item: &Value, names: &mut Names, people: &mut HashMap<String
         Person {
             roles: names.shared_roles(guild, user).unwrap_or_default(),
             presence: Presence::parse(presence),
+            observation,
             activity: activity(&presence["activities"]),
             activities: activities(&presence["activities"]),
         },
@@ -470,9 +611,36 @@ mod tests {
     }
 
     #[test]
+    fn received_client_combinations_and_each_status_survive_parsing_and_storage() {
+        let value = json!({"status": "online", "client_status": {"desktop": "idle", "web": "online", "mobile": "dnd", "unknown": "online"}});
+        let presence = Presence::parse(&value);
+        let clients = presence.clients().unwrap();
+        assert_eq!(clients.desktop, Some(ClientStatus::Idle));
+        assert_eq!(clients.web, Some(ClientStatus::Online));
+        assert_eq!(clients.mobile, Some(ClientStatus::DoNotDisturb));
+        let saved = serde_json::to_vec(&presence).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Presence>(&saved).unwrap(),
+            presence
+        );
+        assert!(
+            Presence::parse(&json!({"status":"online"}))
+                .clients()
+                .is_none(),
+            "unknown is not desktop"
+        );
+        assert!(
+            Presence::parse(&json!({"status":"offline", "client_status":{"web":"online"}}))
+                .clients()
+                .is_none(),
+            "offline never exposes stale device flags"
+        );
+    }
+
+    #[test]
     fn marks_who_is_online_only_on_a_phone() {
         let parse = |status: &str, clients: Value| {
-            Presence::parse(&json!({"status": status, "client_status": clients}))
+            Presence::parse(&json!({"status": status, "client_status": clients})).base()
         };
         assert_eq!(
             parse("online", json!({"mobile": "online"})),
@@ -495,6 +663,38 @@ mod tests {
         assert_eq!(
             Presence::parse(&json!({"status": "online"})),
             Presence::Online
+        );
+    }
+
+    #[test]
+    fn member_list_sync_updates_and_local_cache_keep_received_platform_combinations() {
+        let mut names = Names::default();
+        let mut list = MemberList::new("10".into(), "11".into(), "everyone".into());
+        let clients = json!({"desktop": "idle", "web": "online", "mobile": "dnd"});
+        let mut item = member("1", "fixture");
+        item["member"]["presence"] = json!({"status":"online", "client_status":clients});
+        assert!(list.apply(
+            &json!({"guild_id":"10", "id":"everyone", "ops":[{
+                "op":"SYNC", "range":[0,99], "items":[item]
+            }]}),
+            &mut names
+        ));
+        let initial = list.members(None, &names)[0].presence;
+        assert_eq!(initial.clients().unwrap().web, Some(ClientStatus::Online));
+        assert!(initial.clients().unwrap().mobile.is_some());
+        let cached: MemberList =
+            serde_json::from_slice(&serde_json::to_vec(&list).unwrap()).unwrap();
+        assert_eq!(cached.members(None, &names)[0].presence, initial);
+        assert!(
+            list.presence(&json!({"guild_id":"10", "user":{"id":"1"}, "status":"idle",
+            "client_status":{"desktop":"idle"}}))
+        );
+        let updated = list.members(None, &names)[0].presence.clients().unwrap();
+        assert_eq!(updated.desktop, Some(ClientStatus::Idle));
+        assert_eq!(
+            (updated.web, updated.mobile),
+            (None, None),
+            "explicit new client set removes old devices"
         );
     }
 

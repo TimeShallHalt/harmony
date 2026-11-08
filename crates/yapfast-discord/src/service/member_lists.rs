@@ -51,9 +51,17 @@ pub(super) struct MemberLists {
     /// This account's presence as it last told Discord, which its row
     /// shows: Discord lists it online even while it's invisible.
     own: Presence,
+    /// Anonymous in-memory fixtures explicitly disable the persistent cache sink.
+    persist: bool,
 }
 
 impl MemberLists {
+    #[cfg(feature = "test-fixtures")]
+    pub(super) fn fixture_show(&mut self, guild: String, channel: String, readers: String) {
+        self.persist = false;
+        self.shown = Some(MemberList::new(guild, channel, readers));
+    }
+
     pub(super) fn new(
         kept: Vec<MemberList>,
         live: broadcast::Sender<Live>,
@@ -71,6 +79,7 @@ impl MemberLists {
             subscribed: HashMap::new(),
             stale: Box::pin(tokio::time::sleep(LIST_FRESH)),
             own,
+            persist: true,
         }
     }
 
@@ -242,13 +251,13 @@ impl MemberLists {
         let (mut changed, mut counted) = (false, false);
         if let Some(list) = self.shown.as_mut() {
             let count = list.count();
-            changed = list.apply(data, &mut names);
+            changed = list.apply_received(data, &mut names, Some(tracker.observation.clone()));
             counted = list.count() != count;
         }
         // Or a list kept from before, which Discord still sends.
         if !changed {
             for kept in &mut self.kept {
-                if kept.apply(data, &mut names) {
+                if kept.apply_received(data, &mut names, Some(tracker.observation.clone())) {
                     break;
                 }
             }
@@ -258,7 +267,7 @@ impl MemberLists {
         let sent = data["ops"]
             .as_array()
             .is_some_and(|ops| ops.iter().any(|op| op["op"] == "SYNC"));
-        if changed && sent {
+        if changed && sent && self.persist {
             cache::keep_lists(
                 self.kept
                     .iter()
@@ -275,7 +284,11 @@ impl MemberLists {
 
     /// Takes in a presence for the list on screen.
     pub(super) fn presence(&mut self, tracker: &Tracker, data: &Value) {
-        if self.shown.as_mut().is_some_and(|list| list.presence(data)) {
+        if self
+            .shown
+            .as_mut()
+            .is_some_and(|list| list.presence_received(data, Some(tracker.observation.clone())))
+        {
             self.publish(tracker);
         }
     }
@@ -335,6 +348,7 @@ impl MemberLists {
             let _ = self.live.send(Live::Members {
                 channel: channel.clone(),
                 members,
+                observation: Some(tracker.observation.clone()),
             });
         }
     }
@@ -357,6 +371,7 @@ impl MemberLists {
         let _ = self.live.send(Live::Members {
             channel: list.channel().to_owned(),
             members,
+            observation: list.observation(),
         });
     }
 
@@ -395,6 +410,7 @@ impl MemberLists {
         let _ = self.live.send(Live::Members {
             channel: channel.to_owned(),
             members,
+            observation: list.observation(),
         });
         if let Some(count) = list.count() {
             snapshots.send_modify(|snapshot| {

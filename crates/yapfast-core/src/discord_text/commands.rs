@@ -2,7 +2,7 @@
 //! events, carried out on the channels.
 
 use super::{
-    render::{chat_member, mention_groups, notification, publish, send_topic, sent_id},
+    render::{mention_groups, notification, publish, send_topic, sent_id},
     *,
 };
 use crate::chat::ForwardFailure;
@@ -805,12 +805,14 @@ pub fn live(
         Ok(Live::Members {
             channel: id,
             members,
+            observation,
         }) => {
             if id == channel.channel || id == channel.members_of {
-                let _ = events.send(Event::Members {
-                    room: channel.room.clone(),
-                    members: Ok(members.into_iter().map(chat_member).collect()),
-                });
+                let _ = events.send(super::received_members(
+                    channel.room.clone(),
+                    members,
+                    observation,
+                ));
             }
         }
         Ok(event) => {

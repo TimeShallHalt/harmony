@@ -210,6 +210,11 @@ pub(super) fn same_role_rows(
 /// The profile to show in place of `shown`, keeping its lists where they're
 /// the same; none when nothing changed.
 pub(super) fn changed_profile(shown: &ProfileData, mut data: ProfileData) -> Option<ProfileData> {
+    if data.id == shown.id {
+        data.local_timezone_owner = shown.local_timezone_owner.clone();
+        data.local_timezone = shown.local_timezone.clone();
+        data.local_time = shown.local_time.clone();
+    }
     data.servers = same_list(&shown.servers, data.servers);
     data.friends = same_list(&shown.friends, data.friends);
     data.activities = same_list(&shown.activities, data.activities);
@@ -293,6 +298,11 @@ pub(super) fn profile_data(
         accent: role_color(accent),
         has_accent: accent.is_some(),
         presence: presence_name(profile.presence).into(),
+        // Contact snapshots replace this independently of the cached status dot.
+        platforms: received_platforms(state, view.platform_presence),
+        local_timezone_owner: SharedString::default(),
+        local_timezone: SharedString::default(),
+        local_time: SharedString::default(),
         activity: activity.into(),
         activity_emoji: activity_emoji.unwrap_or_default().into(),
         activities: activity_rows(&profile.activities),
@@ -425,8 +435,28 @@ pub(super) fn profile_data(
     }
 }
 
+pub(super) fn received_platforms(state: &AppState, presence: Option<Presence>) -> SharedString {
+    if !state.discord_online {
+        return Default::default();
+    }
+    presence_platforms(presence)
+}
+
+pub(super) fn presence_platforms(presence: Option<Presence>) -> SharedString {
+    match presence {
+        #[cfg(feature = "discord")]
+        Some(Presence::Clients(clients)) => clients.summary().into(),
+        Some(Presence::Mobile) => "Mobile (online)".into(),
+        _ => Default::default(),
+    }
+}
+
 pub(super) fn presence_name(presence: Option<Presence>) -> &'static str {
     match presence {
+        #[cfg(feature = "discord")]
+        Some(Presence::Clients(clients)) => {
+            presence_name(Some(yapfast_core::discord::presence(clients.base())))
+        }
         Some(Presence::Online) => "online",
         Some(Presence::Mobile) => "mobile",
         Some(Presence::Idle) => "idle",

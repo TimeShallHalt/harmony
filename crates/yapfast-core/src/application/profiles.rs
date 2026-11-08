@@ -192,7 +192,9 @@ impl Application {
     ) -> Vec<Effect> {
         let fetch = Network::of(&room) == Network::Discord && !self.state.preview;
         let user = profile.id.clone();
+        let platform_presence = self.profile_platform_presence(&user, profile.presence);
         self.state.profile = Some(ProfileView {
+            platform_presence,
             profile,
             large,
             loading: fetch,
