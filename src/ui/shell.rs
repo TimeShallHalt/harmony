@@ -404,6 +404,13 @@ impl Adapter {
     /// The window closed: what only it used stops with it. The models stay, so
     /// the next window shows them without building them again.
     pub(super) fn detach(&mut self) {
+        self.latest_due = false;
+        self.present_selection = None;
+        self.start_selection = None;
+        // Retire the whole window-owned decode channel as well as its timer,
+        // pins and registrations. Old workers can finish only into a dropped
+        // receiver; the next real window starts a fresh animation lifetime.
+        self.animations = emoji_animation::Animations::new();
         self.call_timer.detach();
         self.timezone_clock.stop();
         self.meter = None;

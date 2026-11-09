@@ -3,6 +3,111 @@
 use super::*;
 
 impl Application {
+    pub(super) fn request_profile(&mut self, room: String, user: String, panel: bool) -> Effect {
+        let request = Arc::new(chat::ProfileRequest {
+            room,
+            user,
+            panel,
+            account: self.state.account.clone(),
+            owner: self.state.discord_user.clone(),
+            #[cfg(feature = "discord")]
+            source: self
+                .discord
+                .as_ref()
+                .and_then(|snapshot| snapshot.presence_observation.clone()),
+            #[cfg(feature = "discord")]
+            publication: Arc::default(),
+        });
+        if panel {
+            self.panel_profile_request = Some(request.clone());
+        } else {
+            self.profile_request = Some(request.clone());
+        }
+        Effect::Backend(Command::Discord(DiscordCommand::ScopedProfile(request)))
+    }
+
+    pub(super) fn show_profile_presentation(
+        &mut self,
+        request: Arc<chat::ProfileRequest>,
+        kept: bool,
+        result: Result<Profile, String>,
+    ) {
+        if !self.state.discord_online
+            || request.account != self.state.account
+            || request.owner != self.state.discord_user
+        {
+            return;
+        }
+        #[cfg(feature = "discord")]
+        if match (
+            &request.source,
+            self.discord
+                .as_ref()
+                .and_then(|snapshot| snapshot.presence_observation.as_ref()),
+        ) {
+            (Some(a), Some(b)) => !a.same_source(b),
+            (None, None) => false,
+            _ => true,
+        } {
+            return;
+        }
+        #[cfg(feature = "discord")]
+        if !request
+            .publication
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .is_some_and(|publication| publication.accepts(&request))
+        {
+            return;
+        }
+        let current = if request.panel {
+            &self.panel_profile_request
+        } else {
+            &self.profile_request
+        };
+        if !current
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &request))
+        {
+            return;
+        }
+        if !self.state.rooms.iter().any(|room| room.id == request.room) {
+            return;
+        }
+        let view = if request.panel {
+            &mut self.state.panel_profile
+        } else {
+            &mut self.state.profile
+        };
+        let Some(view) = view
+            .as_mut()
+            .filter(|view| view.loading && view.profile.id == request.user)
+        else {
+            return;
+        };
+        if result
+            .as_ref()
+            .is_ok_and(|profile| profile.id != request.user)
+        {
+            return;
+        }
+        if kept {
+            if let Ok(profile) = result {
+                fill_profile(view, &profile);
+                view.kept = true;
+            }
+        } else {
+            view.loading = false;
+            match result {
+                Ok(profile) => fill_profile(view, &profile),
+                Err(_) if view.kept => {}
+                Err(_) => view.note = Some("Discord didn't share the rest of this profile.".into()),
+            }
+            view.kept = false;
+        }
+    }
+
     /// Shows someone in the open conversation, or else a Discord friend.
     pub(super) fn show_profile(&mut self, user: String, large: bool) -> Vec<Effect> {
         let (Some(room), Some(member)) = (self.state.selected_room(), self.state.person(&user))
@@ -202,10 +307,7 @@ impl Application {
             note: None,
         });
         if fetch {
-            vec![Effect::Backend(Command::Discord(DiscordCommand::Profile {
-                room,
-                user,
-            }))]
+            vec![self.request_profile(room, user, false)]
         } else {
             vec![]
         }

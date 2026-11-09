@@ -28,6 +28,7 @@ mod gifs;
 mod gift;
 mod header;
 mod join;
+mod jump_start;
 mod members;
 mod messages;
 mod mfa;
@@ -42,6 +43,11 @@ mod profile_editor;
 mod profile_media;
 mod profiles;
 mod reactions;
+mod read_all;
+#[cfg(test)]
+mod read_all_tests;
+#[cfg(all(test, feature = "discord", feature = "test-fixtures"))]
+mod navread_acceptance_tests;
 mod rooms;
 mod scheduled_event;
 mod server;
@@ -532,6 +538,7 @@ pub struct AppState {
     pub online: bool,
     pub storage: Option<&'static str>,
     pub notice: Option<String>,
+    pub read_all: Option<read_all::ReadAll>,
     /// Shared with the networks' lists they're shown from.
     pub rooms: Vec<Arc<ChatRoom>>,
     pub servers: Vec<Arc<ChatServer>>,
@@ -1321,6 +1328,9 @@ pub enum Action {
     /// Mark a listed conversation read, or every conversation of a listed
     /// server, as their menus do.
     MarkRead(String),
+    AskReadAll,
+    ConfirmReadAll,
+    CancelReadAll,
     /// Go to wherever a conversation is listed and open it.
     Open(String),
     /// [`Action::Open`], showing the conversation's messages: a voice
@@ -1495,6 +1505,7 @@ pub enum Action {
     /// Show the selected room's newest messages again in place of a window
     /// of older ones.
     JumpToPresent,
+    JumpToStart,
     /// Download pictures that show outside the state, such as the emoji
     /// picker's; see [`DiscordCommand::Pictures`].
     LoadPictures(Vec<String>),
@@ -2032,6 +2043,9 @@ type TimelineArc = Arc<Vec<Arc<ChatMessage>>>;
 
 #[derive(Default)]
 pub struct Application {
+    read_all_submitted: HashMap<String, (Option<String>, std::time::Instant)>,
+    profile_request: Option<Arc<chat::ProfileRequest>>,
+    panel_profile_request: Option<Arc<chat::ProfileRequest>>,
     pub state: AppState,
     /// Received evidence for contacts whose profiles have been opened. Retained
     /// across card close/reopen, never persisted or sourced from profile fetches.
@@ -2359,6 +2373,20 @@ fn pictures_on_screen<'a>(
                         .filter_map(Option::as_deref)
                         .chain(tag_badge(&profile.tag))
                         .chain(profile.bio_emoji.iter().map(|emoji| emoji.picture.as_str()))
+                        .chain(
+                            profile
+                                .decoration
+                                .iter()
+                                .filter(|art| {
+                                    art.visible_at(
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs(),
+                                    )
+                                })
+                                .map(|art| art.url.as_str()),
+                        )
                         .chain(profile.badges.iter().flat_map(|badge| {
                             std::iter::once(badge.icon.as_str())
                                 .chain(badge.level.iter().map(|level| level.picture.as_str()))
@@ -2707,6 +2735,12 @@ impl Application {
             },
             Action::SelectRoom(id) => self.select_room(id),
             Action::MarkRead(id) => self.mark_read(id),
+            Action::AskReadAll => self.ask_read_all(),
+            Action::ConfirmReadAll => self.confirm_read_all(),
+            Action::CancelReadAll => {
+                self.state.read_all = None;
+                vec![]
+            }
             Action::EditLast => self.edit_last(),
             Action::OpenNewDm => self.open_new_dm(),
             Action::NewDmQuery(query) => {
@@ -2829,6 +2863,7 @@ impl Application {
             }
             Action::Later => self.later(),
             Action::JumpToPresent => self.jump_to_present(),
+            Action::JumpToStart => self.jump_to_start(),
             Action::LoadPictures(urls) => self.load_pictures(urls),
             Action::UnloadEmojiPictures => self.unload_emoji_pictures(),
             Action::Earlier => self.earlier(),
@@ -3358,6 +3393,7 @@ impl Application {
             }
             Action::CloseProfile => {
                 self.state.profile = None;
+                self.profile_request = None;
                 vec![]
             }
             Action::ShowRole(role) => self.show_role(role),
@@ -3557,8 +3593,18 @@ impl Application {
                 if self.state.selected.as_ref() == Some(&room) && !self.focusing {
                     // A backend can drop its oldest messages, as Discord does
                     // after missing many; what came before them loads again.
+                    // A successful Home Around has just established the
+                    // boundary for this intentional replacement. `seek` below
+                    // consumes that exact intent once; ordinary later eviction
+                    // must still invalidate the old boundary.
+                    let start_replacement = self.state.history_start
+                        && self
+                            .seeking
+                            .as_ref()
+                            .is_some_and(|seeking| seeking.item == "d:1" && !seeking.unread);
                     if let Some(first) = self.state.messages.first()
                         && !messages.iter().any(|message| message.item == first.item)
+                        && !start_replacement
                     {
                         self.state.history_start = false;
                     }
@@ -3581,6 +3627,11 @@ impl Application {
                     self.state.notice = Some(message);
                 }
             }
+            Event::ProfilePresentation {
+                request,
+                kept,
+                result,
+            } => self.show_profile_presentation(request, kept, result),
             Event::Profile { user, result } => self.show_fetched_profile(user, result),
             Event::KeptProfile { user, profile } => self.show_kept_profile(user, profile),
             Event::BadgeLevels { user, badges } => self.show_badge_levels(&user, badges),

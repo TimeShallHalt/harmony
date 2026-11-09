@@ -432,6 +432,9 @@ impl Adapter {
         // setting says; a minimised window has lost focus, and `playing` is
         // already false for it.
         let playing = window.global::<Motion>().get_playing() && !self.is_inactive();
+        if window.get_react_item().is_empty() {
+            self.animations.also(Vec::new(), pictures);
+        }
         self.animations.show(shown, pictures);
         self.animations.run(window, pictures);
         self.animations.sync(window, playing, self.weak.clone());
@@ -1044,6 +1047,18 @@ impl Adapter {
         window.set_discord_status(state.discord_presence.as_deref().unwrap_or("online").into());
         window.set_storage(state.storage.unwrap_or_default().into());
         window.set_notice(state.notice.as_deref().unwrap_or_default().into());
+        window.set_read_all_supported(
+            state.discord_online && state.discord_user.is_some() && !state.preview,
+        );
+        window.set_read_all_open(state.read_all.is_some());
+        window.set_read_all_count(state.read_all.as_ref().map_or(0, |p| p.rooms.len() as i32));
+        window.set_read_all_eligible(state.read_all.as_ref().map_or(0, |p| p.eligible as i32));
+        window.set_read_all_sync(
+            state
+                .read_all
+                .as_ref()
+                .map_or(state.sync_discord_reads, |p| p.sync),
+        );
     }
 
     /// Starting a thread: what the open channel offers, and the "New
@@ -3049,6 +3064,15 @@ impl Adapter {
         window.set_history_start(state.history_start);
         window.set_history_failed(state.history_failed);
         window.set_detached(state.detached);
+        window.set_jump_start_supported(
+            state.discord_online
+                && state.room_ready
+                && !state.preview
+                && !state.busy
+                && state.selected_room().is_some_and(|room| {
+                    room.network == yapfast_core::network::Network::Discord && !room.locked
+                }),
+        );
         window.set_loading_later(state.loading_later);
         window.set_later_failed(state.later_failed);
         // Without Matrix everything is Discord, so the encryption and key hints
@@ -3221,7 +3245,18 @@ impl Adapter {
             );
             if selection_changed || reset {
                 self.latest_due = false;
+                self.present_selection = None;
+                self.start_selection = None;
             } else if messages_changed && !state.detached && std::mem::take(&mut self.latest_due) {
+                if self.present_selection.take().as_ref() == state.selected.as_ref() {
+                    if let Some(last) = state.messages.last() {
+                        window.set_active_index(state.messages.len() as i32 - 1);
+                        window.set_active_item(last.item.as_str().into());
+                    } else {
+                        window.set_active_index(-1);
+                        window.set_active_item(SharedString::default());
+                    }
+                }
                 window.invoke_scroll_to_latest();
             }
             // A sent echo can get its event id without changing the row count
@@ -3271,7 +3306,14 @@ impl Adapter {
                     .iter()
                     .position(|message| &message.item == item)
             {
-                show_message(window, index, item, true);
+                let start = self.start_selection.take().as_ref() == state.selected.as_ref()
+                    && state.history_start
+                    && index == 0;
+                if start {
+                    window.set_active_index(0);
+                    window.set_active_item(item.as_str().into());
+                }
+                show_message(window, index, item, !start);
             }
         }
         if state.unread_jump != self.unread_jumped {
@@ -3854,6 +3896,11 @@ impl Adapter {
         let state = &self.app.state;
         window.set_profile_open(state.profile.is_some());
         window.set_panel_profile_shown(state.panel_profile.is_some());
+        if state.panel_profile.is_none() {
+            let mut data = window.get_panel_profile();
+            data.decoration = slint::Image::default();
+            window.set_panel_profile(data);
+        }
         if let Some(view) = &state.panel_profile {
             let mut data = profile_data(&mut self.pictures, state, view);
             // The DM list keeps up with whether they're around; the profile
@@ -3879,6 +3926,9 @@ impl Adapter {
             }
         }
         let Some(view) = &state.profile else {
+            let mut data = window.get_profile();
+            data.decoration = slint::Image::default();
+            window.set_profile(data);
             window.set_profile_member(SharedString::default());
             self.tick_activities(window);
             self.tick_timezones(window);

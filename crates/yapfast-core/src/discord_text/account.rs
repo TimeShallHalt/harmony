@@ -15,6 +15,28 @@ use crate::chat::{
     NotificationChange, NotifyLevel, OAuthGuild, OAuthPreview, RelationshipChange,
 };
 
+fn profile_completion(
+    request: Option<Arc<crate::chat::ProfileRequest>>,
+    user: String,
+    kept: bool,
+    result: Result<Profile, String>,
+) -> Event {
+    if let Some(request) = request {
+        Event::ProfilePresentation {
+            request,
+            kept,
+            result,
+        }
+    } else if kept {
+        Event::KeptProfile {
+            user,
+            profile: result.expect("kept profile is successful"),
+        }
+    } else {
+        Event::Profile { user, result }
+    }
+}
+
 /// Carries out a command about the account, or gives back any other.
 pub(super) fn command(
     command: Command,
@@ -160,33 +182,49 @@ pub(super) fn command(
         }
         return None;
     }
-    if let Command::Discord(DiscordCommand::Profile { room, user }) = command {
+    if let Some((room, user, request)) = match &command {
+        Command::Discord(DiscordCommand::Profile { room, user }) => {
+            Some((room.clone(), user.clone(), None))
+        }
+        Command::Discord(DiscordCommand::ScopedProfile(request)) => Some((
+            request.room.clone(),
+            request.user.clone(),
+            Some(request.clone()),
+        )),
+        _ => None,
+    } {
         match (discord, discord::parse_room(&room)) {
             (Ok(discord), Some((guild, _))) => {
                 let (discord, events, guild) = (discord.clone(), events.clone(), guild.to_owned());
                 tokio::spawn(async move {
                     let kept = |profile| {
-                        let _ = events.send(Event::KeptProfile {
-                            user: user.clone(),
-                            profile: chat_profile(&discord, &guild, profile),
-                        });
+                        let _ = events.send(profile_completion(
+                            request.clone(),
+                            user.clone(),
+                            true,
+                            Ok(chat_profile(&discord, &guild, profile)),
+                        ));
                     };
                     let profile = match discord.profile(&guild, &user, kept).await {
                         Ok(profile) => profile,
                         Err(error) => {
                             tracing::warn!(%error, "could not fetch a Discord profile");
-                            let _ = events.send(Event::Profile {
+                            let _ = events.send(profile_completion(
+                                request.clone(),
                                 user,
-                                result: Err(error.to_string()),
-                            });
+                                false,
+                                Err(error.to_string()),
+                            ));
                             return;
                         }
                     };
                     let mut badges = profile.badges.clone();
-                    let _ = events.send(Event::Profile {
-                        user: user.clone(),
-                        result: Ok(chat_profile(&discord, &guild, profile)),
-                    });
+                    let _ = events.send(profile_completion(
+                        request.clone(),
+                        user.clone(),
+                        false,
+                        Ok(chat_profile(&discord, &guild, profile)),
+                    ));
                     // The badges' levels come after the card is on screen.
                     let badges_task = async {
                         if discord.badge_levels(&guild, &user, &mut badges).await {
@@ -209,10 +247,12 @@ pub(super) fn command(
                 });
             }
             (discord, _) => {
-                let _ = events.send(Event::Profile {
+                let _ = events.send(profile_completion(
+                    request,
                     user,
-                    result: Err(discord.err().unwrap_or(NOT_DISCORD).into()),
-                });
+                    false,
+                    Err(discord.err().unwrap_or(NOT_DISCORD).into()),
+                ));
             }
         }
         return None;

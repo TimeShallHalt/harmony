@@ -287,6 +287,39 @@ pub(super) fn profile_data(
         has_theme: profile.theme.is_some(),
         id: profile.id.clone().into(),
         name: profile.name.clone().into(),
+        decoration: cached_picture(
+            pictures,
+            state,
+            profile
+                .decoration
+                .as_ref()
+                .filter(|art| {
+                    art.visible_at(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    )
+                })
+                .map(|art| art.url.as_str()),
+        ),
+        name_font: profile
+            .name_style
+            .as_ref()
+            .map_or(0, |s| i32::try_from(s.font_id).unwrap_or(-1)),
+        name_effect: profile
+            .name_style
+            .as_ref()
+            .map_or(0, |s| i32::try_from(s.effect_id).unwrap_or(-1)),
+        name_colors: ModelRc::new(VecModel::from(profile.name_style.as_ref().map_or_else(
+            Vec::new,
+            |s| {
+                s.colors
+                    .iter()
+                    .map(|c| slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, *c as u8))
+                    .collect::<Vec<_>>()
+            },
+        ))),
         initial: initial(&profile.name),
         tint: tint(&profile.name),
         picture: avatar.clone(),

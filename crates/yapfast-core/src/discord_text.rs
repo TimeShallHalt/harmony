@@ -59,6 +59,8 @@ mod account;
 mod audit_log;
 mod channels;
 mod commands;
+#[cfg(feature = "test-fixtures")]
+pub mod navread_fixture;
 mod expressions;
 mod gifs;
 mod open_channel;
@@ -180,6 +182,7 @@ pub(crate) struct Chat {
     finished: UnboundedReceiver<Done>,
     pictures: discord::Pictures,
     profile_media: crate::profile_media_io::Loader,
+    profile_publication: Arc<crate::chat::ProfilePublication>,
     saving: tokio::time::Interval,
     /// The video playing in the open channel or the thread beside it.
     video: Option<crate::playback::Playback>,
@@ -191,6 +194,7 @@ pub(crate) struct Chat {
 impl Drop for Chat {
     /// What changed since the last save goes to disk before Yapfast closes.
     fn drop(&mut self) {
+        self.profile_publication.retire();
         for channel in self
             .channels
             .open
@@ -217,6 +221,9 @@ impl Chat {
         let (done, finished) = tokio::sync::mpsc::unbounded_channel();
         Ok(Some(Self {
             states: Some(discord.snapshots()),
+            profile_publication: Arc::new(crate::chat::ProfilePublication::new(
+                discord.snapshots(),
+            )),
             live: Some(discord.live()),
             discord,
             online: false,
@@ -241,6 +248,15 @@ impl Chat {
     }
 
     pub(crate) fn command(&mut self, command: Command, events: &UnboundedSender<Event>) {
+        if let Command::Discord(DiscordCommand::ScopedProfile(request)) = &command {
+            let mut publication = request
+                .publication
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if publication.is_none() {
+                *publication = Some(self.profile_publication.clone());
+            }
+        }
         match command {
             Command::Discord(DiscordCommand::ViewProfileMedia {
                 request,

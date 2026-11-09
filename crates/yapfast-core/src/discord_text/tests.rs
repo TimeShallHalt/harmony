@@ -1,4 +1,7 @@
 use super::{open_channel::*, render::*, *};
+#[cfg(feature = "test-fixtures")]
+#[path = "navread_acceptance_tests.rs"]
+mod navread_acceptance_tests;
 use crate::chat::ForwardFailure;
 use yapfast_discord::ready::Deletes;
 

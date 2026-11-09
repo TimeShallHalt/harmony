@@ -2,6 +2,9 @@
 //! server. See <https://docs.discord.food/resources/user#get-user-profile>.
 
 use serde_json::Value;
+pub mod appearance;
+#[cfg(test)]
+mod update4_tests;
 
 use crate::{
     message::{Tag, iso_ms, snowflake_ms},
@@ -10,6 +13,10 @@ use crate::{
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Profile {
+    #[serde(default)]
+    pub name_style: Option<appearance::NameStyle>,
+    #[serde(default)]
+    pub decoration: Option<appearance::Decoration>,
     pub user_id: String,
     /// Their nickname in the server, else their display name or username.
     pub name: String,
@@ -294,6 +301,12 @@ pub fn parse(value: &Value, guild: Option<&str>) -> Option<Profile> {
     };
     Some(Profile {
         name,
+        name_style: appearance::name_style(&user["display_name_styles"]),
+        decoration: appearance::decoration(
+            member
+                .get("avatar_decoration_data")
+                .unwrap_or(&user["avatar_decoration_data"]),
+        ),
         username: user["username"].as_str().unwrap_or_default().to_owned(),
         avatar,
         banner,

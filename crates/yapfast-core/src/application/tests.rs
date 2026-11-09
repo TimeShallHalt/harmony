@@ -3937,8 +3937,8 @@ fn a_linked_discord_profile_loads_for_someone_not_listed() {
     assert!(
         effects.iter().any(|effect| matches!(
             effect,
-            Effect::Backend(Command::Discord(DiscordCommand::Profile { room, user }))
-                if room == "discord:10:11" && user == "4242"
+            Effect::Backend(Command::Discord(DiscordCommand::ScopedProfile(request)))
+                if request.room == "discord:10:11" && request.user == "4242"
         )),
         "Discord's profile is fetched"
     );
@@ -4042,7 +4042,9 @@ fn matrix_profiles_show_what_the_member_list_knows() {
     assert!(
         !effects.iter().any(|effect| matches!(
             effect,
-            Effect::Backend(Command::Discord(DiscordCommand::Profile { .. }))
+            Effect::Backend(Command::Discord(
+                DiscordCommand::Profile { .. } | DiscordCommand::ScopedProfile(_)
+            ))
         )),
         "Matrix has nothing more to fetch"
     );
@@ -4087,7 +4089,7 @@ fn discord_profiles_load_the_rest_from_discord() {
     assert!(
         effects.iter().any(|effect| matches!(
             effect,
-            Effect::Backend(Command::Discord(DiscordCommand::Profile { room, user })) if room == "discord:@me:30" && user == "7"
+            Effect::Backend(Command::Discord(DiscordCommand::ScopedProfile(request))) if request.room == "discord:@me:30" && request.user == "7"
         )),
         "Discord's profile is fetched"
     );
@@ -4432,8 +4434,8 @@ fn a_one_to_one_dm_shows_its_persons_profile_beside_it() {
         effects
             .iter()
             .filter_map(|effect| match effect {
-                Effect::Backend(Command::Discord(DiscordCommand::Profile { user, .. })) => {
-                    Some(user.clone())
+                Effect::Backend(Command::Discord(DiscordCommand::ScopedProfile(request))) => {
+                    Some(request.user.clone())
                 }
                 _ => None,
             })
@@ -4485,7 +4487,7 @@ fn a_one_to_one_dm_shows_its_persons_profile_beside_it() {
     });
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Backend(Command::Discord(DiscordCommand::Profile { room, user })) if room == "discord:@me:30" && user == "7"
+        Effect::Backend(Command::Discord(DiscordCommand::ScopedProfile(request))) if request.room == "discord:@me:30" && request.user == "7"
     )));
     let view = app.state.profile.as_ref().unwrap();
     assert!(!view.large && view.profile.name == "Ann");

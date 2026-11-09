@@ -69,6 +69,8 @@ export { ContactRow, PlaceRow, ReactionPill, ReactorRow, PollAnswerDraft } from 
 export { FoundRow, PickRow } from "header.slint";
 export { GifTile, GifFavorites } from "gifs.slint";
 
+import { ReadAllControl } from "read-all.slint";
+
 export component YapfastWindow inherits Window {
     /// "Yapfast", or "(3) Yapfast" with mentions and DMs waiting, as a browser
     /// tab's title counts them, so the taskbar shows it.
@@ -1239,6 +1241,16 @@ export component YapfastWindow inherits Window {
     callback earlier;
     callback later;
     callback jump-to-present;
+    callback ask-read-all;
+    callback confirm-read-all;
+    callback cancel-read-all;
+    in property <bool> read-all-open;
+    in property <bool> read-all-supported;
+    in property <int> read-all-count;
+    in property <int> read-all-eligible;
+    in property <bool> read-all-sync;
+    callback jump-to-start;
+    in property <bool> jump-start-supported;
     callback jump-to-unread;
     // The newest message came into view with the window in front, or left it.
     callback reading-changed(bool);
@@ -1912,14 +1924,22 @@ export component YapfastWindow inherits Window {
             }
         }
     }
+    property <bool> status-menu-open: status-menu.is-open;
+    changed status-menu-open => { if !root.status-menu-open { root.cancel-read-all(); } }
     status-menu := PopupWindow {
         width: ClientStyle.enabled ? 300px : 248px; height: status-menu-content.preferred-height;
         x: max(8px, min(root.width - self.width - 8px, root.menu-x));
         y: max(8px, root.menu-y - self.height - 4px);
         close-policy: PopupClosePolicy.close-on-click-outside;
         status-menu-content := VerticalLayout {
+            read-control := ReadAllControl {
+                open: root.read-all-open; supported: root.read-all-supported; count: root.read-all-count; eligible: root.read-all-eligible; sync: root.read-all-sync;
+                asked => { root.ask-read-all(); }
+                confirmed => { root.confirm-read-all(); }
+                cancelled => { root.cancel-read-all(); }
+            }
             if ClientStyle.enabled: AccountPopover {
-                available-height: max(120px, root.menu-y - 12px);
+                available-height: max(120px, root.menu-y - 12px - read-control.preferred-height);
                 name: root.account-name; initial: root.account-initial; tint: root.account-tint; picture: root.account-picture;
                 user-id: root.account-user-id;
                 status: root.discord-status; has-custom-status: root.has-custom-status;
@@ -2668,6 +2688,13 @@ export component YapfastWindow inherits Window {
                                 }
                             }
                         }
+                        if root.room-selected && !root.voice-panel && !root.room-forum: Middle {
+                            IconButton {
+                                icon: @image-url("icons/scroll-up.svg"); label: root.jump-start-supported ? "Jump to channel start" : "Jump to start unavailable (Discord only)";
+                                enabled: root.jump-start-supported; size: 32px; glyph: 20px;
+                                clicked => { root.jump-to-start(); }
+                            }
+                        }
                         if root.can-add-people: Middle {
                             IconButton {
                                 icon: @image-url("icons/user-plus.svg");
@@ -2872,6 +2899,8 @@ export component YapfastWindow inherits Window {
                                 accessible-role: list;
                                 accessible-label: "Messages";
                                 key-pressed(event) => {
+                                    if event.text == Key.Home { root.jump-to-start(); return accept; }
+                                    if event.text == Key.End { root.jump-to-present(); return accept; }
                                     if root.messages.length == 0 { return reject; }
                                     if root.confirm-delete != "" && root.confirm-delete == root.active-item {
                                         if event.text == Key.Return { root.confirm-delete-message(); return accept; }
@@ -2881,8 +2910,7 @@ export component YapfastWindow inherits Window {
                                     if event.text == Key.DownArrow { root.step-message(root.active-index < 0 ? root.messages.length - 1 : root.active-index + 1); return accept; }
                                     if event.text == Key.PageUp { root.step-message(root.active-index - 5); return accept; }
                                     if event.text == Key.PageDown { root.step-message(root.active-index + 5); return accept; }
-                                    if event.text == Key.Home { root.step-message(0); return accept; }
-                                    if event.text == Key.End { root.step-message(root.messages.length - 1); return accept; }
+
                                     if event.text == Key.Escape { root.focus-composer(); return accept; }
                                     if root.active-index < 0 || root.active-index >= root.messages.length { return reject; }
                                     if root.keyed-message.deleted || root.keyed-message.delivery != "" { return reject; }

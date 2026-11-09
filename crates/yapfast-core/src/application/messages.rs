@@ -800,6 +800,19 @@ impl Application {
         let Some(seeking) = self.seeking.take() else {
             return vec![];
         };
+        if seeking.item == "d:1" && !seeking.unread {
+            if self.state.history_start {
+                if let Some(first) = self.state.messages.first() {
+                    let count = self.state.jump.as_ref().map_or(0, |(_, count)| count + 1);
+                    self.state.jump = Some((first.item.clone(), count));
+                }
+            } else {
+                self.state.notice = Some(
+                    "The server did not establish an accessible history start. Try again.".into(),
+                );
+            }
+            return vec![];
+        }
         if self
             .state
             .messages

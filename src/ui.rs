@@ -86,6 +86,20 @@ mod update3_tests;
 mod update3_timezone_tests;
 #[cfg(test)]
 mod update3_volume_controls_tests;
+#[cfg(all(test, feature = "discord"))]
+mod update4_appearance_tests;
+#[cfg(all(test, feature = "discord"))]
+mod update4_appearance_acceptance_tests;
+#[cfg(all(test, feature = "discord"))]
+mod update4_decoration_tests;
+#[cfg(all(test, feature = "discord"))]
+mod update4_navigation_tests;
+#[cfg(all(test, feature = "discord"))]
+mod update4_read_all_tests;
+#[cfg(all(test, feature = "discord"))]
+mod update4_navread_acceptance_tests;
+#[cfg(test)]
+mod update4_tests;
 mod viewer_picture;
 mod yapfast;
 
@@ -1208,12 +1222,21 @@ fn attention(window: &YapfastWindow, wanted: bool) {
 }
 
 /// Plays animations or holds them still, as the setting and the focus say.
+fn motion_reduced(window: &YapfastWindow) -> bool {
+    window.global::<Theme>().get_reduced_motion()
+        || i_slint_core::with_existing_context(|context| {
+            context.motion_preference() == i_slint_core::MotionPreference::Reduced
+        })
+        .unwrap_or(false)
+}
+
 fn show_motion(window: &YapfastWindow) {
-    let playing = match ANIMATE.get() {
-        Animate::Focused => FOCUSED.get(),
-        Animate::Always => true,
-        Animate::Never => false,
-    };
+    let playing = !motion_reduced(window)
+        && match ANIMATE.get() {
+            Animate::Focused => FOCUSED.get(),
+            Animate::Always => true,
+            Animate::Never => false,
+        };
     window.global::<Motion>().set_playing(playing);
     // Animated emoji hold still with everything else, at once rather than at
     // the next refresh.
@@ -1780,6 +1803,8 @@ struct Adapter {
     /// ones, and show at the end the moment they come. Following the
     /// window's end until then would load earlier pages as they go in.
     latest_due: bool,
+    present_selection: Option<String>,
+    start_selection: Option<String>,
     /// Spoilers clicked, and what was picked or shown on polls; see
     /// `message_row`.
     revealed: HashSet<String>,
@@ -1868,6 +1893,8 @@ struct Adapter {
     link_code: Option<(String, slint::Image)>,
     /// What the GIF picker's grid shows.
     gifs: gifs::Shown,
+    /// Preference notifications; no idle polling timer.
+    motion_changes: i_slint_core::properties::ChangeTracker,
     /// A Discord link handed to this start before Discord is online.
     pending_link: Option<String>,
 }
@@ -2031,6 +2058,8 @@ impl Adapter {
                 jumped: None,
                 unread_jumped: 0,
                 latest_due: false,
+                present_selection: None,
+                start_selection: None,
                 revealed: HashSet::new(),
                 clock_minute: 0,
                 restyle: false,
@@ -2077,6 +2106,7 @@ impl Adapter {
                 #[cfg(feature = "discord")]
                 link_code: None,
                 gifs: gifs::Shown::default(),
+                motion_changes: Default::default(),
                 pending_link: None,
             })
         }))
@@ -2460,6 +2490,11 @@ impl Adapter {
                         None => Err(command),
                     };
                     if let Err(command) = result {
+                        if matches!(command, Command::Present(_) | Command::Around { .. }) {
+                            self.latest_due = false;
+                            self.present_selection = None;
+                            self.start_selection = None;
+                        }
                         self.app.backend_failed(&command);
                     }
                 }
@@ -2567,6 +2602,20 @@ impl Adapter {
     }
 
     fn action(&mut self, window: &YapfastWindow, action: Action) {
+        if matches!(
+            action,
+            Action::Jump(_)
+                | Action::JumpToStart
+                | Action::JumpToUnread
+                | Action::SelectRoom(_)
+                | Action::Navigate(_)
+                | Action::Open(_)
+                | Action::OpenDmScreen(_)
+        ) {
+            self.latest_due = false;
+            self.present_selection = None;
+            self.start_selection = None;
+        }
         // A keystroke in the composer changes only the composer, and one in
         // the profile editor only the editor; the rest of the window
         // stays as it is.
@@ -2612,6 +2661,29 @@ impl Adapter {
 
     /// Applies a backend event; the caller shows what it can have changed after.
     fn apply(&mut self, event: Event) -> Reach {
+        if let Event::HistoryLoaded {
+            room,
+            direction,
+            history: yapfast_core::chat::History::Failed,
+        } = &event
+        {
+            if self.app.state.selected.as_ref() == Some(room) {
+                match direction {
+                    yapfast_core::chat::Direction::Latest
+                        if self.present_selection.as_ref() == Some(room) =>
+                    {
+                        self.present_selection = None;
+                        self.latest_due = false;
+                    }
+                    yapfast_core::chat::Direction::Around
+                        if self.start_selection.as_ref() == Some(room) =>
+                    {
+                        self.start_selection = None
+                    }
+                    _ => {}
+                }
+            }
+        }
         let reach = Reach::of(&event);
         let voice_event = matches!(&event, Event::Voice(_));
         let owner = (

@@ -10,6 +10,10 @@
 
 use super::*;
 
+#[cfg(all(test, feature = "discord"))]
+#[path = "update4_emoji_acceptance_tests.rs"]
+mod acceptance;
+
 /// Ten frames a second, for a frame whose animation gave it no delay. A GIF's
 /// delays are read with its pixels, so this only covers a picture that lost
 /// them.
@@ -230,6 +234,7 @@ impl Cache {
                 return;
             };
             if let Some(taken) = self.entries.remove(&key) {
+                i_slint_core::yapfast_emoji::remove(&key);
                 self.bytes -= taken.frames.bytes();
             }
         }
@@ -292,6 +297,7 @@ const DECODING_AT_ONCE: usize = 1;
 /// The animated emoji on screen: what they need decoded, what is kept, and the
 /// clock they all draw from.
 pub(super) struct Animations {
+    picker: HashSet<String>,
     cache: Cache,
     queue: Queue,
     /// The emoji whose frames a thread is decoding now.
@@ -308,11 +314,21 @@ pub(super) struct Animations {
     interval: u64,
 }
 
+impl Drop for Animations {
+    fn drop(&mut self) {
+        self.timer.stop();
+        for key in self.cache.entries.keys() {
+            i_slint_core::yapfast_emoji::remove(key);
+        }
+    }
+}
+
 impl Animations {
     pub(super) fn new() -> Self {
         let (done, decoded) = std::sync::mpsc::channel();
         Self {
             cache: Cache::new(),
+            picker: HashSet::new(),
             queue: Queue::default(),
             decoding: std::collections::HashSet::new(),
             done,
@@ -336,6 +352,9 @@ impl Animations {
             // The font may have been made after the frames were kept, or made
             // again since, so run of text that draws this emoji is named here.
             if let Some(glyph) = glyph {
+                if let Some(kept) = self.cache.entries.get_mut(&key) {
+                    kept.glyph = Some(glyph);
+                }
                 i_slint_core::yapfast_emoji::set_glyph(&key, glyph);
             }
             if self.cache.get(&key).is_some()
@@ -355,6 +374,10 @@ impl Animations {
             wanted.push((key, glyph, address));
         }
         self.cache.pin(keys.iter().map(String::as_str));
+        self.reconcile_registry();
+        self.queue
+            .waiting
+            .retain(|job| self.cache.pinned.contains(&job.key) || self.picker.contains(&job.key));
         for (key, glyph, address) in wanted {
             self.queue.want(Job {
                 key,
@@ -372,6 +395,12 @@ impl Animations {
         shown: impl IntoIterator<Item = (String, Option<char>, String)>,
         pictures: &HashMap<String, Arc<Picture>>,
     ) {
+        let shown: Vec<_> = shown.into_iter().collect();
+        self.picker = shown.iter().map(|(key, _, _)| key.clone()).collect();
+        self.queue
+            .waiting
+            .retain(|job| self.cache.pinned.contains(&job.key) || self.picker.contains(&job.key));
+        self.reconcile_registry();
         for (key, glyph, address) in shown {
             if self.cache.contains(&key)
                 || self.cache.is_still(&key)
@@ -389,6 +418,25 @@ impl Animations {
     }
 
     /// Starts decoding what is wanted, within the budget of work in flight.
+    fn reconcile_registry(&self) {
+        for (key, kept) in &self.cache.entries {
+            if self.cache.pinned.contains(key) || self.picker.contains(key) {
+                if i_slint_core::yapfast_emoji::frame_of_key(key).is_none() {
+                    i_slint_core::yapfast_emoji::insert(
+                        key,
+                        kept.glyph,
+                        Rc::new(i_slint_core::yapfast_emoji::Animation::new(
+                            kept.frames.images().to_vec(),
+                            kept.frames.delays(),
+                        )),
+                    );
+                }
+            } else {
+                i_slint_core::yapfast_emoji::remove(key);
+            }
+        }
+    }
+
     pub(super) fn start(&mut self, pictures: &HashMap<String, Arc<Picture>>) {
         while self.decoding.len() < DECODING_AT_ONCE {
             let Some(job) = self.queue.take() else {
@@ -434,7 +482,9 @@ impl Animations {
                 frames.images().to_vec(),
                 frames.delays(),
             ));
-            i_slint_core::yapfast_emoji::insert(&decoded.key, decoded.glyph, animation);
+            if self.cache.pinned.contains(&decoded.key) || self.picker.contains(&decoded.key) {
+                i_slint_core::yapfast_emoji::insert(&decoded.key, decoded.glyph, animation);
+            }
             self.cache.insert(decoded.key, decoded.glyph, frames);
             self.cache.evict();
         }
@@ -444,7 +494,9 @@ impl Animations {
     /// draws what shows a frame again. Called each tick and each refresh, so a
     /// decode that finishes is seen at once rather than at the next change.
     pub(super) fn run(&mut self, window: &YapfastWindow, pictures: &HashMap<String, Arc<Picture>>) {
-        self.start(pictures);
+        if window.global::<Motion>().get_playing() {
+            self.start(pictures);
+        }
         self.drain();
         window
             .global::<EmojiAnimations>()
@@ -464,8 +516,7 @@ impl Animations {
         i_slint_core::yapfast_emoji::set_playing(playing);
         self.side = frame_side(window.window().scale_factor());
         let waiting = !self.decoding.is_empty()
-            || self.queue.len() > 0
-            || !i_slint_core::yapfast_emoji::is_empty();
+            || (playing && (self.queue.len() > 0 || !i_slint_core::yapfast_emoji::is_empty()));
         if !waiting {
             self.timer.stop();
             self.interval = 0;
@@ -494,11 +545,15 @@ impl Animations {
                 let (Some(adapter), Some(window)) = (adapter.upgrade(), weak.upgrade()) else {
                     return;
                 };
+                let owner = Rc::downgrade(&adapter);
                 let mut adapter = adapter.borrow_mut();
                 let Adapter {
                     app, animations, ..
                 } = &mut *adapter;
                 animations.run(&window, &app.state.pictures);
+                // Completion can be the last outstanding work while playback is
+                // paused. Reconcile here instead of waiting for another refresh.
+                animations.sync(&window, i_slint_core::yapfast_emoji::playing(), owner);
             },
         );
     }
@@ -580,6 +635,573 @@ fn frames_reach_the_registry() {
     i_slint_core::yapfast_emoji::remove(key);
 }
 
+#[test]
+fn update4_generated_frames_retire_registry_and_timer_with_actual_adapter() {
+    i_slint_backend_testing::init_no_event_loop();
+    let dir = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let owner = Adapter::new(
+        Arc::new(yapfast_core::runtime::BackgroundRuntime::new().unwrap()),
+        dir.path().into(),
+        &window,
+    )
+    .unwrap();
+    let mut data = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new(&mut data);
+        for (red, delay) in [(11, 40), (231, 90)] {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(4, 4, image::Rgba([red, 31, 71, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(delay, 1),
+                ))
+                .unwrap();
+        }
+    }
+    let pic = Arc::new(yapfast_core::chat::decode_picture(&data, 128, 128).unwrap());
+    let pictures = HashMap::from([("generated".into(), pic)]);
+    let key = "update4-generated:200";
+    {
+        let mut a = owner.borrow_mut();
+        a.animations
+            .show(vec![(key.into(), None, "generated".into())], &pictures);
+        a.animations.start(&pictures);
+        for _ in 0..200 {
+            a.animations.drain();
+            if i_slint_core::yapfast_emoji::frame_of_key(key).is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    i_slint_core::yapfast_emoji::set_playing(true);
+    let first = i_slint_core::yapfast_emoji::frame_of_key(key).unwrap();
+    assert_eq!(
+        &first.to_rgba8().unwrap().as_bytes()[..4],
+        &[11, 31, 71, 255]
+    );
+    i_slint_core::yapfast_emoji::advance(std::time::Duration::from_millis(40));
+    let second = i_slint_core::yapfast_emoji::frame_of_key(key).unwrap();
+    assert_eq!(
+        &second.to_rgba8().unwrap().as_bytes()[..4],
+        &[231, 31, 71, 255]
+    );
+    drop(first);
+    drop(second);
+    let mut a = owner.borrow_mut();
+    a.animations.show(Vec::new(), &pictures);
+    a.animations.sync(&window, true, Rc::downgrade(&owner));
+    assert!(
+        i_slint_core::yapfast_emoji::frame_of_key(key).is_none(),
+        "no consumer retains a registry animation"
+    );
+    assert!(
+        !a.animations.timer.running(),
+        "no idle animation timer after consumers leave"
+    );
+    a.animations
+        .show(vec![(key.into(), None, "generated".into())], &pictures);
+    assert!(
+        i_slint_core::yapfast_emoji::frame_of_key(key).is_some(),
+        "cache reopens without another decode"
+    );
+    let weak = Rc::downgrade(&a.animations.cache.get(key).unwrap());
+    drop(a);
+    drop(owner);
+    assert!(weak.upgrade().is_none());
+    assert!(
+        i_slint_core::yapfast_emoji::frame_of_key(key).is_none(),
+        "dropping actual Adapter retires owned registry entries"
+    );
+}
+
+#[test]
+fn update4_paused_decoded_emoji_quiesces_and_resumes_actual_adapter_timer() {
+    i_slint_backend_testing::init_no_event_loop();
+    let dir = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let owner = Adapter::new(
+        Arc::new(yapfast_core::runtime::BackgroundRuntime::new().unwrap()),
+        dir.path().into(),
+        &window,
+    )
+    .unwrap();
+    let mut data = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new(&mut data);
+        for (red, delay) in [(17, 40), (223, 90)] {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(4, 4, image::Rgba([red, 31, 71, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(delay, 1),
+                ))
+                .unwrap();
+        }
+    }
+    let picture = Arc::new(yapfast_core::chat::decode_picture(&data, 128, 128).unwrap());
+    let pictures = HashMap::from([("generated-paused".into(), picture)]);
+    let key = "update4-paused:201";
+    let mut a = owner.borrow_mut();
+    a.animations.show(
+        vec![(key.into(), None, "generated-paused".into())],
+        &pictures,
+    );
+    a.animations.start(&pictures);
+    for _ in 0..200 {
+        a.animations.drain();
+        if a.animations.decoding.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(a.animations.decoding.is_empty());
+    assert_eq!(a.animations.queue.len(), 0);
+    a.animations.sync(&window, true, Rc::downgrade(&owner));
+    assert!(
+        a.animations.timer.running(),
+        "positive control: visible playing emoji ticks"
+    );
+    let first = i_slint_core::yapfast_emoji::frame_of_key(key).unwrap();
+    a.animations.sync(&window, false, Rc::downgrade(&owner));
+    assert!(
+        !a.animations.timer.running(),
+        "paused decoded emoji must not retain an idle wakeup timer"
+    );
+    i_slint_core::yapfast_emoji::advance(std::time::Duration::from_millis(100));
+    assert_eq!(
+        i_slint_core::yapfast_emoji::frame_of_key(key).unwrap(),
+        first
+    );
+    a.animations.sync(&window, true, Rc::downgrade(&owner));
+    assert!(a.animations.timer.running());
+    i_slint_core::yapfast_emoji::advance(std::time::Duration::from_millis(40));
+    assert_eq!(
+        &i_slint_core::yapfast_emoji::frame_of_key(key)
+            .unwrap()
+            .to_rgba8()
+            .unwrap()
+            .as_bytes()[..4],
+        &[223, 31, 71, 255]
+    );
+    a.animations.show(Vec::new(), &pictures);
+    a.animations.sync(&window, true, Rc::downgrade(&owner));
+    assert!(!a.animations.timer.running());
+}
+
+#[test]
+fn update4_paused_inflight_decode_stops_timer_after_completion_without_refresh() {
+    i_slint_backend_testing::init_no_event_loop();
+    let dir = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let owner = Adapter::new(
+        Arc::new(yapfast_core::runtime::BackgroundRuntime::new().unwrap()),
+        dir.path().into(),
+        &window,
+    )
+    .unwrap();
+    let mut data = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new(&mut data);
+        for red in [19, 221] {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(4, 4, image::Rgba([red, 31, 71, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(40, 1),
+                ))
+                .unwrap();
+        }
+    }
+    let key = "update4-paused-inflight:202";
+    {
+        let mut a = owner.borrow_mut();
+        a.app.state.pictures.insert(
+            "inflight".into(),
+            Arc::new(yapfast_core::chat::decode_picture(&data, 128, 128).unwrap()),
+        );
+        let Adapter {
+            app, animations, ..
+        } = &mut *a;
+        animations.show(
+            vec![(key.into(), None, "inflight".into())],
+            &app.state.pictures,
+        );
+        animations.start(&app.state.pictures);
+        assert_eq!(
+            animations.decoding.len(),
+            1,
+            "completion still awaits the real timer consumer"
+        );
+        animations.sync(&window, false, Rc::downgrade(&owner));
+        assert!(
+            animations.timer.running(),
+            "bounded completion polling remains live"
+        );
+    }
+    // The owning adapter can pause for inactivity even when the global mode
+    // still permits motion. A completion must preserve that stricter policy.
+    window.global::<Motion>().set_playing(true);
+    for _ in 0..200 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
+        if owner.borrow().animations.decoding.is_empty() {
+            break;
+        }
+    }
+    let a = owner.borrow();
+    assert!(
+        a.animations.decoding.is_empty(),
+        "real timer must consume generated decode"
+    );
+    assert!(
+        i_slint_core::yapfast_emoji::frame_of_key(key).is_some(),
+        "still fallback remains available"
+    );
+    assert!(
+        !a.animations.timer.running(),
+        "paused completion must quiesce without a later app refresh"
+    );
+}
+
+#[test]
+fn update4_paused_actual_adapter_defers_new_frame_decode_until_playback_resumes() {
+    i_slint_backend_testing::init_no_event_loop();
+    let dir = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let owner = Adapter::new(
+        Arc::new(yapfast_core::runtime::BackgroundRuntime::new().unwrap()),
+        dir.path().into(),
+        &window,
+    )
+    .unwrap();
+    let mut data = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new(&mut data);
+        for red in [23, 219] {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(4, 4, image::Rgba([red, 31, 71, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(40, 1),
+                ))
+                .unwrap();
+        }
+    }
+    let key = "update4-paused-admission:203";
+    let mut a = owner.borrow_mut();
+    a.app.state.pictures.insert(
+        "paused-admission".into(),
+        Arc::new(yapfast_core::chat::decode_picture(&data, 128, 128).unwrap()),
+    );
+    let Adapter {
+        app, animations, ..
+    } = &mut *a;
+    animations.show(
+        vec![(key.into(), None, "paused-admission".into())],
+        &app.state.pictures,
+    );
+    assert_eq!(
+        animations.queue.len(),
+        1,
+        "real received source wants animation frames"
+    );
+    window.global::<Motion>().set_playing(false);
+    animations.run(&window, &app.state.pictures);
+    animations.sync(&window, false, Rc::downgrade(&owner));
+    assert!(
+        animations.decoding.is_empty(),
+        "paused real run must not admit a later frame decoder"
+    );
+    assert_eq!(
+        animations.queue.len(),
+        1,
+        "deferred work survives without decode"
+    );
+    assert!(
+        !animations.timer.running(),
+        "deferred paused queue must not poll"
+    );
+    window.global::<Motion>().set_playing(true);
+    animations.run(&window, &app.state.pictures);
+    assert_eq!(
+        animations.decoding.len(),
+        1,
+        "resume admits exactly the deferred production decode"
+    );
+    for _ in 0..200 {
+        animations.drain();
+        if animations.decoding.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(animations.decoding.is_empty());
+    assert!(i_slint_core::yapfast_emoji::frame_of_key(key).is_some());
+}
+
+#[test]
+fn repair1_picker_no_match_and_known_empty_retire_consumers_without_refresh() {
+    i_slint_backend_testing::init_no_event_loop();
+    let dir = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let owner = Adapter::new(
+        Arc::new(yapfast_core::runtime::BackgroundRuntime::new().unwrap()),
+        dir.path().into(),
+        &window,
+    )
+    .unwrap();
+    bind_callbacks(&window, &owner);
+    window.set_emoji_panel_width(498.);
+    window.set_react_item("fixture-picker".into());
+    window.global::<Motion>().set_playing(true);
+    for empty_viewport in [false, true] {
+        window.invoke_emoji_search("pizza".into());
+        let key = "repair1-picker:210";
+        let weak;
+        {
+            let mut a = owner.borrow_mut();
+            let frames = Rc::new(Frames::new(
+                vec![
+                    slint::SharedPixelBuffer::new(2, 2),
+                    slint::SharedPixelBuffer::new(2, 2),
+                ],
+                &[40, 90],
+            ));
+            weak = Rc::downgrade(&frames);
+            a.animations.cache.insert(key.into(), None, frames);
+            a.animations
+                .also(vec![(key.into(), None, "missing".into())], &HashMap::new());
+            a.animations.sync(&window, true, Rc::downgrade(&owner));
+            assert!(a.animations.timer.running());
+        }
+        if empty_viewport {
+            window.invoke_emoji_scrolled_to(100000., 50.);
+        } else {
+            window.invoke_emoji_search("no-such-emoji-repair1-xyz".into());
+        }
+        {
+            let mut a = owner.borrow_mut();
+            assert!(
+                a.animations.picker.is_empty(),
+                "known empty picker must replace its previous consumers"
+            );
+            assert!(i_slint_core::yapfast_emoji::frame_of_key(key).is_none());
+            assert!(
+                !a.animations.timer.running(),
+                "model/viewport replacement must reconcile timer immediately"
+            );
+            // Ordinary production budget pressure, without forced eviction/purge.
+            for i in 0..4 {
+                a.animations.cache.insert(
+                    format!("pressure:{i}"),
+                    None,
+                    Rc::new(Frames::new(
+                        vec![slint::SharedPixelBuffer::new(1024, 1024)],
+                        &[40],
+                    )),
+                );
+                a.animations.cache.evict();
+            }
+        }
+        assert!(weak.upgrade().is_none());
+        window.invoke_emoji_search("pizza".into());
+        assert!(window.get_emoji_rows().row_count() > 0);
+    }
+}
+
+#[test]
+fn repair1_preference_event_resumes_quiesced_timer_without_refresh() {
+    i_slint_backend_testing::init_no_event_loop();
+    let dir = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let owner = Adapter::new(
+        Arc::new(yapfast_core::runtime::BackgroundRuntime::new().unwrap()),
+        dir.path().into(),
+        &window,
+    )
+    .unwrap();
+    bind_callbacks(&window, &owner);
+    ANIMATE.set(Animate::Always);
+    let key = "repair1-event:209";
+    let mut data = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new(&mut data);
+        for red in [37, 199] {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(4, 4, image::Rgba([red, 31, 71, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(40, 1),
+                ))
+                .unwrap();
+        }
+    }
+    {
+        let mut a = owner.borrow_mut();
+        a.app.state.pictures.insert(
+            "event-generated".into(),
+            Arc::new(yapfast_core::chat::decode_picture(&data, 128, 128).unwrap()),
+        );
+        let Adapter {
+            app, animations, ..
+        } = &mut *a;
+        animations.show(
+            vec![(key.into(), None, "event-generated".into())],
+            &app.state.pictures,
+        );
+        animations.start(&app.state.pictures);
+        for _ in 0..200 {
+            animations.drain();
+            if animations.decoding.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        animations.sync(&window, true, Rc::downgrade(&owner));
+        assert!(animations.timer.running());
+    }
+    // Only the received backend preference changes. No direct show_motion,
+    // run, sync or Application refresh is allowed after this initial setup.
+    i_slint_core::with_existing_context(|context| {
+        context.set_motion_preference(i_slint_core::MotionPreference::Reduced)
+    })
+    .unwrap();
+    i_slint_core::properties::ChangeTracker::run_change_handlers();
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    assert!(!owner.borrow().animations.timer.running());
+    let before = i_slint_core::yapfast_emoji::revision();
+    i_slint_core::with_existing_context(|context| {
+        context.set_motion_preference(i_slint_core::MotionPreference::NoPreference)
+    })
+    .unwrap();
+    i_slint_core::properties::ChangeTracker::run_change_handlers();
+    assert!(
+        owner.borrow().animations.timer.running(),
+        "preference event must restart the stopped owning timer"
+    );
+    std::thread::sleep(Duration::from_millis(45));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    assert!(i_slint_core::yapfast_emoji::revision() > before);
+    assert_eq!(
+        &i_slint_core::yapfast_emoji::frame_of_key(key)
+            .unwrap()
+            .to_rgba8()
+            .unwrap()
+            .as_bytes()[..4],
+        &[199, 31, 71, 255]
+    );
+}
+
+#[test]
+fn repair1_retained_adapter_detach_retires_decoded_and_inflight_animation() {
+    i_slint_backend_testing::init_no_event_loop();
+    for inflight in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let window = YapfastWindow::new().unwrap();
+        let owner = Adapter::new(
+            Arc::new(yapfast_core::runtime::BackgroundRuntime::new().unwrap()),
+            dir.path().into(),
+            &window,
+        )
+        .unwrap();
+        let mut data = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut data);
+            for red in [29, 211] {
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        image::RgbaImage::from_pixel(4, 4, image::Rgba([red, 31, 71, 255])),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(40, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        let pictures = HashMap::from([(
+            "detach-generated".into(),
+            Arc::new(yapfast_core::chat::decode_picture(&data, 128, 128).unwrap()),
+        )]);
+        let key = "repair1-detach:208";
+        let weak_frames;
+        {
+            let mut a = owner.borrow_mut();
+            a.animations.show(
+                vec![(key.into(), None, "detach-generated".into())],
+                &pictures,
+            );
+            a.animations.also(
+                vec![(key.into(), None, "detach-generated".into())],
+                &pictures,
+            );
+            a.animations.start(&pictures);
+            if !inflight {
+                for _ in 0..200 {
+                    a.animations.drain();
+                    if a.animations.decoding.is_empty() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                weak_frames = Some(Rc::downgrade(&a.animations.cache.get(key).unwrap()));
+            } else {
+                weak_frames = None;
+            }
+            a.animations.sync(&window, true, Rc::downgrade(&owner));
+            assert!(a.animations.timer.running());
+            a.detach();
+            assert!(
+                !a.animations.timer.running(),
+                "tray-retained Adapter must stop animation wakeups immediately"
+            );
+            assert!(a.animations.cache.pinned.is_empty() && a.animations.picker.is_empty());
+            assert!(i_slint_core::yapfast_emoji::frame_of_key(key).is_none());
+        }
+        drop(window);
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(5));
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+            slint::platform::update_timers_and_animations();
+        }
+        assert!(weak_frames.is_none_or(|weak| weak.upgrade().is_none()));
+        let next = YapfastWindow::new().unwrap();
+        {
+            let mut a = owner.borrow_mut();
+            a.window = next.as_weak();
+            a.animations.drain();
+            assert!(
+                a.animations.cache.entries.is_empty(),
+                "late old decoder cannot revive retired window"
+            );
+            a.animations.show(
+                vec![(key.into(), None, "detach-generated".into())],
+                &pictures,
+            );
+            a.animations.start(&pictures);
+            for _ in 0..200 {
+                a.animations.drain();
+                if a.animations.decoding.is_empty() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            a.animations.sync(&next, true, Rc::downgrade(&owner));
+            assert!(a.animations.timer.running());
+            assert!(i_slint_core::yapfast_emoji::frame_of_key(key).is_some());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,6 +1223,30 @@ mod tests {
             key: key.to_owned(),
             glyph: Some('a'),
             address: address.to_owned(),
+        }
+    }
+
+    #[test]
+    fn repair1_retired_cached_frames_bind_current_glyph_on_first_show() {
+        for old in [None, Some('\u{10ffe3}')] {
+            let key = "repair1-glyph:207";
+            let glyph = '\u{10ffe4}';
+            let mut animations = Animations::new();
+            animations.cache.insert(key.into(), old, small(2));
+            animations.also(vec![(key.into(), old, "missing".into())], &HashMap::new());
+            assert!(i_slint_core::yapfast_emoji::frame_of_key(key).is_some());
+            animations.also(Vec::new(), &HashMap::new());
+            assert!(i_slint_core::yapfast_emoji::frame_of_key(key).is_none());
+            animations.show(
+                vec![(key.into(), Some(glyph), "missing".into())],
+                &HashMap::new(),
+            );
+            assert_eq!(
+                i_slint_core::yapfast_emoji::frame_of_glyph(glyph),
+                i_slint_core::yapfast_emoji::frame_of_key(key),
+                "first reopened text consumer must bind its current glyph"
+            );
+            assert!(i_slint_core::yapfast_emoji::frame_of_glyph(glyph).is_some());
         }
     }
 

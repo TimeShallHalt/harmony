@@ -89,6 +89,7 @@ impl Application {
         let room = self.state.one_to_one().filter(|_| self.state.profile_panel);
         let Some((room, person)) = room.and_then(|room| Some((room, room.person.clone()?))) else {
             self.state.panel_profile = None;
+            self.panel_profile_request = None;
             return vec![];
         };
         if self
@@ -96,6 +97,11 @@ impl Application {
             .panel_profile
             .as_ref()
             .is_some_and(|view| view.profile.id == person)
+            && (room.network != Network::Discord
+                || self
+                    .panel_profile_request
+                    .as_ref()
+                    .is_some_and(|request| request.room == room.id))
         {
             return vec![];
         }
@@ -111,10 +117,7 @@ impl Application {
             note: None,
         });
         if fetch {
-            vec![Effect::Backend(Command::Discord(DiscordCommand::Profile {
-                room,
-                user: person,
-            }))]
+            vec![self.request_profile(room, person, true)]
         } else {
             vec![]
         }
@@ -407,6 +410,32 @@ impl Application {
         snapshot: Arc<yapfast_discord::service::Snapshot>,
     ) -> Vec<Effect> {
         self.state.discord_online = snapshot.status == yapfast_discord::service::Status::Online;
+        if !self.state.discord_online
+            || self.discord.as_ref().is_some_and(|old| {
+                old.user_id != snapshot.user_id
+                    || match (&old.presence_observation, &snapshot.presence_observation) {
+                        (Some(a), Some(b)) => !a.same_source(b),
+                        (None, None) => false,
+                        _ => true,
+                    }
+            })
+        {
+            self.clear_read_all();
+            self.profile_request = None;
+            self.panel_profile_request = None;
+            // Keep the accepted legacy identity/presence presentation, but
+            // retire received appearance and all pending presentation authority.
+            // Closing unrelated profile state would regress cached member rows.
+            for view in [&mut self.state.profile, &mut self.state.panel_profile]
+                .into_iter()
+                .flatten()
+            {
+                view.profile.name_style = None;
+                view.profile.decoration = None;
+                view.loading = false;
+                view.kept = false;
+            }
+        }
         if self.discord.as_ref().is_some_and(|earlier| {
             match (
                 &earlier.presence_observation,

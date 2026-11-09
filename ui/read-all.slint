@@ -1,0 +1,36 @@
+import { ActionButton } from "controls.slint";
+import { Theme } from "theme.slint";
+// A confirmation, never a one-click irreversible global receipt operation.
+export component ReadAllControl inherits VerticalLayout {
+    in property <bool> open;
+    in property <bool> supported;
+    in property <int> count;
+    in property <int> eligible;
+    in property <bool> sync;
+    callback asked;
+    callback confirmed;
+    callback cancelled;
+    spacing: 8px; padding: 10px;
+    public function confirm() { if root.open && root.count > 0 { root.confirmed(); } }
+    public function cancel() { if root.open { root.cancelled(); } }
+    if !root.open: ActionButton { text: "Read all notifications…"; small: true; enabled: root.supported; clicked => { root.asked(); } }
+    if !root.supported: Text { text: "Read all is unavailable: connect Discord. Matrix is not supported."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+    if root.open: VerticalLayout {
+        spacing: 8px;
+        Text {
+            text: root.count == 0 ? "No additional unread received Discord conversations."
+                : "Mark " + root.count + " of " + root.eligible + " unread conversations as read?";
+            color: Theme.text; font-size: 14px; wrap: word-wrap;
+        }
+        Text {
+            text: "Discord only: received readable conversations; excludes message requests. Up to 100 per confirmation. Matrix read-all is disabled."
+                + (root.sync ? " Discord read state syncs to your other clients." : " Discord read state stays local.");
+            color: Theme.muted; font-size: 12px; wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            ActionButton { text: "Cancel"; small: true; clicked => { root.cancel(); } }
+            ActionButton { text: "Mark read"; enabled: root.count > 0; primary: true; small: true; clicked => { root.confirm(); } }
+        }
+    }
+}

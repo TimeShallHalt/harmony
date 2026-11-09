@@ -203,7 +203,11 @@ export struct ProfileBadgeRow { icon: string, description: string, link: string,
 /// account was made ("" when unknown), and whether the service verified it.
 export struct ProfileConnectionRow { kind: string, name: string, url: string, since: string, verified: bool }
 
+import { StyledProfileName } from "profile-appearance.slint";
+
 export struct ProfileData {
+    name-font: int, name-effect: int, name-colors: [color],
+    decoration: image,
     avatar-media: bool, banner-media: bool,
     local-timezone-owner: string, local-timezone: string, local-time: string,
     id: string, name: string, initial: string, tint: color, picture: image,
@@ -683,6 +687,13 @@ export component ProfileCard inherits Rectangle {
                         width: root.avatar-size + 12px; height: self.width; border-radius: self.width / 2;
                         background: root.docked && ClientStyle.enabled ? Theme.panel : Theme.sidebar;
                         Avatar { size: root.avatar-size; initial: root.data.initial; tint: root.data.tint; picture: root.data.picture; }
+                        // Received preset, still PNG fallback only; never an equip/purchase control.
+                        if root.data.decoration.width > 0: Image {
+                            source: root.data.decoration; image-fit: contain;
+                            width: root.avatar-size * 1.2; height: self.width;
+                            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                            accessible-role: image; accessible-label: "Received avatar decoration (still preset)";
+                        }
                         if root.data.presence != "" && root.data.presence != "offline": StatusDot {
                             x: parent.width - self.width - (root.large ? 14px : 10px); y: parent.height - self.height - (root.large ? 14px : 10px);
                             presence: root.data.presence; ring: root.ground;
@@ -699,11 +710,12 @@ export component ProfileCard inherits Rectangle {
                     padding-left: root.pad; padding-right: root.pad; spacing: 12px;
                     VerticalLayout {
                         spacing: 2px;
-                        Text {
-                            text: root.data.name; color: Theme.text; font-size: root.large ? 26px : 20px; font-weight: 700;
-                            overflow: elide;
+                        styled-name := StyledProfileName {
+                            text: root.data.name; font-size: root.large ? 26px : 20px; font-weight: 700;
+                            font-id: root.data.name-font; effect-id: root.data.name-effect; colors: root.data.name-colors;
                             if !root.large && !root.preview: TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.enlarge(); } }
                         }
+                        if styled-name.fallback != "": Text { text: styled-name.fallback; color: Theme.secondary; font-size: 11px; wrap: word-wrap; }
                         if root.data.handle != "" || root.data.tag != "": HorizontalLayout {
                             spacing: 6px; alignment: start;
                             if root.data.handle != "": Text {

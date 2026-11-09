@@ -564,6 +564,8 @@ pub(super) fn chat_profile(
     let bio_emoji = profile.bio.as_deref().map(emoji_in).unwrap_or_default();
     Profile {
         name: profile.name,
+        name_style: profile.name_style.map(Into::into),
+        decoration: profile.decoration.map(Into::into),
         avatar: Some(profile.avatar),
         theme: profile.theme,
         banner: profile.banner,

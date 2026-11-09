@@ -643,6 +643,8 @@ pub struct ServerTag {
 /// member list knows; Discord adds the rest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Profile {
+    pub name_style: Option<crate::appearance::NameStyle>,
+    pub decoration: Option<crate::appearance::Decoration>,
     /// Their Discord user id or Matrix ID, as in [`ChatMember::id`].
     pub id: String,
     pub name: String,
@@ -2127,6 +2129,67 @@ pub struct OAuthPreview {
     pub guilds: Vec<OAuthGuild>,
 }
 
+/// One received-profile open. Arc identity is its non-reusable generation;
+/// the room, slot, account and provider source cannot be changed by a reply.
+#[derive(Clone, Debug)]
+pub struct ProfileRequest {
+    pub room: String,
+    pub user: String,
+    pub panel: bool,
+    pub account: Option<String>,
+    pub owner: Option<String>,
+    #[cfg(feature = "discord")]
+    pub source: Option<yapfast_discord::service::PresenceObservation>,
+    #[cfg(feature = "discord")]
+    pub publication: Arc<std::sync::Mutex<Option<Arc<ProfilePublication>>>>,
+}
+
+/// Live provider authority owned by the chat actor, not by its I/O clones or
+/// clonable Application snapshots. Retirement is irreversible.
+#[cfg(feature = "discord")]
+#[derive(Debug)]
+pub struct ProfilePublication {
+    active: std::sync::atomic::AtomicBool,
+    snapshots: tokio::sync::watch::Receiver<Arc<yapfast_discord::service::Snapshot>>,
+}
+#[cfg(feature = "discord")]
+impl ProfilePublication {
+    #[cfg(feature = "test-fixtures")]
+    pub fn fixture(
+        snapshot: Arc<yapfast_discord::service::Snapshot>,
+    ) -> (Arc<Self>, impl Fn(Arc<yapfast_discord::service::Snapshot>)) {
+        let (sender, receiver) = tokio::sync::watch::channel(snapshot);
+        (Arc::new(Self::new(receiver)), move |snapshot| {
+            sender.send_replace(snapshot);
+        })
+    }
+    pub fn new(
+        snapshots: tokio::sync::watch::Receiver<Arc<yapfast_discord::service::Snapshot>>,
+    ) -> Self {
+        Self {
+            active: std::sync::atomic::AtomicBool::new(true),
+            snapshots,
+        }
+    }
+    pub fn retire(&self) {
+        self.active
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+    pub fn accepts(&self, request: &ProfileRequest) -> bool {
+        if !self.active.load(std::sync::atomic::Ordering::Acquire) {
+            return false;
+        }
+        let snapshot = self.snapshots.borrow();
+        snapshot.status == yapfast_discord::service::Status::Online
+            && snapshot.user_id == request.owner
+            && match (&request.source, &snapshot.presence_observation) {
+                (Some(a), Some(b)) => a.same_source(b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
 /// Commands only the linked Discord account carries out.
 #[derive(Clone)]
 pub enum DiscordCommand {
@@ -2548,6 +2611,9 @@ pub enum DiscordCommand {
     },
     /// Fetch a Discord user's profile, as a member of a room's server or as
     /// the other person in a DM. It comes back as [`Event::Profile`].
+    /// Correlated received-profile presentation. The opaque request is owned
+    /// by exactly one card/panel open and is echoed by every completion.
+    ScopedProfile(Arc<ProfileRequest>),
     Profile {
         room: String,
         user: String,
@@ -3388,6 +3454,12 @@ pub enum Event {
         picture: Option<Arc<Picture>>,
     },
     Voice(voice::State),
+    /// A kept/success/error completion of one exact card/panel request.
+    ProfilePresentation {
+        request: Arc<ProfileRequest>,
+        kept: bool,
+        result: Result<Profile, String>,
+    },
     /// A profile [`DiscordCommand::Profile`] asked for, or why Discord didn't give it.
     Profile {
         user: String,

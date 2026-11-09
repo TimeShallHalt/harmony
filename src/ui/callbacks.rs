@@ -40,6 +40,10 @@ fn fill_shown_glyphs(window: &YapfastWindow, adapter: &mut Adapter, first: usize
     let rows = &adapter.models.emoji_rows;
     let count = rows.row_count();
     if count == 0 || first >= count {
+        adapter
+            .animations
+            .also(Vec::new(), &adapter.app.state.pictures);
+        reconcile_picker_animations(window, adapter);
         return;
     }
     let mut shown: Vec<String> = Vec::new();
@@ -99,6 +103,15 @@ fn fill_shown_glyphs(window: &YapfastWindow, adapter: &mut Adapter, first: usize
         .collect();
     let pictures = &adapter.app.state.pictures;
     adapter.animations.also(shown, pictures);
+    reconcile_picker_animations(window, adapter);
+}
+
+fn reconcile_picker_animations(window: &YapfastWindow, adapter: &mut Adapter) {
+    let playing = window.global::<Motion>().get_playing() && !adapter.is_inactive();
+    adapter.animations.run(window, &adapter.app.state.pictures);
+    adapter
+        .animations
+        .sync(window, playing, adapter.weak.clone());
 }
 
 /// Takes the pictures [`fill_shown_glyphs`] gave back from the rows over
@@ -195,6 +208,29 @@ fn show_emoji(adapter: &Rc<RefCell<Adapter>>, window: &YapfastWindow, query: &st
 }
 
 pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
+    adapter.borrow().motion_changes.init(
+        (window.as_weak(), Rc::downgrade(adapter)),
+        |(weak, _)| {
+            weak.upgrade().map(|window| {
+                (
+                    super::motion_reduced(&window),
+                    window.global::<Motion>().get_playing(),
+                )
+            })
+        },
+        |(weak, owner), _| {
+            if let (Some(window), Some(adapter)) = (weak.upgrade(), owner.upgrade()) {
+                super::show_motion(&window);
+                let mut adapter = adapter.borrow_mut();
+                let playing = window.global::<Motion>().get_playing() && !adapter.is_inactive();
+                let Adapter {
+                    app, animations, ..
+                } = &mut *adapter;
+                animations.run(&window, &app.state.pictures);
+                animations.sync(&window, playing, owner.clone());
+            }
+        },
+    );
     super::games::bind(window, adapter);
     super::timezones::bind(window, adapter);
     super::gifs::bind(window, adapter);
@@ -375,15 +411,59 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         });
     }
     bind!(on_earlier, Action::Earlier);
+    bind!(on_ask_read_all, Action::AskReadAll);
+    bind!(on_confirm_read_all, Action::ConfirmReadAll);
+    bind!(on_cancel_read_all, Action::CancelReadAll);
     bind!(on_later, Action::Later);
+    {
+        let adapter = adapter.clone();
+        let weak = window.as_weak();
+        window.on_jump_to_start(move || {
+            if let Some(window) = weak.upgrade() {
+                let mut a = adapter.borrow_mut();
+                a.latest_due = false;
+                a.present_selection = None;
+                let effects = a.app.dispatch(Action::JumpToStart);
+                let requested = effects.iter().any(|effect| matches!(effect, Effect::Backend(Command::Around { item, .. }) if item == "d:1"));
+                // Repeated Home may deduplicate the actual pending core seek.
+                // Keep only that same-room intent, never an empty-result refusal
+                // after the core seek or the adapter's authority was retired.
+                let pending = a.start_selection.is_some()
+                    && a.start_selection == a.app.state.selected
+                    && a.app.is_seeking_start();
+                a.start_selection = (requested || pending)
+                    .then(|| a.app.state.selected.clone()).flatten();
+                a.execute(effects);
+                a.refresh(&window);
+            }
+        });
+    }
     {
         let adapter = adapter.clone();
         let weak = window.as_weak();
         window.on_jump_to_present(move || {
             let Some(window) = weak.upgrade() else { return };
             // The newest messages show at the end once they replace the window.
-            adapter.borrow_mut().latest_due = true;
-            adapter.borrow_mut().action(&window, Action::JumpToPresent);
+            let mut a = adapter.borrow_mut();
+            a.start_selection = None;
+            // Record a real requested replacement, including cancellation of
+            // pending Around, and retain that request across repeated End.
+            let effects = a.app.dispatch(Action::JumpToPresent);
+            let replacing = effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::Backend(Command::Present(_))))
+                || (a.present_selection.is_some() && a.present_selection == a.app.state.selected);
+            a.latest_due = replacing;
+            a.present_selection = replacing.then(|| a.app.state.selected.clone()).flatten();
+            a.execute(effects);
+            a.refresh(&window);
+            if !replacing {
+                if let Some(last) = a.app.state.messages.last() {
+                    window.set_active_index(a.app.state.messages.len() as i32 - 1);
+                    window.set_active_item(last.item.as_str().into());
+                }
+                window.invoke_scroll_to_latest();
+            }
         });
     }
     bind!(on_jump_to_unread, Action::JumpToUnread);

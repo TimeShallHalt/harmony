@@ -64,6 +64,19 @@ impl Application {
     /// Call when the backend could not accept an effect's command.
     pub fn backend_failed(&mut self, command: &Command) {
         match command {
+            Command::MarkRead { room, .. } => {
+                self.read_all_submitted.remove(room);
+                self.state.notice =
+                    Some("The read request was not accepted. Review again to retry.".into());
+                return;
+            }
+            Command::Around { .. } | Command::Present(_) => {
+                self.seeking = None;
+                self.focusing = false;
+                self.state.notice =
+                    Some("History navigation is unavailable. Try again after reconnecting.".into());
+                return;
+            }
             Command::Discord(DiscordCommand::ViewProfileMedia {
                 request,
                 asset,

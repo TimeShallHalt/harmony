@@ -40,6 +40,8 @@ mod read_acks;
 mod session;
 mod stream_openings;
 mod tracker;
+#[cfg(feature = "test-fixtures")]
+pub mod navread_fixture;
 mod voice_join;
 
 use member_lists::MemberLists;
