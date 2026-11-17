@@ -22,6 +22,66 @@ class HarmonyMsiTests(unittest.TestCase):
     def test_build_is_encoded_in_a_significant_msi_version_field(self):
         self.assertEqual(self.module().msi_version('1.0.0',1),'1.0.1')
 
+    def test_add_remove_programs_uses_the_original_harmony_icon(self):
+        module=self.module()
+        ns={'w':module.WIX_NS}
+        with tempfile.TemporaryDirectory() as folder:
+            payload=Path(folder)
+            (payload/'Harmony.exe').write_bytes(b'fixture, never executed')
+            xml=ET.fromstring(module.generate_wxs(payload,{'version':'1.1.0','build_id':1}))
+        icon=xml.find('.//w:Icon',ns)
+        assert icon is not None
+        self.assertEqual(icon.get('Id'),'Harmony.ico')
+        self.assertEqual(Path(icon.attrib['SourceFile']),ROOT/'packaging/windows/harmony.ico')
+        self.assertIsNotNone(xml.find('.//w:Property[@Id="ARPPRODUCTICON"][@Value="Harmony.ico"]',ns))
+
+    def test_fault_injection_is_isolated_and_never_authored_for_production(self):
+        module=self.module()
+        ns={'w':module.WIX_NS}
+        with tempfile.TemporaryDirectory() as folder:
+            payload=Path(folder)
+            (payload/'Harmony.exe').write_bytes(b'fixture, never executed')
+            info={'version':'1.1.0','build_id':1}
+            with self.assertRaisesRegex(ValueError,'isolated lifecycle fixtures'):
+                module.generate_wxs(payload,info,test_fail_after_install_files=True)
+            xml=ET.fromstring(module.generate_wxs(payload,info,test_namespace=uuid.uuid4(),
+                                                 test_version='1.1.3',test_fail_after_install_files=True))
+            ordinary=ET.fromstring(module.generate_wxs(payload,info))
+        self.assertEqual(ordinary.findall('.//w:CustomAction',ns),[])
+        action=xml.find('.//w:CustomAction',ns)
+        assert action is not None
+        self.assertEqual(action.attrib,{'Id':'FixtureAbortAfterInstallFiles',
+                                       'Error':'Harmony isolated MSI rollback fixture failure'})
+        sequenced=xml.find('.//w:InstallExecuteSequence/w:Custom',ns)
+        assert sequenced is not None
+        self.assertEqual(sequenced.attrib,{'Action':'FixtureAbortAfterInstallFiles',
+                                          'After':'InstallExecute','Condition':'NOT REMOVE'})
+
+    def test_fixture_ancestor_is_secure_and_remembered_for_nested_uninstall(self):
+        module=self.module()
+        ns={'w':module.WIX_NS}
+        namespace=uuid.uuid4()
+        with tempfile.TemporaryDirectory() as folder:
+            payload=Path(folder)
+            (payload/'Harmony.exe').write_bytes(b'fixture, never executed')
+            fixture=ET.fromstring(module.generate_wxs(payload,{'version':'1.1.0','build_id':1},test_namespace=namespace))
+            production=ET.fromstring(module.generate_wxs(payload,{'version':'1.1.0','build_id':1}))
+        ancestor=fixture.find('.//w:Property[@Id="HARMONYFIXTUREPROGRAMS"]',ns)
+        assert ancestor is not None
+        self.assertEqual(ancestor.get('Secure'),'yes')
+        search=ancestor.find('w:RegistrySearch',ns)
+        assert search is not None
+        self.assertEqual(search.get('Key'),rf'Software\Harmony\InstallerTests\{namespace}')
+        self.assertEqual(search.get('Name'),'FixtureProgramsRoot')
+        self.assertEqual(search.get('Bitness'),'always64')
+        remembered=fixture.find('.//w:RegistryValue[@Name="FixtureProgramsRoot"]',ns)
+        assert remembered is not None
+        self.assertEqual(remembered.get('Value'),'[HARMONYFIXTUREPROGRAMS]')
+        self.assertIsNotNone(fixture.find('.//w:RemoveFolder[@Directory="HARMONYFIXTUREPROGRAMS"]',ns))
+        self.assertIsNone(fixture.find('.//w:Directory[@Id="HarmonyPrograms"]',ns))
+        self.assertIsNotNone(production.find('.//w:Directory[@Id="HarmonyPrograms"]',ns))
+        self.assertIsNone(production.find('.//w:Property[@Id="HARMONYFIXTUREPROGRAMS"]',ns))
+
     def test_msi_version_encoding_rejects_ambiguous_or_unrepresentable_identity(self):
         module=self.module()
         for version,build in [('01.0.0',1),('1.0.0.1',1),('1.0.0-beta',1),('1.0.0',True),('1.0.0',0),('1.0.0',1000),('256.0.0',1),('1.256.0',1),('1.0.65',536)]:
@@ -120,7 +180,11 @@ class HarmonyMsiTests(unittest.TestCase):
                 files={'Harmony.exe':raw,'BUILD.json':json.dumps(build),'harmony-build-info.json':json.dumps(info),'LICENSE.txt':(ROOT/'LICENSE').read_bytes(),'SOURCE.txt':'fixture source accompanying this package','THIRD-PARTY.json':json.dumps([{'name':'fixture-only','license_files':['licenses/fixture.txt']}]),'licenses/fixture.txt':'fixture notice'}
                 if extra:files.update(extra)
                 with zipfile.ZipFile(bundle,'w') as archive:
-                    for name,data in files.items():archive.writestr('Fixture/'+name,data)
+                    for name,data in files.items():
+                        entry=zipfile.ZipInfo('placeholder')
+                        entry.filename='Fixture/'+name
+                        entry.orig_filename=entry.filename
+                        archive.writestr(entry,data)
             write_bundle()
             manifest={'commit':info['commit'],'version':'1.0.0','build_id':1,'executable':{'sha256':exe_hash},'artifacts':[{'path':str(bundle),'sha256':sha(bundle)},{'path':str(source),'sha256':sha(source)}]}
             path=root/'manifest.json';path.write_text(json.dumps(manifest))
@@ -141,6 +205,14 @@ class HarmonyMsiTests(unittest.TestCase):
             with self.assertRaises(ValueError):module.stage_release(path,root/'bad-path')
             self.assertFalse((root/'escaped.txt').exists())
             self.assertFalse((root/'bad-path').exists())
+            for index,name in enumerate(('nested\\file.txt','cut\0suffix.txt','a/./file.txt','a//file.txt')):
+                with self.subTest(raw_archive_name=repr(name)):
+                    write_bundle({name:'must be rejected without normalization'})
+                    manifest['artifacts'][0]['sha256']=sha(bundle);path.write_text(json.dumps(manifest))
+                    bad=root/f'bad-raw-name-{index}'
+                    with self.assertRaisesRegex(ValueError,'noncanonical archive member'):
+                        module.stage_release(path,bad)
+                    self.assertFalse(bad.exists())
             for index, extra in enumerate(({'yapfast.exe':raw},{'harmony.exe':raw},{'BUILD.json':json.dumps(dict(build,updater_included=True))},{'BUILD.json':json.dumps(dict(build,version='9.9.9'))})):
                 with self.subTest(extra=list(extra)):
                     write_bundle(extra)

@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 
 WIX_NS = 'http://wixtoolset.org/schemas/v4/wxs'
 UI_NS = 'http://wixtoolset.org/schemas/v4/wxs/ui'
+ROOT = Path(__file__).resolve().parents[1]
 UPGRADE_CODE = uuid.uuid5(uuid.NAMESPACE_URL, 'https://github.com/TimeShallHalt/harmony/windows-msi/per-user/x64')
 # First production MSI whose executable is Harmony.exe: app 1.1.0 build 1.
 # Quarantine older products even if their component key path needs repair.
@@ -44,9 +45,11 @@ def msi_version(version, build_id):
     return f'{major}.{minor}.{encoded}'
 
 
-def generate_wxs(payload, info, *, test_namespace=None, test_version=None):
+def generate_wxs(payload, info, *, test_namespace=None, test_version=None, test_fail_after_install_files=False):
     """Author only private program files; never own user data, launchers or processes."""
     payload = Path(payload)
+    if type(test_fail_after_install_files) is not bool or (test_fail_after_install_files and test_namespace is None):
+        raise ValueError('Fault injection is allowed only for explicitly isolated lifecycle fixtures')
     payload_names = {path.name.casefold(): path.name for path in payload.iterdir()}
     if test_namespace is None and (payload_names.get('harmony.exe') != 'Harmony.exe' or not (payload / 'Harmony.exe').is_file() or 'yapfast.exe' in payload_names):
         raise ValueError('Production MSI requires Harmony.exe, not a legacy yapfast.exe payload')
@@ -83,6 +86,10 @@ def generate_wxs(payload, info, *, test_namespace=None, test_version=None):
                       UpgradeCode=str(upgrade_code).upper(), Language='1033', Scope='perUser', InstallerVersion='500')
     if test_namespace is not None:
         element(package, 'Property', Id='ARPSYSTEMCOMPONENT', Value='1')
+    element(package, 'Icon', Id='Harmony.ico', SourceFile=str(ROOT/'packaging/windows/harmony.ico'))
+    element(package, 'Property', Id='ARPPRODUCTICON', Value='Harmony.ico')
+    if test_fail_after_install_files:
+        element(package, 'CustomAction', Id='FixtureAbortAfterInstallFiles', Error='Harmony isolated MSI rollback fixture failure')
     element(package, 'SummaryInformation', Description=f"Harmony {info['version']} (build {info['build_id']}) manual update")
     element(package, 'MajorUpgrade', Schedule='afterInstallInitialize', DowngradeErrorMessage='A newer Harmony MSI is already installed. Use that version or a newer installer.')
     # Detection only: never uninstall a legacy product just to rename its binary.
@@ -104,6 +111,11 @@ def generate_wxs(payload, info, *, test_namespace=None, test_version=None):
         element(actions, 'LaunchConditions', Sequence='100')
         if sequence == 'InstallExecuteSequence':
             element(actions, 'InstallInitialize', Sequence='1500')
+            if test_fail_after_install_files:
+                # InstallFiles schedules deferred writes. Flush that script
+                # before failing, so the native test exercises real restoration.
+                element(actions, 'InstallExecute', Sequence='6500')
+                element(actions, 'Custom', Action='FixtureAbortAfterInstallFiles', After='InstallExecute', Condition='NOT REMOVE')
     element(package, 'MediaTemplate', EmbedCab='yes', CompressionLevel='high')
     for name, value in {'REINSTALLMODE':'amus','REBOOT':'ReallySuppress','MSIRESTARTMANAGERCONTROL':'DisableShutdown','MSIDISABLERMRESTART':'1',
                         'WIXUI_EXITDIALOGOPTIONALTEXT':'Open Harmony.exe using your chosen data folder. Setup does not change shortcuts, protocol handlers or startup entries, or start the app.'}.items():
@@ -111,14 +123,25 @@ def generate_wxs(payload, info, *, test_namespace=None, test_version=None):
     element(package, 'SetProperty', Id='ARPINSTALLLOCATION', Value='[INSTALLFOLDER]', After='CostFinalize', Sequence='execute')
     existing = element(package, 'Property', Id='INSTALLFOLDER', Secure='yes')
     element(existing, 'RegistrySearch', Id='RememberedProgramFolder', Root='HKCU', Key=registry, Name='InstallFolder', Type='raw', Bitness='always64')
+    programs_id = 'HarmonyPrograms'
+    if test_namespace is not None:
+        # A fixture's inherited uninstall must never fall back to the real
+        # LocalAppData Programs ancestor when RemoveExistingProducts runs it.
+        programs_id = 'HARMONYFIXTUREPROGRAMS'
+        ancestor = element(package, 'Property', Id=programs_id, Secure='yes')
+        element(ancestor, 'RegistrySearch', Id='RememberedFixtureProgramsRoot', Root='HKCU',
+                Key=registry, Name='FixtureProgramsRoot', Type='raw', Bitness='always64')
     element(package, 'Launch', Condition='VersionNT64', Message='This Harmony package requires 64-bit Windows.')
     element(package, 'Launch', Condition='NOT ALLUSERS', Message='Harmony installs only for the current user; do not request an all-users installation.')
     standard = element(package, 'StandardDirectory', Id='LocalAppDataFolder')
-    programs = element(standard, 'Directory', Id='HarmonyPrograms', Name='Programs')
+    programs = element(standard, 'Directory', Id=programs_id, Name='Programs')
     install = element(programs, 'Directory', Id='INSTALLFOLDER', Name=folder_name)
     feature = element(package, 'Feature', Id='Application', Title='Harmony program and notices', Level='1', AllowAdvertise='no')
     location = element(install, 'Component', Id='ProgramFolderRegistration', Guid=str(uuid.uuid5(upgrade_code, 'install-folder')), Bitness='always64')
     element(location, 'RegistryValue', Root='HKCU', Key=registry, Name='InstallFolder', Value='[INSTALLFOLDER]', Type='string', KeyPath='yes')
+    if test_namespace is not None:
+        element(location, 'RegistryValue', Root='HKCU', Key=registry, Name='FixtureProgramsRoot',
+                Value='[HARMONYFIXTUREPROGRAMS]', Type='string', KeyPath='no')
     element(feature, 'ComponentRef', Id='ProgramFolderRegistration')
     directories = {'': install}
 
@@ -150,7 +173,7 @@ def generate_wxs(payload, info, *, test_namespace=None, test_version=None):
     # profile ancestors for ICE64, never recursive deletion or wildcard files.
     for relative, directory in directories.items():
         element(location, 'RemoveFolder', Id=identifier('Remove_', relative), Directory=directory.attrib['Id'], On='uninstall')
-    element(location, 'RemoveFolder', Id='RemoveEmptyProgramsParent', Directory='HarmonyPrograms', On='uninstall')
+    element(location, 'RemoveFolder', Id='RemoveEmptyProgramsParent', Directory=programs_id, On='uninstall')
     ET.SubElement(package, f'{{{UI_NS}}}WixUI', {'Id':'WixUI_Minimal'})
     element(package, 'UIRef', Id='WixUI_ErrorProgressText')
     element(package, 'WixVariable', Id='WixUILicenseRtf', Value='$(var.LicenseRtf)')
@@ -184,10 +207,15 @@ def stage_release(manifest_file, destination):
         total = 0
         forbidden = {'layout.json','credentials.json','session.json','discord-account.json','discord-cookies.json','yapfast.log','harmony.log','.env','yapfast.exe'}
         for item in archive.infolist():
+            # Windows ZipInfo normalizes separators/truncates NULs before
+            # exposing filename; never silently accept repaired member tokens.
+            raw_name = item.orig_filename
+            if raw_name != item.filename:
+                raise ValueError('Unsafe or noncanonical archive member')
             if item.is_dir():
                 continue
-            path = PurePosixPath(item.filename)
-            if len(path.parts) < 2 or path.is_absolute() or any(part in ('.','..') or part.rstrip(' .') != part for part in path.parts) or '\\' in item.filename or ':' in item.filename or PureWindowsPath(item.filename).drive:
+            path = PurePosixPath(raw_name)
+            if path.as_posix() != raw_name or len(path.parts) < 2 or path.is_absolute() or any(part in ('.','..') or part.rstrip(' .') != part for part in path.parts) or '\\' in raw_name or ':' in raw_name or PureWindowsPath(raw_name).drive:
                 raise ValueError('Unsafe or noncanonical archive member')
             roots.add(path.parts[0]); relative = PurePosixPath(*path.parts[1:]).as_posix()
             if relative.casefold() in entries or path.name.lower() in forbidden or (item.external_attr >> 16) & 0o170000 == 0o120000:
@@ -263,7 +291,7 @@ def stage_release(manifest_file, destination):
     return info, {path.relative_to(destination).as_posix(): sha(path) for path in sorted(destination.rglob('*')) if path.is_file()}
 
 
-def build_msi(payload, info, output, wix_dll, ui_extension, *, test_namespace=None, test_version=None):
+def build_msi(payload, info, output, wix_dll, ui_extension, *, test_namespace=None, test_version=None, test_fail_after_install_files=False):
     """Compile real WiX below normal priority; no installation, UI input or app launch."""
     if os.name != 'nt':
         raise ValueError('This MSI build/validation entry point requires Windows')
@@ -274,7 +302,8 @@ def build_msi(payload, info, output, wix_dll, ui_extension, *, test_namespace=No
     work = output.parent / (output.stem + '-build')
     work.mkdir()
     recipe = work / 'Harmony.wxs'
-    recipe.write_bytes(generate_wxs(payload, info, test_namespace=test_namespace, test_version=test_version))
+    recipe.write_bytes(generate_wxs(payload, info, test_namespace=test_namespace, test_version=test_version,
+                                    test_fail_after_install_files=test_fail_after_install_files))
     license_rtf = work / 'license.rtf'
     text = (
         f"Harmony {info['version']} (build {info['build_id']})\n\n"
@@ -301,7 +330,11 @@ def build_msi(payload, info, output, wix_dll, ui_extension, *, test_namespace=No
     log.write_text(result.stdout + result.stderr, encoding='utf-8')
     receipt = {'command':command,'exit_code':result.returncode,'log':str(log),'msi_version':test_version or msi_version(info['version'],info['build_id']),
                'app_version':info['version'],'app_build_id':info['build_id'],'fixture_namespace':str(test_namespace) if test_namespace else None,
-               'source_recipe':str(recipe),'output':str(output),'installed':False,'priority':'below-normal','cabinet_threads':2}
+               'source_recipe':str(recipe),'output':str(output),'installed':False,'priority':'below-normal','cabinet_threads':2,
+               'fixture_fault_after_install_files':test_fail_after_install_files,
+               'builder_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+               'wix_cli_sha256':hashlib.sha256(Path(wix_dll).read_bytes()).hexdigest(),
+               'wix_ui_sha256':hashlib.sha256(Path(ui_extension).read_bytes()).hexdigest()}
     (work / 'build-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n',encoding='utf-8')
     if result.returncode != 0:
         raise RuntimeError(f'WiX exited {result.returncode}; see {log}:\n{result.stdout}{result.stderr}')
@@ -321,12 +354,16 @@ def main():
     args = parser.parse_args()
     if args.output.suffix.lower() != '.msi' or args.output.exists():
         parser.error('Choose a new .msi output file')
+    packaging_commit = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+    if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip():
+        parser.error('Commit the exact clean installer source before building a production MSI')
     payload = args.output.parent / (args.output.stem + '-payload')
     info, files = stage_release(args.manifest, payload)
     result = build_msi(payload,info,args.output,args.wix_dll,args.ui_extension)
     with args.output.open('rb') as stream:
         digest = hashlib.file_digest(stream,'sha256').hexdigest()
-    result.update({'application_commit':info['commit'],'executable_sha256':files['Harmony.exe'],'msi_sha256':digest,
+    result.update({'application_commit':info['commit'],'packaging_commit':packaging_commit,
+                   'executable_sha256':files['Harmony.exe'],'msi_sha256':digest,
                    'msi_bytes':args.output.stat().st_size,'payload_root':str(payload),'payload_files':files,'unsigned':True,
                    'scope':'per-user x64; manual MSI only; no accounts/user-data/shortcut changes, no in-app updater',
                    'producer_manifest_sha256':hashlib.sha256(args.manifest.read_bytes()).hexdigest()})

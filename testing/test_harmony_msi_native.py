@@ -40,6 +40,10 @@ class NativeMsiBuildTests(unittest.TestCase):
             self.assertNotIn('yapfast.exe', filenames)
             properties = dict(database.query('SELECT `Property`, `Value` FROM `Property`'))
             self.assertEqual(properties['MSIDISABLERMRESTART'], '1')
+            self.assertEqual(properties['ARPPRODUCTICON'], 'Harmony.ico')
+            self.assertEqual(database.query('SELECT `Name` FROM `Icon`'), [['Harmony.ico']])
+            self.assertEqual(database.read_stream("SELECT `Data` FROM `Icon` WHERE `Name`='Harmony.ico'", max_bytes=1024*1024),
+                             (ROOT/'packaging/windows/harmony.ico').read_bytes())
             self.assertNotIn('ALLUSERS', properties)
             conditions = dict(database.query('SELECT `Condition`, `Description` FROM `LaunchCondition`'))
             self.assertIn(module.LEGACY_MIGRATION_CONDITION, conditions)
@@ -66,5 +70,28 @@ class NativeMsiBuildTests(unittest.TestCase):
                 if table == 'InstallExecuteSequence':
                     self.assertLess(int(sequence['LaunchConditions']), int(sequence['InstallInitialize']))
                     self.assertLess(int(sequence['InstallInitialize']), int(sequence['RemoveExistingProducts']))
+
+    def test_real_fixture_only_fault_is_type19_after_installfiles(self):
+        spec=importlib.util.spec_from_file_location('harmony_msi',ROOT/'scripts/package_harmony_msi.py')
+        assert spec and spec.loader
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        root=Path(tempfile.mkdtemp(prefix='harmony-msi-fault-native-',dir=os.environ['TMPDIR']))
+        payload=root/'payload';payload.mkdir()
+        (payload/'Harmony.exe').write_bytes(b'fixture package content, never executed')
+        (payload/'LICENSE.txt').write_bytes((ROOT/'LICENSE').read_bytes())
+        output=root/'FaultFixture.msi'
+        namespace=uuid.uuid4()
+        module.build_msi(payload,{'version':'1.1.0','build_id':1},output,
+                         Path(os.environ['HARMONY_WIX_DLL']),Path(os.environ['HARMONY_WIX_UI']),
+                         test_namespace=namespace,test_version='1.1.3',test_fail_after_install_files=True)
+        from testing.msi_database import Database
+        with Database(output) as database:
+            rows=database.query("SELECT `Type`, `Target` FROM `CustomAction` WHERE `Action`='FixtureAbortAfterInstallFiles'")
+            self.assertEqual(rows,[['19','Harmony isolated MSI rollback fixture failure']])
+            sequence=dict(database.query('SELECT `Action`, `Sequence` FROM `InstallExecuteSequence`'))
+            self.assertLess(int(sequence['RemoveExistingProducts']),int(sequence['InstallFiles']))
+            self.assertLess(int(sequence['InstallFiles']),int(sequence['InstallExecute']))
+            self.assertLess(int(sequence['InstallExecute']),int(sequence['FixtureAbortAfterInstallFiles']))
+            self.assertLess(int(sequence['FixtureAbortAfterInstallFiles']),int(sequence['InstallFinalize']))
 
 if __name__=='__main__':unittest.main()

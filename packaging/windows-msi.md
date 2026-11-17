@@ -37,11 +37,16 @@ If setup reports a leftover exact legacy component marker after an explicit unin
 
 ## Build
 
-Use Python on Windows, an existing .NET runtime capable of running the pinned WiX v4 CLI, and matching UI extension. WiX is build-only; installer users do not need Python, Git, WiX or .NET.
+Use Python with `Path.is_junction()`, an existing .NET runtime capable of running the pinned WiX v4 CLI, and its matching UI extension. The build-only tool preparer pins **WiX 4.0.6** and **WixToolset.UI.wixext 4.0.6** to their NuGet-catalog SHA-512 values; it does not execute downloads or install a .NET SDK. Scan the downloaded tool directory with your security software before executing it. Installer users do not need Python, Git, WiX or .NET.
+
+Set `HARMONY_TEST_SCRATCH`, `TMPDIR`, `TMP` and `TEMP` explicitly to your approved scratch directory when building/testing; do not assume the shell's default temporary path is the intended profile scratch.
 
 ```
-python3 scripts/package_harmony_msi.py --manifest PATH/TO/release-artifacts.json --wix-dll PATH/TO/wix.dll --ui-extension PATH/TO/WixToolset.UI.wixext.dll --output PATH/TO/Harmony.msi
+python3 scripts/prepare-windows-wix.py
+python3 scripts/package_harmony_msi.py --manifest PATH/TO/release-artifacts.json --wix-dll .local/tools/wix-4.0.6/wix/tools/net6.0/any/wix.dll --ui-extension .local/tools/wix-4.0.6/wixtoolset.ui.wixext/wixext4/WixToolset.UI.wixext.dll --output PATH/TO/Harmony.msi
 ```
+
+The production builder requires a clean, committed installer source tree. The MSI receipt records the **application commit** from the verified portable payload separately from the **packaging commit**, plus builder/tool hashes. Packaging-only changes do not relabel or rebuild the application. The original Harmony icon is embedded as the Installed Apps icon. The preparer refuses an existing tool directory rather than overwriting it; retain its `tooling-provenance.json` alongside build evidence.
 
 `scripts/package-harmony.py` produces the portable `Harmony.exe` ZIP, matching source ZIP, checksums and `release-artifacts.json` consumed here. It requires the clean committed candidate and matching `harmony-build-info.json`. Its stamp credits upstream Yapfast 0.4.1 while retaining the internal Cargo package name `yapfast`.
 
@@ -51,6 +56,15 @@ The builder does not download tools, rebuild Rust, install/launch the app, chang
 
 Unit tests cover version limits/floor, stable upgrade identity, exact legacy marker matching, detect-only legacy version range, generated WXS pre-removal sequencing in both modes, fresh/future payload authoring, unchanged launcher ownership, archive/hash pairing and safe staging, disjoint fixture identities, and nonrecursive empty-directory cleanup. A real small WiX compilation test uses explicit `HARMONY_WIX_DLL` and `HARMONY_WIX_UI` environment paths and additionally checks compiled Upgrade/RegLocator/LaunchCondition and sequence tables. Source-recipe tests do not establish native MSI execution; no installer build, installation or live integration edit is required for the offline unit suite.
 
-`testing/msi_database.py` reads MSI tables without WMI Win32_Product (which can trigger unrelated repairs). The historical opt-in `testing/run_msi_lifecycle.py` predates the executable rename and this refusal policy: it still assumes `yapfast.exe`, old fixture versions and an older scratch root. **Do not use it as current lifecycle evidence or run it unchanged.** A future lifecycle update must verify the legacy refusal leaves the exact old fixture installed, then separately exercise renamed-product install/upgrade/repair/uninstall using disjoint identities and profile scratch only. Fixture MSI version changes are not new application builds. No such registration/install test is claimed by this repair.
+`testing/msi_database.py` reads MSI tables, bounded binary streams, and exact product/UpgradeCode state without WMI `Win32_Product` (which can trigger unrelated repairs). The opt-in lifecycle runner uses separate random namespaces for version-only legacy detection, component-marker-only detection, normal renamed upgrades, and rollback. Every compiled MSI is checked against its complete expected tables and byte hashes before registration. Fixtures receive both `INSTALLFOLDER` and secure `HARMONYFIXTUREPROGRAMS` scratch paths; the latter is remembered in the isolated fixture registry for maintenance and nested predecessor uninstall, so empty-directory cleanup cannot fall back to real `%LOCALAPPDATA%\\Programs`.
 
-Full interactive wizard presentation and deliberate crash/fault rollback injection are separate, unclaimed checks. Keep actual test/scan/source-review receipts; do not infer passing lifecycle tests from successful compilation or a nonzero downgrade exit alone.
+Prepare a fresh, single-use plan first; this step builds/inspects fixtures but never invokes `msiexec`:
+
+```
+python3 -B testing/run_msi_lifecycle.py --release-receipt PATH/TO/Harmony.msi.json --wix-dll PATH/TO/wix.dll --ui-extension PATH/TO/WixToolset.UI.wixext.dll --scratch-root PATH/TO/HEX/PROFILE/cache/scratch --include-fault-rollback --prepare-only
+python3 -B testing/run_msi_lifecycle.py --run-prepared PATH/TO/SCRATCH/msi-lifecycle-UUID/plan.json --allow-isolated-msi-registration
+```
+
+The second command explicitly permits **fixture-only** registration, never production installation. It rechecks the complete plan, packages, payloads, namespaces, remembered paths, and compiled tables before the first native operation. It exercises independent legacy refusals before removal, then fresh renamed install, upgrade, missing-file repair, downgrade refusal, and uninstall. Controlled rollback uses a fixture-only Type 19 failure after `InstallExecute` has flushed deferred file writes; the production MSI cannot request that hook. Exact installed bytes, differing owned markers, new-only rollback files, fake user-data/unowned-file canaries, registration, and cleanup are checked. All exact fixture identities are independently considered for cleanup even after a failure. Fixture MSI versions are not new application builds.
+
+Offline safety tests, successful compilation, or a nonzero refusal exit alone are not native lifecycle evidence. Retain each actual `plan.json`, MSI table snapshot, native step log, `cleanup.json`, and `result.json`. The runner's real registration tests use `/qn`; full interactive wizard presentation and deliberate process-crash recovery remain separate, unclaimed checks.
