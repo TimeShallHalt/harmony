@@ -35,6 +35,11 @@ class HarmonyBrandingTest(unittest.TestCase):
             text = source(relative)
             self.assertIsNone(re.search(r'"[^"\n]*Yapfast[^"\n]*"', text), relative)
 
+    def test_runtime_launch_messages_use_harmony(self):
+        for relative in ("src/instance.rs", "src/desktop_entry.rs"):
+            for invocation in re.findall(r"tracing::(?:info|warn)!\([^;]+;", source(relative)):
+                self.assertNotIn("Yapfast", invocation, relative)
+
     def test_session_stopped_notice_uses_harmony(self):
         self.assertIn('Restart Harmony to restore your session.', source('crates/yapfast-core/src/application.rs'))
 

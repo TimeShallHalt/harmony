@@ -42,9 +42,9 @@ pub fn install() {
         return;
     };
     match install_in(&data, &data_dirs(), &image) {
-        Ok(true) => tracing::info!(appimage = %image.display(), "added Yapfast to the app menu"),
+        Ok(true) => tracing::info!(appimage = %image.display(), "added Harmony to the app menu"),
         Ok(false) => {}
-        Err(error) => tracing::warn!(%error, "could not add Yapfast to the app menu"),
+        Err(error) => tracing::warn!(%error, "could not add Harmony to the app menu"),
     }
 }
 
