@@ -12,11 +12,20 @@ pub fn publication_handle(snapshot: Snapshot) -> Discord {
         api: Arc::new(Api::anonymous().expect("anonymous HTTP client construction only")),
         names: Arc::default(),
         profiles: Arc::default(),
+        tag_servers: Arc::default(),
+        feed_place: Arc::default(),
         notes: Notes::default(),
+        effects: Arc::default(),
+        frames: Arc::default(),
         listed_threads: Arc::default(),
         new_dms: Arc::new(Mutex::new(limits::Window::new(NEW_DMS, NEW_DM_SPAN))),
         application_icons: Arc::default(),
         mfa: Arc::default(),
         default_sounds: Arc::default(),
+        // Publication fixtures deliberately create neither a gateway watcher
+        // nor any other background task.
+        commands: commands::Kept::default(),
+        autocompletes: interactions::Autocompletes::default(),
+        status_writes: Arc::default(),
     }
 }
