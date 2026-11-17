@@ -17,6 +17,7 @@ fn fixture() -> Application {
             attachments: (0..3)
                 .map(|_| chat::Attachment {
                     name: "fixture.png".into(),
+                    description: None,
                     size: None,
                     image: true,
                     dimensions: None,

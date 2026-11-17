@@ -2383,6 +2383,7 @@ fn someones_menu_blocks_and_unblocks_them_but_never_this_account() {
             nickname: None,
             since: None,
             presence: None,
+            presence_observation: None,
             activity: None,
             activities: Default::default(),
         }]
@@ -3343,6 +3344,7 @@ fn viewer_lifecycle_navigation_releases_the_inactive_original() {
             attachments: (0..3)
                 .map(|_| chat::Attachment {
                     name: "fixture.png".into(),
+                    description: None,
                     size: None,
                     image: true,
                     dimensions: None,
@@ -3395,6 +3397,7 @@ fn viewer_lifecycle_reopening_rejects_the_previous_result() {
             item: "e:originals".into(),
             attachments: vec![chat::Attachment {
                 name: "fixture.png".into(),
+                description: None,
                 size: None,
                 image: true,
                 dimensions: None,
