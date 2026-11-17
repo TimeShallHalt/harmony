@@ -23,7 +23,32 @@ TABLE_COLUMNS = {
     'LaunchCondition': ('Condition', 'Description'),
     'AppSearch': ('Property', 'Signature_'),
     'RegLocator': ('Signature_', 'Root', 'Key', 'Name', 'Type'),
+    'Signature': ('Signature', 'FileName', 'MinVersion', 'MaxVersion', 'MinSize', 'MaxSize', 'MinDate', 'MaxDate', 'Languages'),
 }
+
+# Reviewed output of the pinned WiX Minimal UI recipe, not a general MSI loader.
+# No other locator, integration, executable-extension, or custom schema is allowed.
+REVIEWED_TABLES = frozenset({
+    'ActionText', 'AdminExecuteSequence', 'AdminUISequence', 'AdvtExecuteSequence',
+    'AppSearch', 'Binary', 'CheckBox', 'Component', 'Control', 'ControlCondition',
+    'ControlEvent', 'CustomAction', 'Dialog', 'Directory', 'Error', 'EventMapping',
+    'Feature', 'FeatureComponents', 'File', 'Icon', 'InstallExecuteSequence',
+    'InstallUISequence', 'LaunchCondition', 'ListBox', 'Media', 'MsiFileHash',
+    'Property', 'RadioButton', 'RegLocator', 'Registry', 'RemoveFile', 'Signature',
+    'TextStyle', 'UIText', 'Upgrade', '_Validation',
+})
+
+
+def validate_table_policy(table_names, raw_tables):
+    unexpected = (set(table_names) | set(raw_tables)) - REVIEWED_TABLES
+    if unexpected:
+        raise ValueError('Unexpected integration table or unreviewed schema: ' + ', '.join(sorted(unexpected)))
+    # WiX creates an empty Signature table for the raw registry searches. A
+    # populated signature can change AppSearch semantics and must not be hidden.
+    if 'Signature' in table_names and 'Signature' not in raw_tables:
+        raise ValueError('Signature table must be inspected and empty')
+    if raw_tables.get('Signature'):
+        raise ValueError('Signature table must be inspected and empty')
 
 
 def msi_api():
@@ -217,6 +242,7 @@ def inspect(path):
             name: db.query('SELECT ' + ', '.join('`' + column + '`' for column in columns) + ' FROM `' + name + '`')
             for name, columns in TABLE_COLUMNS.items() if name in tables
         }
+        validate_table_policy(tables, rows)
         properties = dict(rows['Property'])
         if properties.get('ALLUSERS') not in (None, ''):
             raise ValueError('Not a per-user-only package')

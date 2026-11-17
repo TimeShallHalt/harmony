@@ -29,7 +29,7 @@ def fake_database(package):
     """Explicit synthetic table model, used only to attack the pure validator."""
     ns = package.namespace
     raw = {name: [] for name in database.TABLE_COLUMNS}
-    raw['Directory'] = [['TARGETDIR', '', 'SourceDir'], ['LocalAppDataFolder', 'TARGETDIR', '.'],
+    raw['Directory'] = [['TARGETDIR', '', 'SourceDir'], ['LocalAppDataFolder', 'TARGETDIR', 'LocalApp'],
                         [runner.FIXTURE_PROGRAMS, 'LocalAppDataFolder', 'Programs'],
                         ['INSTALLFOLDER', runner.FIXTURE_PROGRAMS, 'short|Harmony-MSI-Fixture-' + ns.hex]]
     raw['Component'] = [['ProgramFolderRegistration', database.guid_text(uuid.uuid5(ns, 'install-folder')),
@@ -85,6 +85,16 @@ def refusal_log(signal, message=MESSAGE):
 
 
 class ScratchTest(unittest.TestCase):
+    def test_native_payload_and_install_paths_respect_utf16_max_path(self):
+        short = runner.PROFILE_SCRATCH / 'msi-lifecycle-123456789abc'
+        runner.validate_native_paths(short / 'payload', short / 'target', {'LICENSE.txt': 'hash'})
+        for payload, target in ((short / ('a' * 260), short), (short, short / ('b' * 260))):
+            with self.subTest(payload=str(payload), target=str(target)), self.assertRaisesRegex(ValueError, 'MAX_PATH'):
+                runner.validate_native_paths(payload, target, {'LICENSE.txt': 'hash'})
+        # Supplementary Unicode characters consume two Windows UTF-16 units.
+        with self.assertRaisesRegex(ValueError, 'MAX_PATH'):
+            runner.validate_native_paths(short / ('\U0001f680' * 100), short, {'LICENSE.txt': 'hash'})
+
     def setUp(self):
         scratch = Path(os.environ.get('HARMONY_TEST_SCRATCH', runner.PROFILE_SCRATCH))
         runner.scratch_path(scratch)
@@ -212,6 +222,37 @@ class TableSafetyTests(ScratchTest):
                 db['raw_tables'][table][0][2] = r'Software\Harmony\Installer'
                 with self.assertRaises(ValueError):
                     runner.validate_database(db, self.pkg, MESSAGE)
+
+    def test_upgrade_action_properties_cannot_seed_product_removal_lists(self):
+        production = database.guid_text(uuid.uuid5(runner.PRODUCTION_UPGRADE_CODE, 'product:1.1.1'))
+        for name in {row[6] for row in self.db['raw_tables']['Upgrade']}:
+            for value in ('', production):
+                db = copy.deepcopy(self.db)
+                db['properties'][name] = value
+                db['properties']['SecureCustomProperties'] += ';' + name
+                db['raw_tables']['Property'] = [[key, data] for key, data in db['properties'].items()]
+                with self.subTest(property=name, value=value), self.assertRaisesRegex(ValueError, 'defaults|Upgrade action properties'):
+                    runner.validate_database(db, self.pkg, MESSAGE)
+
+    def test_unreviewed_locators_and_schema_are_refused_even_if_not_in_snapshot_names(self):
+        for name in ('CompLocator', 'IniLocator', 'DrLocator', 'UnreviewedFixtureExtension'):
+            for source in ('names', 'rows', 'both'):
+                db = copy.deepcopy(self.db)
+                if source in ('names', 'both'):
+                    db['table_names'].append(name)
+                if source in ('rows', 'both'):
+                    db['raw_tables'][name] = [['RememberedProgramFolder', '', r'C:\outside-fixture', '0']]
+                with self.subTest(table=name, source=source), self.assertRaisesRegex(ValueError, 'unreviewed schema'):
+                    runner.validate_database(db, self.pkg, MESSAGE)
+
+    def test_signature_table_is_explicitly_inspected_and_empty(self):
+        db = copy.deepcopy(self.db)
+        db['raw_tables']['Signature'] = [['RememberedProgramFolder', 'other.exe', '', '', '', '', '', '', '']]
+        with self.assertRaisesRegex(ValueError, 'Signature table must be inspected and empty'):
+            runner.validate_database(db, self.pkg, MESSAGE)
+        del db['raw_tables']['Signature']
+        with self.assertRaisesRegex(ValueError, 'Signature table must be inspected and empty'):
+            runner.validate_database(db, self.pkg, MESSAGE)
 
     def test_target_defaults_cannot_escape_to_production(self):
         self.db['raw_tables']['Directory'][3][2] = 'Harmony'

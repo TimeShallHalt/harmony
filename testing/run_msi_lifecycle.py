@@ -27,9 +27,9 @@ import time
 import uuid
 
 try:
-    from .msi_database import guid_text, inspect, product_state, related_products
+    from .msi_database import guid_text, inspect, product_state, related_products, validate_table_policy
 except ImportError:  # Direct script invocation.
-    from msi_database import guid_text, inspect, product_state, related_products
+    from msi_database import guid_text, inspect, product_state, related_products, validate_table_policy
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE_SCRATCH = Path.home() / 'AppData/Local/hermes/profiles/hex/cache/scratch'
@@ -237,6 +237,7 @@ def validate_database(db, package, legacy_message):
     ns = package.namespace
     require(ns.version == 4 and ns != PRODUCTION_UPGRADE_CODE, 'Only fresh UUID4 fixture namespaces are allowed')
     props, tables = db['properties'], db['raw_tables']
+    validate_table_policy(db['table_names'], tables)
     require(guid_text(props['UpgradeCode']) == guid_text(ns) and guid_text(props['ProductCode']) == package.code,
             'MSI fixture product/upgrade identity mismatch')
     require(props.get('ProductVersion') == package.version and props.get('ProductName') == 'Harmony MSI Lifecycle Fixture'
@@ -252,7 +253,7 @@ def validate_database(db, package, legacy_message):
             <= set(props.get('SecureCustomProperties', '').split(';')), 'Detection/target properties must be secure')
 
     directories = {row[0]: [row[1], row[2].split('|')[-1]] for row in tables['Directory']}
-    expected_dirs = {'TARGETDIR': ['', 'SourceDir'], 'LocalAppDataFolder': ['TARGETDIR', '.'],
+    expected_dirs = {'TARGETDIR': ['', 'SourceDir'], 'LocalAppDataFolder': ['TARGETDIR', 'LocalApp'],
                      FIXTURE_PROGRAMS: ['LocalAppDataFolder', 'Programs'],
                      'INSTALLFOLDER': [FIXTURE_PROGRAMS, 'Harmony-MSI-Fixture-' + ns.hex]}
     file_directories = {}
@@ -319,6 +320,8 @@ def validate_database(db, package, legacy_message):
             and 'NOT ALLUSERS' in conditions and any('WIX_DOWNGRADE_DETECTED' in key for key in conditions),
             'Legacy/downgrade/context launch guards missing')
     upgrades = tables['Upgrade']
+    require(not {row[6] for row in upgrades} & props.keys(),
+            'Upgrade action properties must not be pre-authored; product removal lists come only from FindRelatedProducts')
     require(all(guid_text(row[0]) == guid_text(ns) and row[6] in
                 {'HARMONY_LEGACY_MSI', 'WIX_UPGRADE_DETECTED', 'WIX_DOWNGRADE_DETECTED'} for row in upgrades),
             'Upgrade table can discover/remove a non-fixture identity')
@@ -381,6 +384,15 @@ def expected_files(source_files, label, ns, alias, fault):
     return files
 
 
+def validate_native_paths(payload, target, files):
+    # WiX 4's native cabinet backend still has MAX_PATH-sensitive inputs.
+    # Keep the complete notice payload; shorten the scratch work name instead.
+    for root in (payload, target):
+        for name in files:
+            units = len(str(root / name).encode('utf-16-le')) // 2
+            require(units < 260, 'Native MSI fixture path exceeds MAX_PATH; use the profile scratch root directly: ' + str(root / name))
+
+
 def prepare(args):
     builder = builder_module()
     payload, source_files, info = load_release(args.release_receipt)
@@ -392,7 +404,9 @@ def prepare(args):
                 'Builder needs test-namespace-only test_fail_after_install_files=False in generate_wxs/build_msi')
     scratch = scratch_path(args.scratch_root)
     scratch.mkdir(parents=True, exist_ok=True)
-    work = scratch / ('msi-lifecycle-' + uuid.uuid4().hex)
+    # The directory token is not an MSI identity. All product/component/upgrade
+    # namespaces below remain complete independent UUID4 values; mkdir is exclusive.
+    work = scratch / ('msi-lifecycle-' + uuid.uuid4().hex[:12])
     work.mkdir()
     namespaces = {group: uuid.uuid4() for group in GROUPS if group != 'rollback' or args.include_fault_rollback}
     packages = []
@@ -408,12 +422,15 @@ def prepare(args):
         if fault:
             (destination / NEW_ONLY).write_bytes(b'New-only rollback canary; must not survive failed upgrade.\n')
         output = work / 'packages' / (label + '.msi')
+        target = work / group / 'program'
+        files = expected_files(source_files, label, ns, alias, fault)
+        validate_native_paths(destination, target, files)
         kwargs = {'test_namespace': ns, 'test_version': version}
         if fault:
             kwargs['test_fail_after_install_files'] = True
         builder.build_msi(destination, info, output, args.wix_dll, args.ui_extension, **kwargs)
         package = Package(label, group, ns, version, alias, fault, output, destination,
-                          work / group / 'program', expected_files(source_files, label, ns, alias, fault), digest(output))
+                          target, files, digest(output))
         require(payload_hashes(destination) == package.files, 'Prepared payload identity mismatch')
         db = inspect(output)
         validate_database(db, package, builder.LEGACY_MIGRATION_MESSAGE)
@@ -461,6 +478,7 @@ def load_prepared(path):
         require(package.files == expected_files(source_files, label, ns, alias, fault)
                 and payload_hashes(package.payload) == package.files and digest(package.path) == package.sha256,
                 'Prepared package/payload bytes changed')
+        validate_native_paths(package.payload, package.target, package.files)
         db = inspect(package.path)
         validate_database(db, package, builder.LEGACY_MIGRATION_MESSAGE)
         write_json(work / 'packages' / (label + '-run-preflight.json'), db)
