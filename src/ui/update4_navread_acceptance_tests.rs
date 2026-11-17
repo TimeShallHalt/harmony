@@ -327,7 +327,10 @@ fn acceptance_tall_account_popover_normal_minimum_scroll_review_cancel_escape() 
         let (b, mut sink) = Backend::anonymous_fixture(a.borrow().runtime.clone());
         a.borrow_mut().backend = Some(b);
         deliver(&a, &w, &mut f);
-        let status_text = "long owned received status ".repeat(100);
+        let status_text = "long owned received status "
+            .repeat(100)
+            .trim_end()
+            .to_owned();
         {
             let mut a = a.borrow_mut();
             // Opening the merged account card asks for its own profile and refreshes

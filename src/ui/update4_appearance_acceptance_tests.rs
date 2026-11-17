@@ -1,5 +1,7 @@
 //! Safe in-memory actual-main appearance acceptance; no live provider or IO.
-use super::update4_appearance_tests::{repair1_profile_command, repair1_profile_response};
+use super::update4_appearance_tests::{
+    native_name_glyph, repair1_profile_command, repair1_profile_response,
+};
 use super::*;
 use i_slint_core::{accessibility::AccessibleStringProperty, item_tree::ItemRc};
 use std::ops::ControlFlow;
@@ -11,61 +13,113 @@ fn settle(window: &YapfastWindow) {
     i_slint_core::properties::ChangeTracker::run_change_handlers();
 }
 fn install(owner: &Rc<RefCell<Adapter>>, window: &YapfastWindow, name: &str) {
+    install_profile(
+        owner,
+        window,
+        yapfast_core::chat::Profile {
+            id: "200".into(),
+            name: name.into(),
+            ..Default::default()
+        },
+        false,
+    );
+}
+fn install_profile(
+    owner: &Rc<RefCell<Adapter>>,
+    window: &YapfastWindow,
+    profile: yapfast_core::chat::Profile,
+    panel: bool,
+) {
     // Refresh derives workspace/trust from Application, not window overrides.
-    // Keep a real in-memory DM context and publish to its exact open request.
+    // Publish metadata through this exact surface's real scoped request. Moving
+    // a card into panel_profile leaves no panel request: show_panel_profile()
+    // correctly replaces that forged panel with a new loading shell on dispatch.
     received(owner);
     let mut a = owner.borrow_mut();
     a.layout.sound_volume = Some(0);
     a.app.dispatch(Action::ShowProfilePanel(false));
-    let command = repair1_profile_command(a.app.dispatch(Action::ShowProfile {
-        user: "200".into(),
-        large: false,
+    let command = repair1_profile_command(a.app.dispatch(if panel {
+        Action::ShowProfilePanel(true)
+    } else {
+        Action::ShowProfile {
+            user: profile.id.clone(),
+            large: false,
+        }
     }));
+    let Command::Discord(yapfast_core::chat::DiscordCommand::ScopedProfile(request)) = &command
+    else {
+        panic!("real scoped profile request");
+    };
+    assert_eq!(request.panel, panel);
+    assert_eq!(request.room, "discord:@me:10");
+    assert_eq!(request.owner.as_deref(), Some("100"));
     a.apply(repair1_profile_response(
         command,
         false,
-        Ok(yapfast_core::chat::Profile {
-            id: "200".into(),
-            name: name.into(),
-            ..Default::default()
-        }),
+        Ok(profile.clone()),
     ));
-    let view = a.app.state.profile.as_ref().unwrap();
+    let view = if panel {
+        a.app.state.panel_profile.as_ref()
+    } else {
+        a.app.state.profile.as_ref()
+    }
+    .unwrap();
     assert!(!view.loading);
-    assert_eq!(view.profile.name, name);
+    assert!(!view.kept);
+    assert_eq!(view.profile.id, profile.id);
+    assert_eq!(view.profile.name, profile.name);
+    assert_eq!(view.profile.avatar, profile.avatar);
+    assert_eq!(view.profile.banner, profile.banner);
+    assert_eq!(view.profile.decoration, profile.decoration);
     a.refresh(window);
     assert!(window.get_workspace());
     assert!(window.get_trusted());
-    assert!(window.get_profile_open());
+    assert_eq!(window.get_profile_open(), !panel);
+    if panel {
+        assert!(a.app.state.profile_panel);
+        assert_eq!(window.get_panel_profile().id, profile.id);
+    }
 }
 fn texts(window: &YapfastWindow, name: &str) -> Vec<(String, slint::Brush)> {
     let inner = i_slint_core::window::WindowInner::from_pub(window.window());
     let mut out = Vec::new();
     let _: Option<()> = ItemRc::new_root(inner.component()).visit_descendants(|item| {
-        if let Some(t) = item.downcast::<i_slint_core::items::ComplexText>() {
-            let p = t.as_pin_ref();
-            if i_slint_core::items::ComplexText::FIELD_OFFSETS
-                .text()
-                .apply_pin(p)
-                .get()
-                == name
-            {
-                out.push((
-                    i_slint_core::items::ComplexText::FIELD_OFFSETS
-                        .font_family()
-                        .apply_pin(p)
-                        .get()
-                        .to_string(),
-                    i_slint_core::items::ComplexText::FIELD_OFFSETS
-                        .color()
-                        .apply_pin(p)
-                        .get(),
-                ));
-            }
+        if let Some(glyph) = native_name_glyph(&item, name) {
+            out.push((glyph.family, glyph.brush));
         }
         ControlFlow::Continue(())
     });
     out
+}
+fn assert_plain_name(window: &YapfastWindow, name: &str, size: f32) {
+    let inner = i_slint_core::window::WindowInner::from_pub(window.window());
+    let mut glyphs = Vec::new();
+    let _: Option<()> = ItemRc::new_root(inner.component()).visit_descendants(|item| {
+        if let Some(glyph) = native_name_glyph(&item, name) {
+            glyphs.push(glyph);
+        }
+        ControlFlow::Continue(())
+    });
+    assert_eq!(
+        glyphs.len(),
+        1,
+        "one actual ordinary name glyph: {glyphs:?}"
+    );
+    assert_eq!(glyphs[0].kind, "TextInput", "plain name remains selectable");
+    assert!(
+        (glyphs[0].size - size).abs() < 0.1,
+        "ordinary size: {glyphs:?}"
+    );
+    assert!(
+        !glyphs[0].family.is_empty(),
+        "resolved ordinary font: {glyphs:?}"
+    );
+    assert_eq!(
+        accessible_count(window, name),
+        1,
+        "one accessible ordinary name value"
+    );
+    println!("actual ordinary name glyph: {glyphs:?}");
 }
 pub(super) fn cpu_snapshot(w: &YapfastWindow) -> slint::SharedPixelBuffer<slint::Rgba8Pixel> {
     use i_slint_core::renderer::RendererSealed;
@@ -88,12 +142,21 @@ fn accessible_count(window: &YapfastWindow, name: &str) -> usize {
     let inner = i_slint_core::window::WindowInner::from_pub(window.window());
     let mut count = 0;
     let _: Option<()> = ItemRc::new_root(inner.component()).visit_descendants(|item| {
-        if item.is_accessible()
+        // Plain names are read-only inputs: "Name" is their label and the
+        // display name is their accessible Value. Styled Text uses Label.
+        // Count actual accessible nodes once, including both rendering paths.
+        let label = item.accessible_string_property(AccessibleStringProperty::Label);
+        let plain_name = item.downcast::<i_slint_core::items::TextInput>().is_some()
+            && label.as_deref() == Some("Name")
             && item
-                .accessible_string_property(AccessibleStringProperty::Label)
+                .accessible_string_property(AccessibleStringProperty::ReadOnly)
                 .as_deref()
-                == Some(name)
-        {
+                == Some("true")
+            && item
+                .accessible_string_property(AccessibleStringProperty::Value)
+                .as_deref()
+                == Some(name);
+        if item.is_accessible() && (label.as_deref() == Some(name) || plain_name) {
             count += 1;
         }
         ControlFlow::Continue(())
@@ -116,6 +179,7 @@ fn all_received_families_brushes_unicode_and_single_accessible_name() {
     install(&owner, &window, name);
     window.show().unwrap();
     settle(&window);
+    assert_plain_name(&window, name, 20.);
     let app_family = texts(&window, name)
         .first()
         .expect("received ordinary profile name is materialized before applying styles")
@@ -161,7 +225,8 @@ fn all_received_families_brushes_unicode_and_single_accessible_name() {
                     .count();
                 assert!(
                     pink > 2,
-                    "actual CPU raster glyph ink for family {id}: {pink}"
+                    "actual CPU raster glyph ink for family {id}: {pink}; native glyphs {:?}",
+                    texts(&window, name)
                 );
             }
             let glyphs = texts(&window, name);
@@ -199,6 +264,7 @@ fn all_received_families_brushes_unicode_and_single_accessible_name() {
         a.refresh(&window);
     }
     settle(&window);
+    assert_plain_name(&window, name, 20.);
     assert_eq!(texts(&window, name).len(), 1);
     assert_eq!(accessible_count(&window, name), 1);
     window.invoke_close_profile();
@@ -278,24 +344,53 @@ fn full_and_dm_panel_decoration_replacement_expiry_failure_and_release() {
         )
         .unwrap();
         bind_callbacks(&w, &a);
-        install(&a, &w, "overlay acceptance");
-        let parsed=yapfast_discord::profile::parse(&serde_json::json!({"user":{"id":"200","username":"fixture","avatar_decoration_data":{"sku_id":"123","asset":"safe"}}}),None).unwrap();
+        let parsed = yapfast_discord::profile::parse(
+            &serde_json::json!({
+                "user": {
+                    "id": "200", "username": "overlay acceptance",
+                    "avatar": "0123456789abcdef0123456789abcdef",
+                    "banner": "0123456789abcdef0123456789abcdef",
+                    "avatar_decoration_data": {"sku_id": "123", "asset": "safe"}
+                }
+            }),
+            None,
+        )
+        .unwrap();
         let art: yapfast_core::appearance::Decoration = parsed.decoration.unwrap().into();
         let url = art.url.clone();
+        let received_profile = yapfast_core::chat::Profile {
+            id: "200".into(),
+            name: "overlay acceptance".into(),
+            avatar: Some(parsed.avatar),
+            banner: parsed.banner,
+            decoration: Some(art),
+            ..Default::default()
+        };
+        // Both originals must be accepted identities before any native action;
+        // decoration art is not an original-media resource.
+        for kind in [ProfilePicture::Avatar, ProfilePicture::Banner] {
+            let asset =
+                yapfast_core::profile_media::Asset::from_profile("100", &received_profile, kind)
+                    .expect("parsed received avatar/banner is a valid original-media identity");
+            assert_eq!(asset.account(), "100");
+            assert_eq!(asset.user(), "200");
+            assert_eq!(asset.kind(), kind);
+            assert!(asset.url().ends_with("?size=4096"));
+            assert!(!asset.url().contains("avatar-decoration"));
+        }
+        install_profile(&a, &w, received_profile.clone(), panel);
         let first = picture(17);
         let weak = Arc::downgrade(&first);
         {
             let mut o = a.borrow_mut();
             o.app.state.pictures.insert(url.clone(), first);
-            let v = o.app.state.profile.as_mut().unwrap();
-            v.large = !panel;
-            v.profile.decoration = Some(art.clone());
-            v.profile.avatar=Some("https://cdn.discordapp.com/avatars/200/0123456789abcdef0123456789abcdef.png?size=128".into());
-            v.profile.banner=Some("https://cdn.discordapp.com/banners/200/0123456789abcdef0123456789abcdef.png?size=512".into());
-            if panel {
-                o.app.state.panel_profile = o.app.state.profile.take();
-                o.app.state.profile_panel = true;
+            let v = if panel {
+                o.app.state.panel_profile.as_mut()
+            } else {
+                o.app.state.profile.as_mut()
             }
+            .unwrap();
+            v.large = !panel;
             o.refresh(&w);
         }
         w.show().unwrap();
@@ -318,6 +413,40 @@ fn full_and_dm_panel_decoration_replacement_expiry_failure_and_release() {
         );
         drop(raster);
         for kind in ["avatar", "banner"] {
+            let media_kind = if kind == "avatar" {
+                ProfilePicture::Avatar
+            } else {
+                ProfilePicture::Banner
+            };
+            let expected_asset = yapfast_core::profile_media::Asset::from_profile(
+                "100",
+                &received_profile,
+                media_kind,
+            )
+            .unwrap();
+            {
+                let o = a.borrow();
+                let v = if panel {
+                    o.app.state.panel_profile.as_ref()
+                } else {
+                    o.app.state.profile.as_ref()
+                }
+                .unwrap();
+                assert!(
+                    !v.loading,
+                    "accepted surface remains loaded before {panel}/{kind}"
+                );
+                assert_eq!(
+                    yapfast_core::profile_media::Asset::from_profile("100", &v.profile, media_kind),
+                    Some(expected_asset.clone())
+                );
+                let projected = if panel {
+                    w.get_panel_profile()
+                } else {
+                    w.get_profile()
+                };
+                assert!(projected.avatar_media && projected.banner_media);
+            }
             let inner = i_slint_core::window::WindowInner::from_pub(w.window());
             let label = format!("View overlay acceptance's {kind}");
             let target = ItemRc::new_root(inner.component())
@@ -332,11 +461,49 @@ fn full_and_dm_panel_decoration_replacement_expiry_failure_and_release() {
                     }
                 })
                 .expect("original media control remains present under decoration");
+            assert!(target.is_accessible());
             target.accessible_action(&i_slint_core::accessibility::AccessibilityAction::Default);
             drop(target);
             settle(&w);
-            assert!(w.get_viewer_open());
+            assert!(
+                w.get_viewer_open(),
+                "native original-media action {panel}/{kind}"
+            );
             assert!(w.get_viewer_profile_media());
+            {
+                let o = a.borrow();
+                let viewer = o
+                    .app
+                    .state
+                    .viewer
+                    .as_ref()
+                    .expect("native action creates a viewer session");
+                let yapfast_core::application::ViewerSource::Profile(session) = &viewer.source
+                else {
+                    panic!("original media must not create a message viewer");
+                };
+                assert_eq!(
+                    session.slot,
+                    if panel {
+                        yapfast_core::profile_media::Slot::Panel
+                    } else {
+                        yapfast_core::profile_media::Slot::Profile
+                    }
+                );
+                assert_eq!(session.asset, expected_asset);
+                let v = if panel {
+                    o.app.state.panel_profile.as_ref()
+                } else {
+                    o.app.state.profile.as_ref()
+                }
+                .unwrap();
+                assert!(
+                    !v.loading,
+                    "native action must not replace the accepted scoped profile"
+                );
+                assert_eq!(v.profile.name, "overlay acceptance");
+            }
+            assert_eq!(w.get_viewer_media_link(), expected_asset.url());
             assert!(w.get_viewer_media_link().contains(if kind == "avatar" {
                 "/avatars/"
             } else {
@@ -476,36 +643,28 @@ fn scales(w: &YapfastWindow, name: &str) -> Vec<(f32, f32)> {
     let inner = i_slint_core::window::WindowInner::from_pub(w.window());
     let mut v = Vec::new();
     let _: Option<()> = ItemRc::new_root(inner.component()).visit_descendants(|i| {
-        if let Some(t) = i.downcast::<i_slint_core::items::ComplexText>() {
-            if i_slint_core::items::ComplexText::FIELD_OFFSETS
-                .text()
-                .apply_pin(t.as_pin_ref())
-                .get()
-                == name
-            {
-                let mut p =
-                    i.parent_item(i_slint_core::item_tree::ParentItemTraversalMode::StopAtPopups);
-                for _ in 0..4 {
-                    let Some(item) = p else {
-                        break;
-                    };
-                    if let Some(t) = item.downcast::<i_slint_core::items::Transform>() {
-                        v.push((
-                            i_slint_core::items::Transform::FIELD_OFFSETS
-                                .transform_scale_x()
-                                .apply_pin(t.as_pin_ref())
-                                .get(),
-                            i_slint_core::items::Transform::FIELD_OFFSETS
-                                .transform_scale_y()
-                                .apply_pin(t.as_pin_ref())
-                                .get(),
-                        ));
-                        break;
-                    }
-                    p = item.parent_item(
-                        i_slint_core::item_tree::ParentItemTraversalMode::StopAtPopups,
-                    );
+        if native_name_glyph(&i, name).is_some() {
+            let mut p =
+                i.parent_item(i_slint_core::item_tree::ParentItemTraversalMode::StopAtPopups);
+            for _ in 0..4 {
+                let Some(item) = p else {
+                    break;
+                };
+                if let Some(t) = item.downcast::<i_slint_core::items::Transform>() {
+                    v.push((
+                        i_slint_core::items::Transform::FIELD_OFFSETS
+                            .transform_scale_x()
+                            .apply_pin(t.as_pin_ref())
+                            .get(),
+                        i_slint_core::items::Transform::FIELD_OFFSETS
+                            .transform_scale_y()
+                            .apply_pin(t.as_pin_ref())
+                            .get(),
+                    ));
+                    break;
                 }
+                p = item
+                    .parent_item(i_slint_core::item_tree::ParentItemTraversalMode::StopAtPopups);
             }
         }
         ControlFlow::Continue(())
@@ -529,10 +688,10 @@ fn actual_backend_name_motion_reset_close_and_drop_quiesce() {
     w.show().unwrap();
     show_motion(&w);
     settle(&w);
-    assert!(
-        !scales(&w, "motion Unicode 日本語").is_empty(),
-        "actual profile glyph transform exists before motion checks"
-    );
+    // The ordinary selectable name intentionally has no Transform. Establish
+    // its real glyph/accessibility presence; require a Transform only once the
+    // styled Gummy branch has actually been projected below.
+    assert_plain_name(&w, "motion Unicode 日本語", 20.);
     // The first refresh starts an unrelated one-shot roster coalescing timer,
     // even with no members. Let it finish naturally before measuring name work;
     // do not stop timers or accept a nonempty baseline.
@@ -556,6 +715,10 @@ fn actual_backend_name_motion_reset_close_and_drop_quiesce() {
         a.refresh(&w);
     }
     settle(&w);
+    assert!(
+        !scales(&w, "motion Unicode 日本語").is_empty(),
+        "actual styled profile glyph transform exists before motion checks"
+    );
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(80));
     slint::platform::update_timers_and_animations();
     assert!(
@@ -601,6 +764,7 @@ fn actual_backend_name_motion_reset_close_and_drop_quiesce() {
         a.refresh(&w);
     }
     settle(&w);
+    assert_plain_name(&w, "motion Unicode 日本語", 20.);
     assert!(
         scales(&w, "motion Unicode 日本語")
             .iter()

@@ -1,6 +1,54 @@
 use super::*;
 use yapfast_core::chat::DiscordCommand;
 
+#[derive(Debug)]
+pub(super) struct NativeNameGlyph {
+    pub kind: &'static str,
+    pub family: String,
+    pub size: f32,
+    pub brush: slint::Brush,
+}
+
+/// Inspect the actual rendered item, not the profile's projected font fields.
+/// people.slint deliberately uses a selectable, read-only TextInput for plain
+/// names and Text for styled names. Slint can lower Text to either native type.
+/// HasFont resolves inherited Window defaults just as the renderer does; a
+/// plain TextInput/SimpleText need not have a local font-family property.
+pub(super) fn native_name_glyph(
+    item: &i_slint_core::item_tree::ItemRc,
+    name: &str,
+) -> Option<NativeNameGlyph> {
+    use i_slint_core::item_rendering::HasFont;
+    macro_rules! inspect {
+        ($ty:ident) => {
+            if let Some(text) = item.downcast::<i_slint_core::items::$ty>() {
+                let text = text.as_pin_ref();
+                if i_slint_core::items::$ty::FIELD_OFFSETS
+                    .text()
+                    .apply_pin(text)
+                    .get()
+                    == name
+                {
+                    let font = text.font_request(item);
+                    return Some(NativeNameGlyph {
+                        kind: stringify!($ty),
+                        family: font.family.unwrap_or_default().to_string(),
+                        size: font.pixel_size.unwrap_or_default().0,
+                        brush: i_slint_core::items::$ty::FIELD_OFFSETS
+                            .color()
+                            .apply_pin(text)
+                            .get(),
+                    });
+                }
+            }
+        };
+    }
+    inspect!(TextInput);
+    inspect!(SimpleText);
+    inspect!(ComplexText);
+    None
+}
+
 pub(super) fn repair1_profile_command(effects: Vec<Effect>) -> Command {
     effects
         .into_iter()
@@ -428,22 +476,8 @@ fn received_style_projects_into_real_profile_card_full_and_panel() {
     let inner = i_slint_core::window::WindowInner::from_pub(window.window());
     let found =
         i_slint_core::item_tree::ItemRc::new_root(inner.component()).visit_descendants(|item| {
-            if let Some(text) = item.downcast::<i_slint_core::items::ComplexText>() {
-                let text = text.as_pin_ref();
-                if i_slint_core::items::ComplexText::FIELD_OFFSETS
-                    .text()
-                    .apply_pin(text)
-                    .get()
-                    == "Ada"
-                {
-                    let family = i_slint_core::items::ComplexText::FIELD_OFFSETS
-                        .font_family()
-                        .apply_pin(text)
-                        .get();
-                    if family == "Bangers" {
-                        return std::ops::ControlFlow::Break(());
-                    }
-                }
+            if native_name_glyph(&item, "Ada").is_some_and(|glyph| glyph.family == "Bangers") {
+                return std::ops::ControlFlow::Break(());
             }
             std::ops::ControlFlow::Continue(())
         });
@@ -457,37 +491,30 @@ fn received_style_projects_into_real_profile_card_full_and_panel() {
         let mut values = Vec::new();
         let _: Option<()> = i_slint_core::item_tree::ItemRc::new_root(inner.component())
             .visit_descendants(|item| {
-                if let Some(text) = item.downcast::<i_slint_core::items::ComplexText>() {
-                    if i_slint_core::items::ComplexText::FIELD_OFFSETS
-                        .text()
-                        .apply_pin(text.as_pin_ref())
-                        .get()
-                        == "Ada"
-                    {
-                        let mut parent = item.parent_item(
+                if native_name_glyph(&item, "Ada").is_some() {
+                    let mut parent = item.parent_item(
+                        i_slint_core::item_tree::ParentItemTraversalMode::StopAtPopups,
+                    );
+                    for _ in 0..4 {
+                        let Some(p) = parent else {
+                            break;
+                        };
+                        if let Some(t) = p.downcast::<i_slint_core::items::Transform>() {
+                            values.push((
+                                i_slint_core::items::Transform::FIELD_OFFSETS
+                                    .transform_scale_x()
+                                    .apply_pin(t.as_pin_ref())
+                                    .get(),
+                                i_slint_core::items::Transform::FIELD_OFFSETS
+                                    .transform_scale_y()
+                                    .apply_pin(t.as_pin_ref())
+                                    .get(),
+                            ));
+                            break;
+                        }
+                        parent = p.parent_item(
                             i_slint_core::item_tree::ParentItemTraversalMode::StopAtPopups,
                         );
-                        for _ in 0..4 {
-                            let Some(p) = parent else {
-                                break;
-                            };
-                            if let Some(t) = p.downcast::<i_slint_core::items::Transform>() {
-                                values.push((
-                                    i_slint_core::items::Transform::FIELD_OFFSETS
-                                        .transform_scale_x()
-                                        .apply_pin(t.as_pin_ref())
-                                        .get(),
-                                    i_slint_core::items::Transform::FIELD_OFFSETS
-                                        .transform_scale_y()
-                                        .apply_pin(t.as_pin_ref())
-                                        .get(),
-                                ));
-                                break;
-                            }
-                            parent = p.parent_item(
-                                i_slint_core::item_tree::ParentItemTraversalMode::StopAtPopups,
-                            );
-                        }
                     }
                 }
                 std::ops::ControlFlow::Continue(())
@@ -528,28 +555,10 @@ fn received_style_projects_into_real_profile_card_full_and_panel() {
     inner.ensure_tree_instantiated();
     let full_family = || {
         i_slint_core::item_tree::ItemRc::new_root(inner.component()).visit_descendants(|item| {
-            if let Some(text) = item.downcast::<i_slint_core::items::ComplexText>() {
-                let t = text.as_pin_ref();
-                if i_slint_core::items::ComplexText::FIELD_OFFSETS
-                    .text()
-                    .apply_pin(t)
-                    .get()
-                    == "Ada"
-                    && (i_slint_core::items::ComplexText::FIELD_OFFSETS
-                        .font_size()
-                        .apply_pin(t)
-                        .get()
-                        .0
-                        - 26.)
-                        .abs()
-                        < 0.1
-                {
-                    return std::ops::ControlFlow::Break(
-                        i_slint_core::items::ComplexText::FIELD_OFFSETS
-                            .font_family()
-                            .apply_pin(t)
-                            .get(),
-                    );
+            if let Some(glyph) = native_name_glyph(&item, "Ada") {
+                if (glyph.size - 26.).abs() < 0.1 {
+                    println!("actual enlarged name glyph: {glyph:?}");
+                    return std::ops::ControlFlow::Break(glyph.family);
                 }
             }
             std::ops::ControlFlow::Continue(())

@@ -1434,7 +1434,7 @@ export component ProfileCard inherits Rectangle {
                             spacing: 2px;
                             // The name and username select, to copy, as in
                             // Discord; the picture opens the full profile.
-                            if root.data.name-style.length == 0 && (!Looks.name-styles || (root.data.name-font == 0 && root.data.name-effect == 0)): TextInput {
+                            if root.data.name-style.length == 0 && (!Looks.name-styles || (root.data.name-font == 0 && root.data.name-effect == 0 && root.data.name-colors.length == 0)): TextInput {
                                 text: root.data.name; color: root.ink; font-size: root.large ? 26px : 20px; font-weight: 700;
                                 read-only: true; single-line: true;
                                 selection-background-color: Theme.accent.with-alpha(0.35);
@@ -1446,7 +1446,7 @@ export component ProfileCard inherits Rectangle {
                                 if !root.large && !root.preview: TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.enlarge(); } }
                             }
                             // Preserve Harmony's native received-name fallback for IDs upstream cannot render.
-                            if Looks.name-styles && root.data.name-style.length == 0 && (root.data.name-font != 0 || root.data.name-effect != 0): VerticalLayout {
+                            if Looks.name-styles && root.data.name-style.length == 0 && (root.data.name-font != 0 || root.data.name-effect != 0 || root.data.name-colors.length > 0): VerticalLayout {
                                 styled-name := StyledProfileName {
                                     text: root.data.name; font-size: root.large ? 26px : 20px; font-weight: 700;
                                     font-id: root.data.name-font; effect-id: root.data.name-effect; colors: root.data.name-colors;
