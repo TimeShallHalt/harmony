@@ -4871,6 +4871,7 @@ fn profile_switches_that_are_off_ask_for_nothing() {
         app.dispatch(Action::HideNameplates(!cosmetics.decorations));
         app.apply(discord_event(Snapshot {
             status: Status::Online,
+            user_id: Some("1".into()),
             conversations: vec![Arc::new(Conversation {
                 id: "30".into(),
                 name: "Ann".into(),
@@ -4906,6 +4907,25 @@ fn profile_switches_that_are_off_ask_for_nothing() {
             })) => Some((*effect, *frame)),
             _ => None,
         });
+        assert!(
+            !app.requested_pictures.contains("ring.png"),
+            "a cached DM shell must not revive unvalidated profile artwork"
+        );
+        app.apply(profile_reply(
+            &app,
+            Event::Profile {
+                user: "7".into(),
+                result: Ok(chat::Profile {
+                    id: "7".into(),
+                    avatar_decoration: Some("ring.png".into()),
+                    decoration: Some(crate::appearance::Decoration {
+                        url: "ring.png".into(),
+                        expires_at: None,
+                    }),
+                    ..Default::default()
+                }),
+            },
+        ));
         (app, effect)
     };
     let off = Cosmetics {
