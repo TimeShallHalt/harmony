@@ -6718,6 +6718,7 @@ fn an_original_reaches_the_native_viewer_without_an_adapter_resize() {
         item: "original-fixture".into(),
         attachments: vec![yapfast_core::chat::Attachment {
             name: "original.png".into(),
+            description: None,
             size: Some(bytes.get_ref().len() as u64),
             image: true,
             dimensions: Some(original.dimensions()),

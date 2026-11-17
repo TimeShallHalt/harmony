@@ -1713,7 +1713,28 @@ async fn reads_history_and_member_lists() {
         _ => None,
     })
     .await;
-    assert_eq!(own, members);
+    // A genuinely new list has the same visible rows, but its own newer
+    // gateway receipt. Cached cross-channel reuse above/below must retain
+    // exact observations instead of stamping them again at publication.
+    assert_eq!(own.len(), members.len());
+    let mut expected_own = members.clone();
+    for (fresh, previous) in own.iter().zip(expected_own.iter_mut()) {
+        assert!(
+            fresh
+                .presence_observation
+                .as_ref()
+                .expect("new list observation")
+                .newer_than(
+                    previous
+                        .presence_observation
+                        .as_ref()
+                        .expect("cached observation")
+                ),
+            "a separately fetched list carries a newer receipt from this gateway"
+        );
+        previous.presence_observation = fresh.presence_observation.clone();
+    }
+    assert_eq!(own, expected_own);
     discord.view(&guild, Some(&general));
     let again = live_where(&mut live, |event| match event {
         Live::Members {
