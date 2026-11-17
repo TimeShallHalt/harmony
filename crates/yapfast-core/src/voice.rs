@@ -41,7 +41,7 @@ pub struct Participant {
     pub person: String,
     pub local: bool,
     pub muted: bool,
-    /// Not hearing the call. MatrixRTC doesn't share this, so in Yapfast calls
+    /// Not hearing the call. MatrixRTC doesn't share this, so in Harmony calls
     /// only this account's own shows.
     pub deafened: bool,
     /// Muted or deafened by a Discord server, which shows in red; `muted`
@@ -53,7 +53,7 @@ pub struct Participant {
     /// example when their client crashed. Their membership stays listed until
     /// it expires. A participant who never unmuted shows no media connection.
     pub connected: bool,
-    /// Why audio may not flow with this participant, if Yapfast can tell.
+    /// Why audio may not flow with this participant, if Harmony can tell.
     pub problem: Option<String>,
     /// Sharing their screen.
     pub streaming: bool,
@@ -359,7 +359,7 @@ pub enum Command {
     /// which is remembered for next time.
     GoLive(StreamQuality),
     /// Share the screen or window picked last in place of the one shared,
-    /// keeping the stream; on Linux, what the system's dialog picks.
+    /// keeping the stream; in a Wayland session, what the system's dialog picks.
     SwitchLive,
     StopLive,
     /// Play the soundboard sound with this id for everyone in the call.
@@ -373,7 +373,7 @@ pub enum Command {
     Watch(String),
     StopWatching,
     /// Remove memberships this device left in voice channels, for example
-    /// after Yapfast was killed. Ignored during a call.
+    /// after Harmony was killed. Ignored during a call.
     LeaveStale,
 }
 
@@ -383,7 +383,7 @@ pub(crate) struct Calls {
     #[cfg(feature = "matrix")]
     pub session: SessionLease,
     /// The linked Discord account, which linking or unlinking changes while
-    /// Yapfast runs.
+    /// Harmony runs.
     #[cfg(feature = "discord")]
     pub discord: watch::Receiver<Option<Discord>>,
 }
@@ -441,7 +441,7 @@ impl Controller {
                     Err(_) => {
                         states.send_modify(|state| {
                             state.error =
-                                Some("Could not start voice. Restart Yapfast and try again.".into())
+                                Some("Could not start voice. Restart Harmony and try again.".into())
                         });
                     }
                 }
@@ -553,7 +553,7 @@ async fn worker(
 }
 
 /// glibc keeps the heap a call freed for reuse, 17-20 MiB in a fake Discord
-/// call with the microphone on, so Yapfast would stay at its size in the call.
+/// call with the microphone on, so Harmony would stay at its size in the call.
 /// Return it once the call has finished freeing it: its audio threads and
 /// connections close on their own after it ends, and a Discord call had freed
 /// everything 2 s after leaving. Turning a camera off frees its picture
@@ -598,11 +598,11 @@ async fn join(
         .await;
     #[cfg(not(feature = "matrix"))]
     Err(anyhow::anyhow!(
-        "This build of Yapfast has no Matrix voice."
+        "This build of Harmony has no Matrix voice."
     ))
 }
 
-/// The file in Yapfast's data folder that remembers the chosen devices.
+/// The file in Harmony's data folder that remembers the chosen devices.
 pub const DEVICES: &str = "devices.json";
 
 /// The devices and stream quality chosen on this machine, kept beside its

@@ -28,7 +28,11 @@ export component SignInScreen inherits Rectangle {
     callback link-discord-token(string);
     callback open-discord-captcha;
     background: Theme.rail;
-    Text { x: 32px; y: 24px; text: "Harmony"; color: Theme.accent; font-size: 24px; font-weight: 900; letter-spacing: -0.4px; }
+    HorizontalLayout {
+        x: 32px; y: 24px; width: 180px; height: 28px; spacing: 10px; alignment: start;
+        Image { source: @image-url("icons/logo.svg"); width: 26px; height: 26px; colorize: Theme.accent; accessible-role: none; }
+        Text { text: "Harmony"; color: Theme.text; font-size: 24px; font-weight: 700; vertical-alignment: center; }
+    }
     ScrollView {
         y: 64px; height: parent.height - 64px;
         VerticalLayout {

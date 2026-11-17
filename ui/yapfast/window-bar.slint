@@ -1,4 +1,4 @@
-import { Theme } from "../theme.slint";
+import { Theme, Tip, Middle } from "../theme.slint";
 import { ClientStyle } from "style.slint";
 
 // Keep the native window callbacks, including the existing close-to-tray policy.
@@ -31,7 +31,59 @@ component CaptionButton inherits Rectangle {
     }
 }
 
+// A button in the bar's own row, before the window's: a 20px glyph on a 4px-rounded ground.
+component BarButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> active;
+    callback clicked;
+    width: 28px; height: 24px; border-radius: 4px;
+    background: !root.enabled ? transparent : root.active ? Theme.active : pointer.has-hover || focus.has-focus ? Theme.hover : transparent;
+    border-width: focus.has-focus ? 1px : 0px; border-color: Theme.accent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    forward-focus: focus;
+    Image {
+        source: root.icon; width: 16px; height: 16px;
+        colorize: !root.enabled ? Theme.faint : root.active || pointer.has-hover ? Theme.text : Theme.secondary;
+    }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == "\n" || event.text == " " { root.clicked(); return accept; }
+            return reject;
+        }
+        pointer := TouchArea {
+            enabled: root.enabled; mouse-cursor: MouseCursor.pointer;
+            // What the click opens may open under the tip.
+            clicked => { Tip.text = ""; root.clicked(); }
+            changed has-hover => {
+                if self.has-hover {
+                    Tip.text = root.label;
+                    Tip.side = 2;
+                    Tip.x = root.absolute-position.x + root.width / 2;
+                    Tip.y = root.absolute-position.y + root.height;
+                } else if Tip.text == root.label {
+                    Tip.text = "";
+                }
+            }
+        }
+    }
+}
+
 export component WindowBar inherits Rectangle {
+    in property <bool> can-go-back;
+    in property <bool> can-go-forward;
+    in property <bool> inbox-open;
+    callback go-back;
+    callback go-forward;
+    callback toggle-inbox;
+    callback open-help;
+    /// The account's screens show; the inbox and help are for them.
+    in property <bool> workspace;
     in property <string> place;
     in property <bool> focused;
     in property <bool> maximized;
@@ -49,16 +101,25 @@ export component WindowBar inherits Rectangle {
         source: ClientStyle.title-logo;
         accessible-role: image; accessible-label: "Theme logo";
     }
-    if ClientStyle.title-logo.width == 0: Text {
-        x: ClientStyle.title-inset; width: ClientStyle.title-brand-width - ClientStyle.title-inset;
+    if ClientStyle.title-logo.width == 0: Rectangle {
+        x: ClientStyle.title-inset; width: max(0px, ClientStyle.title-brand-width - ClientStyle.title-inset);
         height: parent.height;
-        text: "Harmony"; font-size: ClientStyle.title-text-size; font-weight: 700;
-        color: root.focused ? Theme.text : Theme.muted;
-        vertical-alignment: center; overflow: elide;
+        Image {
+            x: 0px; y: (parent.height - self.height) / 2;
+            width: 18px; height: 18px; image-fit: contain;
+            source: @image-url("../icons/logo.svg"); colorize: root.focused ? Theme.accent : Theme.muted;
+            accessible-role: none;
+        }
+        Text {
+            x: 26px; width: max(0px, parent.width - 26px); height: parent.height;
+            text: "Harmony"; font-size: ClientStyle.title-text-size; font-weight: 700;
+            color: root.focused ? Theme.text : Theme.muted;
+            vertical-alignment: center; overflow: elide;
+        }
     }
     Text {
-        x: max(ClientStyle.title-brand-width, 3 * ClientStyle.caption-width);
-        width: max(0px, parent.width - 2 * self.x); height: parent.height;
+        x: ClientStyle.title-brand-width + (root.workspace ? 72px : 8px);
+        width: max(0px, parent.width - self.x - 3 * ClientStyle.caption-width - (root.workspace ? 80px : 8px)); height: parent.height;
         text: root.place == "Harmony" ? "" : root.place;
         font-size: ClientStyle.title-text-size; font-weight: 500;
         color: root.focused ? Theme.secondary : Theme.faint;
@@ -84,8 +145,21 @@ export component WindowBar inherits Rectangle {
         }
         double-clicked => { root.maximize-window(); }
     }
+    if root.workspace: HorizontalLayout {
+        x: ClientStyle.title-brand-width; width: 64px; height: parent.height;
+        alignment: start; spacing: 4px;
+        Middle { BarButton { icon: @image-url("../icons/arrow-left.svg"); label: "Back"; enabled: root.can-go-back; clicked => { root.go-back(); } } }
+        Middle { BarButton { icon: @image-url("../icons/arrow-right.svg"); label: "Forward"; enabled: root.can-go-forward; clicked => { root.go-forward(); } } }
+    }
     HorizontalLayout {
         alignment: end; spacing: 0px;
+        if root.workspace: Middle {
+            HorizontalLayout {
+                spacing: 4px; padding-right: 12px;
+                BarButton { icon: @image-url("../icons/inbox.svg"); label: "Inbox"; active: root.inbox-open; clicked => { root.toggle-inbox(); } }
+                BarButton { icon: @image-url("../icons/help-circle.svg"); label: "Help"; clicked => { root.open-help(); } }
+            }
+        }
         CaptionButton {
             icon: @image-url("../icons/minus.svg"); label: "Minimize"; focused: root.focused;
             clicked => { root.minimize-window(); }

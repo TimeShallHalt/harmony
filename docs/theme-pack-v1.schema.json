@@ -17,6 +17,7 @@
     },
     "base": {
       "enum": [
+        "harmony",
         "yap",
         "bonfire",
         "catppuccin-mocha",

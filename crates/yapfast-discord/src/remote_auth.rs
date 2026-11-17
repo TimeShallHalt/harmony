@@ -1,6 +1,6 @@
 //! Linking an account by QR code, through Discord's remote login gateway, as
-//! the login page of Discord's web client does. Yapfast makes an RSA key and
-//! hands Discord its public half. Discord proves it can reach Yapfast by sending
+//! the login page of Discord's web client does. Harmony makes an RSA key and
+//! hands Discord its public half. Discord proves it can reach Harmony by sending
 //! a nonce encrypted to the key, then gives a fingerprint, which the code
 //! carries as `https://discord.com/ra/{fingerprint}`. Scanning it with the
 //! phone app sends who scanned, and confirming there sends a ticket, which
@@ -238,9 +238,9 @@ fn decrypt(key: &RsaPrivateKey, encrypted: &Value) -> Result<Vec<u8>> {
 
 fn login(key: &RsaPrivateKey, encrypted: &Value) -> Result<String> {
     let token = String::from_utf8(decrypt(key, encrypted)?)
-        .context("Discord's login service sent a login Yapfast can't read")?;
+        .context("Discord's login service sent a login Harmony can't read")?;
     if token.is_empty() || token.contains(char::is_whitespace) {
-        bail!("Discord's login service sent a login Yapfast can't read");
+        bail!("Discord's login service sent a login Harmony can't read");
     }
     Ok(token)
 }

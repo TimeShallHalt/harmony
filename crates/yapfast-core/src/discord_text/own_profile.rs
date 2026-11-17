@@ -11,7 +11,10 @@ use serde_json::{Map, Value};
 use yapfast_discord::profile::PICTURE_LIMIT;
 
 use super::{commands::NOT_DISCORD, *};
-use crate::chat::{OwnProfile, PickedPicture, Pixels, ProfileChange, ProfilePicture, file_size};
+use crate::chat::{
+    OwnProfile, PickedPicture, Pixels, ProfileChange, ProfilePicture, Wishlist, WishlistItem,
+    file_size,
+};
 
 /// The size Discord's client crops a picture to before it sends it: a
 /// square avatar, and a banner 17 by 6. One smaller goes at its own size.
@@ -34,7 +37,10 @@ pub(super) fn command(
     };
     let events = events.clone();
     match command {
-        DiscordCommand::OwnProfile { server } => {
+        DiscordCommand::OwnProfile {
+            server,
+            card: card_request,
+        } => {
             let guild = guild(server.as_deref());
             let (Ok(discord), Some(guild)) = (discord, guild) else {
                 let why = discord.err().unwrap_or(NOT_DISCORD);
@@ -46,8 +52,23 @@ pub(super) fn command(
             };
             let discord = discord.clone();
             tokio::spawn(async move {
-                let result = match discord.own_profile(guild.as_deref()).await {
-                    Ok(profile) => Ok(own_profile(&discord, guild.as_deref(), profile)),
+                let result = match discord.own_profile_and_card(guild.as_deref()).await {
+                    Ok((profile, card)) => {
+                        // The main profile's answer is the account card's
+                        // too, so it needn't be asked for again.
+                        if let (Some(card), Some(request)) = (card, card_request) {
+                            let card = super::render::chat_profile(
+                                &discord,
+                                yapfast_discord::ready::PRIVATE,
+                                card,
+                            );
+                            let _ = events.send(Event::AccountProfile {
+                                request,
+                                result: Ok(card),
+                            });
+                        }
+                        Ok(own_profile(&discord, guild.as_deref(), profile))
+                    }
                     Err(error) => {
                         tracing::warn!(
                             error = format!("{error:#}"),
@@ -57,6 +78,78 @@ pub(super) fn command(
                     }
                 };
                 let _ = events.send(Event::OwnProfile { server, result });
+            });
+        }
+        DiscordCommand::Wishlist { id } => {
+            let Ok(discord) = discord else {
+                let _ = events.send(Event::Wishlist {
+                    id,
+                    wishlist: Wishlist::Failed,
+                });
+                return None;
+            };
+            let discord = discord.clone();
+            tokio::spawn(async move {
+                let wishlist = match discord.wishlist(&id).await {
+                    Ok(items) => Wishlist::Loaded(
+                        items
+                            .into_iter()
+                            .map(|item| WishlistItem {
+                                name: item.name,
+                                picture: item.picture,
+                            })
+                            .collect(),
+                    ),
+                    Err(error) => wishlist_refusal(&error),
+                };
+                let _ = events.send(Event::Wishlist { id, wishlist });
+            });
+        }
+        // Read-only: what the board names comes from `GET /games` and the
+        // applications' public objects.
+        DiscordCommand::ProfileBoard { user, widgets } => {
+            let Ok(discord) = discord else {
+                let _ = events.send(Event::ProfileBoard { user, widgets });
+                return None;
+            };
+            let discord = discord.clone();
+            tokio::spawn(async move {
+                let mut asked: Vec<yapfast_discord::widgets::Widget> =
+                    widgets.iter().map(asked_widget).collect();
+                discord.name_widgets(&mut asked).await;
+                let widgets = widgets
+                    .into_iter()
+                    .zip(asked)
+                    .map(|(widget, named)| named_widget(widget, named))
+                    .collect();
+                let _ = events.send(Event::ProfileBoard { user, widgets });
+            });
+        }
+        DiscordCommand::ProfileRecent { user } => {
+            let Ok(discord) = discord else {
+                let recent = Vec::new();
+                let _ = events.send(Event::ProfileRecent { user, recent });
+                return None;
+            };
+            let discord = discord.clone();
+            tokio::spawn(async move {
+                let recent = match discord.recent_activity(&user).await {
+                    Ok(entries) => entries
+                        .into_iter()
+                        .map(|entry| crate::chat::RecentActivity {
+                            title: entry.title,
+                            subtitle: entry.subtitle,
+                            picture: entry.picture,
+                            music: entry.music,
+                            at: entry.at,
+                        })
+                        .collect(),
+                    Err(error) => {
+                        tracing::debug!(%error, "could not get someone's recent activity");
+                        Vec::new()
+                    }
+                };
+                let _ = events.send(Event::ProfileRecent { user, recent });
             });
         }
         DiscordCommand::ProfilePicture { kind, path } => {
@@ -85,8 +178,15 @@ pub(super) fn command(
                     }
                     None => {
                         let (user, profile) = main_bodies(&change);
+                        let tag = change.primary_server.clone();
                         drop(change);
-                        discord.save_main_profile(&user, &profile).await
+                        discord
+                            .save_main_profile(
+                                &user,
+                                &profile,
+                                tag.as_ref().map(|tag| tag.as_deref()),
+                            )
+                            .await
                     }
                 };
                 let result = result.map_err(|error| {
@@ -109,6 +209,61 @@ pub(super) fn command(
     None
 }
 
+/// A widget as the service names it.
+fn asked_widget(widget: &crate::chat::ProfileWidget) -> yapfast_discord::widgets::Widget {
+    yapfast_discord::widgets::Widget {
+        title: widget.title.clone(),
+        application: widget.application.clone(),
+        lists_games: widget.lists_games,
+        games: widget
+            .games
+            .iter()
+            .map(|game| yapfast_discord::widgets::WidgetGame {
+                id: game.id.clone(),
+                comment: None,
+                name: game.name.clone(),
+                icon: game.icon.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// A widget with the names the service found, and the comments it was asked with.
+fn named_widget(
+    widget: crate::chat::ProfileWidget,
+    named: yapfast_discord::widgets::Widget,
+) -> crate::chat::ProfileWidget {
+    crate::chat::ProfileWidget {
+        title: named.title,
+        application: widget.application,
+        lists_games: widget.lists_games,
+        games: widget
+            .games
+            .into_iter()
+            .zip(named.games)
+            .map(|(game, named)| crate::chat::ProfileGame {
+                id: game.id,
+                name: named.name,
+                icon: named.icon,
+                comment: game.comment,
+            })
+            .collect(),
+    }
+}
+
+/// What Discord refusing a wishlist means: it's hidden from this account when
+/// it's forbidden or said not to exist, as a private one is to anyone else.
+fn wishlist_refusal(error: &anyhow::Error) -> Wishlist {
+    use yapfast_discord::api::Refused;
+    match error.downcast_ref::<Refused>() {
+        Some(Refused(status)) if matches!(status.as_u16(), 403 | 404) => Wishlist::Hidden,
+        _ => {
+            tracing::warn!(error = format!("{error:#}"), "could not fetch a wishlist");
+            Wishlist::Failed
+        }
+    }
+}
+
 /// The Discord server a profile is in, by its server id: `Some(None)` for
 /// the main profile, and none for an id that isn't a server's.
 fn guild(server: Option<&str>) -> Option<Option<String>> {
@@ -118,7 +273,7 @@ fn guild(server: Option<&str>) -> Option<Option<String>> {
     }
 }
 
-/// The profile as Yapfast shows it, its fallback's bio's mentions written
+/// The profile as Harmony shows it, its fallback's bio's mentions written
 /// as names.
 fn own_profile(
     discord: &Discord,
@@ -176,7 +331,9 @@ fn server_bodies(change: &ProfileChange) -> (Value, Value) {
 /// What Discord's client sends for a change to the main profile: the
 /// user's fields, its display name and avatar, for `PATCH /users/@me`, and
 /// the profile's, its bio, pronouns, banner and banner colour, for `PATCH
-/// /users/@me/profile`. An empty display name goes by the username.
+/// /users/@me/profile`. An empty display name goes by the username. The
+/// server tag is neither's: Discord's editor sends it to `PUT
+/// /users/@me/clan`; see `Discord::save_main_profile`.
 fn main_bodies(change: &ProfileChange) -> (Value, Value) {
     let (mut user, mut profile) = (Map::new(), Map::new());
     if let Some(name) = &change.name {
@@ -196,6 +353,23 @@ fn main_bodies(change: &ProfileChange) -> (Value, Value) {
     }
     if let Some(accent) = change.accent {
         profile.insert("accent_color".into(), accent.into());
+    }
+    if let Some(theme) = change.theme {
+        profile.insert("theme_colors".into(), serde_json::json!(theme));
+    }
+    if let Some(style) = &change.name_style {
+        user.insert(
+            "display_name_font_id".into(),
+            serde_json::json!(style.map(|style| style.font)),
+        );
+        user.insert(
+            "display_name_effect_id".into(),
+            serde_json::json!(style.map(|style| style.effect)),
+        );
+        user.insert(
+            "display_name_colors".into(),
+            serde_json::json!(style.as_ref().map(|style| style.colors())),
+        );
     }
     (Value::Object(user), Value::Object(profile))
 }
@@ -230,7 +404,7 @@ pub(super) fn read_shaped(
     let size = std::fs::metadata(path)
         .ok()
         .filter(std::fs::Metadata::is_file)
-        .ok_or_else(|| format!("Yapfast could not read {name}."))?
+        .ok_or_else(|| format!("Harmony could not read {name}."))?
         .len();
     if size > PICTURE_LIMIT {
         return Err(format!(
@@ -239,7 +413,7 @@ pub(super) fn read_shaped(
             file_size(PICTURE_LIMIT)
         ));
     }
-    let data = std::fs::read(path).map_err(|_| format!("Yapfast could not read {name}."))?;
+    let data = std::fs::read(path).map_err(|_| format!("Harmony could not read {name}."))?;
     let not_a_picture = || format!("{name} isn't a PNG, JPG, GIF or WebP picture.");
     let format = image::guess_format(&data)
         .ok()
@@ -442,5 +616,48 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(profile, serde_json::json!({"accent_color": null}));
+    }
+
+    /// Discord's editor sends the tag to its own endpoint: `primary_guild_id`
+    /// in `PATCH /users/@me` isn't what its Save does.
+    #[test]
+    fn a_server_tag_stays_out_of_the_user_and_profile_bodies() {
+        for primary_server in [Some("9".to_owned()), None] {
+            let (user, profile) = main_bodies(&ProfileChange {
+                primary_server: Some(primary_server),
+                ..Default::default()
+            });
+            assert_eq!(user, serde_json::json!({}));
+            assert_eq!(profile, serde_json::json!({}));
+        }
+    }
+
+    #[test]
+    fn a_theme_and_name_style_go_where_discords_editor_sends_them() {
+        let (user, profile) = main_bodies(&ProfileChange {
+            theme: Some(Some([0x112233, 0x445566])),
+            name_style: Some(Some(crate::chat::NameStyle::new(
+                4,
+                2,
+                &[0xff0000, 0x00ff00],
+            ))),
+            ..Default::default()
+        });
+        assert_eq!(
+            user,
+            serde_json::json!({"display_name_font_id": 4, "display_name_effect_id": 2, "display_name_colors": [0xff0000, 0x00ff00]})
+        );
+        assert_eq!(
+            profile,
+            serde_json::json!({"theme_colors": [0x112233, 0x445566]})
+        );
+        let (user, _) = main_bodies(&ProfileChange {
+            name_style: Some(None),
+            ..Default::default()
+        });
+        assert_eq!(
+            user,
+            serde_json::json!({"display_name_font_id": null, "display_name_effect_id": null, "display_name_colors": null})
+        );
     }
 }

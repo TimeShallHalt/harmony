@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the Windows executable, build inputs and dependency notices, as a
+"""Package Harmony's Windows executable, build inputs and dependency notices, as a
 portable ZIP and an Inno Setup installer.
 
 The Discord flavour is the release; the full one, with Matrix, goes out as a
@@ -17,11 +17,9 @@ import urllib.parse
 from release_package import ROOT, dependency_notices, digest, names_home, source_snapshot, zip_directory
 
 TARGET = "x86_64-pc-windows-msvc"
-# Inno Setup's compiler, run under Wine; installed once into its own prefix.
+# Inno Setup's compiler, run under Wine; tooling must already exist locally.
 INNO_SETUP_VERSION = "7.1.0"
-INNO_SETUP_URL = ("https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/"
-                  f"innosetup-{INNO_SETUP_VERSION}-x64.exe")
-INNO_SETUP_SHA256 = "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f"
+
 # Cargo features, the suffix of file names and release tag, and the name the
 # installer shows, for each flavour scripts/build-windows builds.
 FLAVOURS = {
@@ -39,32 +37,15 @@ def wine_environment(prefix):
 
 
 def inno_setup():
-    """The Wine prefix holding Inno Setup, installed there on first use."""
-    prefix = ROOT / ".local/windows/inno-setup" / INNO_SETUP_VERSION
+    """Use offline tooling only; never download or install a compiler implicitly."""
+    prefix = Path(os.environ.get("HARMONY_INNO_PREFIX", ROOT / ".local/windows/inno-setup" / INNO_SETUP_VERSION))
     if (prefix / "drive_c/InnoSetup/ISCC.exe").is_file():
         return prefix
-    installer = prefix.parent / f"innosetup-{INNO_SETUP_VERSION}-x64.exe"
-    if not installer.is_file() or digest(installer) != INNO_SETUP_SHA256:
-        installer.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["curl", "--fail", "--location", "--silent", "--show-error",
-                        "--output", str(installer), INNO_SETUP_URL], check=True, timeout=600)
-        if digest(installer) != INNO_SETUP_SHA256:
-            installer.unlink()
-            raise SystemExit(f"{INNO_SETUP_URL} doesn't match its pinned SHA-256")
-    # Its installer opens windows even when silent, so it gets a private X server.
-    environment = dict(os.environ, WINEPREFIX=str(prefix), WINEDEBUG="-all")
-    environment.pop("WAYLAND_DISPLAY", None)
-    subprocess.run(["xvfb-run", "--auto-servernum", "sh", "-c",
-                    'wine "$0" /VERYSILENT /SUPPRESSMSGBOXES /CURRENTUSER /NORESTART '
-                    '"/DIR=C:\\InnoSetup" /NOICONS && wineserver -w', str(installer)],
-                   env=environment, check=True, timeout=600)
-    if not (prefix / "drive_c/InnoSetup/ISCC.exe").is_file():
-        raise SystemExit(f"Inno Setup didn't install into {prefix}")
-    return prefix
+    raise SystemExit("Offline Inno Setup compiler is missing; set HARMONY_INNO_PREFIX or use --no-installer")
 
 
 def compile_installer(package, version, flavour, output):
-    """Compiles packaging/windows/yapfast.iss over the ZIP's files."""
+    """Compiles packaging/windows/harmony.iss over the ZIP's files."""
     prefix = inno_setup()
     environment = wine_environment(prefix)
 
@@ -81,15 +62,15 @@ def compile_installer(package, version, flavour, output):
     if license_path.is_file():
         definitions.append(f"/DLicenseFile={windows_path(license_path)}")
     subprocess.run(["wine", "C:\\InnoSetup\\ISCC.exe", "/Q", *definitions,
-                    f"/O{windows_path(output)}", windows_path(ROOT / "packaging/windows/yapfast.iss")],
+                    f"/O{windows_path(output)}", windows_path(ROOT / "packaging/windows/harmony.iss")],
                    env=environment, check=True, timeout=1800)
     subprocess.run(["wineserver", "-w"], env=environment, check=True, timeout=120)
-    return output / f"Yapfast-{version}{FLAVOURS[flavour]['suffix']}-windows-x64-setup.exe"
+    return output / f"Harmony-{version}{FLAVOURS[flavour]['suffix']}-windows-x64-setup.exe"
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--exe", type=Path, default=ROOT / "target" / TARGET / "release/yapfast.exe")
+    parser.add_argument("--exe", type=Path, default=ROOT / "target" / TARGET / "release/Harmony.exe")
     parser.add_argument("--flavour", choices=FLAVOURS, default="discord",
                         help="the features the executable was built with (default: discord)")
     parser.add_argument("--output", type=Path, help="default: target/dist/FLAVOUR")
@@ -130,34 +111,37 @@ def main():
     ))
     version = next(package["version"] for package in metadata["packages"] if package["name"] == "yapfast")
     output.mkdir(parents=True, exist_ok=True)
-    base = f"Yapfast-{version}{flavour['suffix']}"
+    if any(output.iterdir()):
+        raise SystemExit("Output must be empty; never overwrite a release")
+    base = f"Harmony-{version}{flavour['suffix']}"
     archive_path = output / f"{base}-windows-x64.zip"
     source_path = output / f"{base}-source.zip"
-    with tempfile.TemporaryDirectory(prefix="yapfast-windows-package-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="harmony-windows-package-") as temporary:
         temporary = Path(temporary)
         rtc = source_snapshot(metadata, base, temporary, source_path)
 
         package = temporary / f"{base}-windows-x64"
         package.mkdir()
-        shutil.copy2(executable, package / "yapfast.exe")
+        shutil.copy2(executable, package / "Harmony.exe")
         shutil.copy2(ROOT / "LICENSE", package / "LICENSE.txt")
-        # The source snapshot goes beside the packages, on the release page,
-        # rather than into every install; SOURCE.txt says where.
-        source_url = f"https://github.com/yapfast/yapfast/releases/tag/v{version}{flavour['suffix']}"
+        # Include corresponding source in optional installer/ZIP too. No remote
+        # upstream release can substitute for this fork's exact source.
+        (package / "corresponding-source").mkdir()
+        shutil.copy2(source_path, package / "corresponding-source" / source_path.name)
         (package / "SOURCE.txt").write_text(
-            f"The source code of this build of Yapfast {version}"
+            f"The source code of this build of Harmony {version}"
             + (", with the exact source of\nthe libraries it includes under the AGPL," if rtc else "")
-            + " is published with it:\n\n"
-            f"  {source_url}\n  {source_path.name}, SHA-256 in BUILD.json\n\n"
-            "and in the repository, https://github.com/yapfast/yapfast. The licenses folder\n"
+            + " accompanies it:\n\n"
+            f"  corresponding-source/{source_path.name}, SHA-256 in BUILD.json\n\n"
+            "Based on Yapfast 0.4.1, https://github.com/yapfast/yapfast. The licenses folder\n"
             "holds every dependency's own license and notices.\n",
             encoding="utf-8", newline="\r\n",
         )
         if args.flavour == "discord":
             first_steps = (
-                "3. Link your Discord account: Yapfast shows a QR code, which Discord on\n"
+                "3. Link your Discord account: Harmony shows a QR code, which Discord on\n"
                 "   your phone scans (Settings, Scan QR Code). Discord doesn't allow apps\n"
-                "   like Yapfast on personal accounts; linking puts your account at some\n"
+                "   like Harmony on personal accounts; linking puts your account at some\n"
                 "   risk of being suspended.\n"
                 "4. Open a channel, or a voice channel to talk.\n\n"
                 "No account or saved session is included.\n"
@@ -173,31 +157,32 @@ def main():
             secrets = "password or recovery key"
         edition = f" ({flavour['edition']})" if flavour["edition"] else ""
         (package / "README.txt").write_text(
-            f"Yapfast{edition} for 64-bit Windows 10/11\n\n"
+            f"Harmony{edition} for 64-bit Windows 10/11\n\n"
             "1. Extract the entire ZIP to a folder.\n"
-            "2. Double-click yapfast.exe.\n"
+            "2. Double-click Harmony.exe.\n"
             + first_steps +
             "No Rust, Visual Studio, or separate app installation is required.\n"
-            "Yapfast writes diagnostics to yapfast.log in its data folder,\n"
-            "%LOCALAPPDATA%\\Yapfast\\Yapfast\\data, or to the console run-yapfast.cmd opens.\n"
+            "Harmony writes diagnostics in its data folder or to the console run-harmony.cmd opens.\n"
+            "Existing account and data storage may retain legacy Yapfast paths for compatibility.\n"
             "Windows stores session secrets in Credential Manager and app data\n"
             "under your Windows user profile. Keep the first verified session.\n\n"
             "Voice: select a voice channel and Join voice; the gear chooses devices.\n"
             "Use headphones for the first two-machine audio test.\n"
             "If anything fails, record the error text, Windows version, GPU and\n"
             f"audio device model. Never send your {secrets} in logs.\n\n"
-            "If Yapfast closes immediately, run run-yapfast.cmd to keep its error visible.\n\n"
-            "Yapfast switches to software rendering if the GPU cannot start.\n"
-            "To choose it yourself, run run-yapfast.cmd --renderer software.\n"
-            "To retry the GPU after a fallback, run run-yapfast.cmd --renderer gpu.\n\n"
-            "Yapfast is free software under the GNU General Public License, version 3\n"
+            "If Harmony closes immediately, run run-harmony.cmd to keep its error visible.\n\n"
+            "Harmony switches to software rendering if the GPU cannot start.\n"
+            "To choose it yourself, run run-harmony.cmd --renderer software.\n"
+            "To retry the GPU after a fallback, run run-harmony.cmd --renderer gpu.\n\n"
+            "Updater not included. Close Harmony yourself before a manual update.\n"
+            "Harmony is free software under the GNU General Public License, version 3\n"
             "or later, in LICENSE.txt. Dependency notices and original licenses are\n"
-            "included; SOURCE.txt says where this build's source code is published.\n",
+            "included; SOURCE.txt locates the matching source archive included here.\n",
             encoding="utf-8",
         )
-        (package / "run-yapfast.cmd").write_text(
-            '@echo off\ncd /d "%~dp0"\nyapfast.exe %*\n'
-            'if errorlevel 1 (\n  echo Yapfast exited with an error.\n  pause\n)\n',
+        (package / "run-harmony.cmd").write_text(
+            '@echo off\ncd /d "%~dp0"\nHarmony.exe %*\n'
+            'if errorlevel 1 (\n  echo Harmony exited with an error.\n  pause\n)\n',
             encoding="utf-8", newline="\r\n",
         )
         skia_location = os.environ.get("SKIA_BINARIES_URL")
@@ -215,6 +200,7 @@ def main():
                                           Path(os.environ["LK_CUSTOM_WEBRTC"]))
         (package / "THIRD-PARTY.json").write_text(json.dumps(dependencies, indent=2) + "\n", encoding="utf-8")
         build = {
+            "application": "Harmony", "upstream": "Yapfast 0.4.1", "updater_included": False,
             "version": version, "flavour": args.flavour, "target": TARGET,
             "cargo_features": " ".join(flavour["features"]) or "default",
             "rustc": subprocess.check_output(["rustc", "--version"], text=True, timeout=10).strip(),

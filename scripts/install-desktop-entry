@@ -1,17 +1,32 @@
 #!/usr/bin/env bash
-# Installs Yapfast's desktop entry and icon for this user, so the launcher lists
-# Yapfast and the desktop shows its icon on the window, which Wayland takes only
-# from the entry. Runs the given executable, by default target/release/yapfast.
+# Install Harmony's desktop entry and icon for this user. Does not launch the app.
+# Cargo's binary is Harmony on Linux; packages install it as lowercase harmony.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-id=io.github.yapfast.Yapfast
-executable=$(realpath "${1:-target/release/yapfast}")
-[ -x "$executable" ] || { echo "no executable at $executable; build Yapfast first" >&2; exit 1; }
+id=io.github.TimeShallHalt.Harmony
+executable=$(realpath "${1:-target/release/Harmony}")
+[ -x "$executable" ] || { echo "no executable at $executable; build Harmony first" >&2; exit 1; }
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 install -Dm644 packaging/icon.svg "$data/icons/hicolor/scalable/apps/$id.svg"
 mkdir -p "$data/applications"
+# Quote the desktop Exec argument rather than interpolating paths into sed code.
+# This preserves spaces, %, quotes, backslashes and shell metacharacters safely.
+python3 - "$executable" "packaging/linux/$id.desktop" "$data/applications/$id.desktop" <<'PY'
+from pathlib import Path
+import sys
+
+def quote_exec(value):
+    if any(character in value for character in '\n\r\x00'):
+        raise SystemExit('Desktop executable path contains a forbidden control character')
+    quoted = '"' + ''.join('\\' + ch if ch in '\\"`$' else ch for ch in value.replace('%', '%%')) + '"'
+    return quoted.replace('\\', '\\\\')
+
+command = quote_exec(sys.argv[1])
 # NixOS keeps the GPU's libraries out of the default search path.
-command=$executable
-[ -d /run/opengl-driver/lib ] && command="env LD_LIBRARY_PATH=/run/opengl-driver/lib $executable"
-sed "s|^Exec=yapfast|Exec=$command|" "packaging/linux/$id.desktop" > "$data/applications/$id.desktop"
-echo "installed $data/applications/$id.desktop, running $executable"
+if Path('/run/opengl-driver/lib').is_dir():
+    command = 'env LD_LIBRARY_PATH=/run/opengl-driver/lib ' + command
+text = Path(sys.argv[2]).read_text(encoding='utf-8')
+text = '\n'.join('Exec=' + command + ' --open-link %u' if line.startswith('Exec=') else line for line in text.splitlines()) + '\n'
+Path(sys.argv[3]).write_text(text, encoding='utf-8')
+PY
+echo "installed $data/applications/$id.desktop (Harmony was not launched)"

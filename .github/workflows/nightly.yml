@@ -1,6 +1,7 @@
-# A nightly release of main, made on demand: Actions > Nightly > Run workflow.
-# It builds the Linux AppImage and the Windows ZIP as the releases are built, and publishes them as a prerelease of the next minor
-# version, such as v0.2.0-nightly.20261020.5. See docs/packaging.md.
+# Dormant upstream-derived recipe: every job is disabled in this private fork.
+# Do not enable Actions, signing or publication as part of a local build/rebrand.
+# Harmony artifacts are updater-free; upstream signing keys are not fork keys.
+# Any future activation needs a separate fork-owned distribution/security review.
 name: Nightly
 
 on:
@@ -14,6 +15,7 @@ concurrency:
 
 jobs:
   version:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -32,6 +34,7 @@ jobs:
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   linux:
+    if: ${{ false }}
     needs: version
     runs-on: ubuntu-latest
     steps:
@@ -58,12 +61,13 @@ jobs:
         with:
           name: linux
           path: |
-            target/dist/linux/Yapfast-*
-            target/dist/linux/yapfast-*.pkg.tar.zst
+            target/dist/linux/Harmony-*
+            target/dist/linux/harmony-*.pkg.tar.zst
           if-no-files-found: error
           compression-level: 0
 
   windows:
+    if: ${{ false }}
     needs: version
     runs-on: ubuntu-latest
     steps:
@@ -96,13 +100,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: target/dist/discord/Yapfast-*
+          path: target/dist/discord/Harmony-*
           if-no-files-found: error
           compression-level: 0
 
   release:
+    if: ${{ false }}
     needs: [version, linux, windows]
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
     env:
@@ -111,7 +117,7 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       COMMIT: ${{ needs.version.outputs.commit }}
     steps:
-      # Only for the notes' jq program.
+      # Only for the notes' jq program; no upstream signing keys or secrets.
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.version.outputs.commit }}
@@ -125,11 +131,11 @@ jobs:
           set -o pipefail
           # Both jobs zip the commit's source; SOURCE.txt and each BUILD.json
           # name the one file the release carries.
-          cmp "dist/linux/Yapfast-$VERSION-source.zip" "dist/windows/Yapfast-$VERSION-source.zip"
+          cmp "dist/linux/Harmony-$VERSION-source.zip" "dist/windows/Harmony-$VERSION-source.zip"
           mkdir release
-          mv dist/linux/Yapfast-* dist/linux/yapfast-*.pkg.tar.zst release/
-          mv dist/windows/Yapfast-*-windows-x64* release/
-          (cd release && sha256sum Yapfast-* yapfast-*.pkg.tar.zst > SHA256SUMS.txt)
+          mv dist/linux/Harmony-* dist/linux/harmony-*.pkg.tar.zst release/
+          mv dist/windows/Harmony-*-windows-x64* release/
+          (cd release && sha256sum Harmony-* harmony-*.pkg.tar.zst > SHA256SUMS.txt)
           # The newest nightly, or before the first one the latest release.
           previous=$(gh release list --exclude-drafts --limit 100 --json tagName \
             --jq '[.[].tagName | select(contains("-nightly."))][0] // empty')
@@ -147,11 +153,11 @@ jobs:
               echo "All changes: https://github.com/$GH_REPO/compare/$previous...$COMMIT"
               echo
             fi
-            echo "AppImage updaters take the AppImage to the latest stable release, not to newer nightlies."
+            echo "Harmony packages have no automatic update feed. These artifacts are unsigned."
             echo
             echo "On Arch Linux, install the .pkg.tar.zst with \`sudo pacman -U\` and its link."
           } > notes.md
           # Titled as the stable releases are, with the commit: the version
           # already says it's a nightly.
           gh release create "v$VERSION" release/* --prerelease --target "$COMMIT" \
-            --title "Yapfast $VERSION (${COMMIT:0:7})" --notes-file notes.md
+            --title "Harmony $VERSION (${COMMIT:0:7})" --notes-file notes.md

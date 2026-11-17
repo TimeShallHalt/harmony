@@ -176,7 +176,7 @@ finally:
     subprocess.run([str(ROOT / 'scripts/ui-session'), 'stop'], cwd=ROOT, capture_output=True)
     (args.output / 'results.json').write_text(json.dumps({
         'recorded_on': time.strftime('%Y-%m-%d'),
-        'binary': str(args.bin or ROOT / 'target/measure/yapfast'),
+        'binary': str(args.bin or ROOT / 'target/measure/Harmony'),
         'environment': args.env,
         'os': f'{platform.system()} {platform.release()}', 'machine': platform.machine(),
         'isolation': 'scripts/ui-session --tray: private headless Weston, PulseAudio and D-Bus, '

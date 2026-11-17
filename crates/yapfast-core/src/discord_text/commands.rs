@@ -59,9 +59,29 @@ pub fn command(
         send_poll(discord, room, poll, events);
         return;
     }
+    if let Command::Discord(DiscordCommand::DismissEphemeral { room, item }) = &command {
+        if let (Ok(discord), Some(channel)) = (discord, channels.shown_mut(room))
+            && channel.dismiss(item)
+        {
+            publish(channel, discord, done, events);
+        }
+        return;
+    }
     if let Command::MarkRead { room, sync } = &command {
         if let (Ok(discord), Some((guild, channel))) = (discord, discord::parse_room(room)) {
             discord.mark_read(guild, channel, *sync);
+        }
+        return;
+    }
+    if let Command::Discord(DiscordCommand::MarkUnread {
+        room,
+        last,
+        mentions,
+        sync,
+    }) = &command
+    {
+        if let (Ok(discord), Some((_, channel))) = (discord, discord::parse_room(room)) {
+            discord.mark_unread(channel, *last, *mentions, *sync);
         }
         return;
     }
@@ -121,7 +141,19 @@ pub fn command(
     let Some(command) = super::expressions::command(command, discord, events) else {
         return;
     };
+    let Some(command) = super::stickers::command(command, discord, events) else {
+        return;
+    };
+    let Some(command) = super::interactions::command(command, discord, events) else {
+        return;
+    };
     let Some(command) = super::ownership::command(command, discord, events) else {
+        return;
+    };
+    let Some(command) = super::interactions::command(command, discord, events) else {
+        return;
+    };
+    let Some(command) = super::app_commands::command(command, discord, events) else {
         return;
     };
     let room = match &command {
@@ -374,7 +406,7 @@ pub fn command(
             None => {
                 let _ = events.send(Event::RoomError {
                     room: room.clone(),
-                    message: "Yapfast couldn't find that message.".into(),
+                    message: "Harmony couldn't find that message.".into(),
                 });
                 let _ = events.send(Event::HistoryLoaded {
                     room,
@@ -667,6 +699,20 @@ pub fn live(
     done: &UnboundedSender<Done>,
     events: &UnboundedSender<Event>,
 ) {
+    let event = match event.map(|live| super::interactions::live(live, events)) {
+        Ok(Some(live)) => Ok(live),
+        Ok(None) => return,
+        Err(missed) => Err(missed),
+    };
+    if let Ok(Live::ActivityFeedStale { refresh_after_ms }) = &event {
+        let wait = discord.activity_feed_stale_wait(*refresh_after_ms);
+        let events = events.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(wait).await;
+            let _ = events.send(Event::ActivityFeedDue);
+        });
+        return;
+    }
     if let Ok(Live::FavoriteGifs(favorites)) = &event {
         let _ = events.send(Event::FavoriteGifs(Ok(gifs::favorites(favorites))));
         tokio::spawn(yapfast_discord::service::keep_favorite_gifs(
@@ -729,6 +775,10 @@ pub fn live(
         let _ = events.send(Event::PlacesUsed(Ok(places)));
         return;
     }
+    if let Ok(Live::Emojis(emojis)) = &event {
+        let _ = events.send(Event::DiscordEmojis(account::emojis(emojis.clone())));
+        return;
+    }
     if let Ok(Live::Notify { guild, message }) = &event {
         let _ = events.send(Event::Notify(notification(
             discord,
@@ -789,7 +839,11 @@ pub fn live(
     // The thread beside the open channel follows as it does.
     if let Some(aside) = channels.aside.as_mut() {
         match &event {
-            Ok(Live::Members { .. }) => {}
+            Ok(Live::Members { .. }) => {
+                if aside.names_changed(discord) {
+                    publish(aside, discord, done, events);
+                }
+            }
             Ok(event) => {
                 if aside.live(event) {
                     publish(aside, discord, done, events);
@@ -813,6 +867,11 @@ pub fn live(
                     members,
                     observation,
                 ));
+            }
+            // The list taught Names its members' roles and nicknames, which
+            // the messages show: their authors' colours follow.
+            if channel.names_changed(discord) {
+                publish(channel, discord, done, events);
             }
         }
         Ok(event) => {

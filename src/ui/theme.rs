@@ -106,6 +106,51 @@ theme! {
 
 /// Yapfast's own colours: layered graphite with a marigold accent. The defaults
 /// in `ui/theme.slint` are these, so the first frame shows them.
+/// Harmony: indigo surfaces, lavender accents and mint live indicators.
+/// Matches ui/theme.slint first-frame defaults without overriding saved themes.
+pub const HARMONY: Theme = Theme {
+    dark: true,
+    rail: rgb(0x15192d),
+    sidebar: rgb(0x1a1f35),
+    panel: rgb(0x171c30),
+    chat: rgb(0x20263e),
+    stage: rgb(0x20263e),
+    raised: rgb(0x282f4b),
+    field: rgb(0x2b3350),
+    sunken: rgb(0x111528),
+    hover: rgb(0x303956),
+    active: rgb(0x3c4265),
+    row_hover: rgb(0x272e49),
+    line: rgb(0x38415e),
+    outline: rgb(0x38415e),
+    outline_chat: rgb(0x38415e),
+    outline_field: rgb(0x38415e),
+    edge: rgb(0x101426),
+    text: rgb(0xf1f2fb),
+    secondary: rgb(0xc2c7de),
+    muted: rgb(0x9ba5c3),
+    faint: rgb(0x7782a3),
+    accent: rgb(0xa79bff),
+    accent_hover: rgb(0xbcb3ff),
+    on_accent: rgb(0x15192d),
+    accent_soft: rgba(0xa79bff26),
+    mentioned: rgba(0xa79bff1f),
+    mentioned_hover: rgba(0xa79bff29),
+    danger: rgb(0xf47789),
+    danger_hover: rgb(0xff91a0),
+    on_danger: rgb(0x15192d),
+    live: rgb(0x79e5ce),
+    loud: rgb(0xf4bc7c),
+    link: rgb(0xa9c8ff),
+    button_default: rgb(0x353e5d),
+    button_default_hover: rgb(0x424d70),
+    overlay: rgb(0xffffff),
+    shimmer: rgba(0xffffff10),
+    reply_spine: rgb(0x647096),
+    tooltip: rgb(0x111528),
+    avatar: rgb(0x7c86aa),
+};
+
 pub const YAP: Theme = Theme {
     dark: true,
     mentioned: rgba(0xf8a5001f),
@@ -139,7 +184,7 @@ pub const YAP: Theme = Theme {
     on_danger: rgb(0xffffff),
     live: rgb(0x3ecf7e),
     loud: rgb(0xff8c42),
-    link: rgb(0x7cc4ff),
+    link: rgb(0x64adf6),
     button_default: rgb(0x33343c),
     button_default_hover: rgb(0x3c3d46),
     overlay: rgb(0xffffff),
@@ -557,10 +602,15 @@ pub struct BuiltIn {
 
 /// The themes Yapfast comes with, as Appearance lists them: the dark ones, then
 /// the light ones. The palettes credited in docs/themes.md are MIT licensed.
-pub const BUILT_IN: [BuiltIn; 10] = [
+pub const BUILT_IN: [BuiltIn; 11] = [
+    BuiltIn {
+        id: "harmony",
+        name: "Harmony",
+        theme: HARMONY,
+    },
     BuiltIn {
         id: "yap",
-        name: "Yap",
+        name: "Harmony Classic",
         theme: YAP,
     },
     BuiltIn {
@@ -626,11 +676,11 @@ pub fn lookup<'a>(id: &str, custom: &'a [Custom]) -> Option<(&'a str, Theme)> {
         })
 }
 
-/// The theme a layout chose, and its id: Yap when it chose none, or one
+/// The theme a layout chose, and its id: Harmony when it chose none, or one
 /// this version doesn't have or the person deleted.
 pub fn chosen<'a>(id: Option<&str>, custom: &'a [Custom]) -> (&'a str, Theme) {
     id.and_then(|id| lookup(id, custom))
-        .unwrap_or((BUILT_IN[0].id, YAP))
+        .unwrap_or((BUILT_IN[0].id, BUILT_IN[0].theme))
 }
 
 /// A colour's name as `ui/theme.slint` and `layout.json` have it.
@@ -811,11 +861,11 @@ thread_local! {
     /// The colour of a mention without one of its own, as `0xrrggbb`: the
     /// theme's link colour. Rows build their markup with it, outside the
     /// window, on the window's thread.
-    static MENTION: Cell<u32> = const { Cell::new(0x7cc4ff) };
+    static MENTION: Cell<u32> = const { Cell::new(0xa9c8ff) };
     /// The theme's text and muted colours, the same way, for a notice's
     /// name, links and time.
-    static TEXT: Cell<u32> = const { Cell::new(0xf2f3f5) };
-    static MUTED: Cell<u32> = const { Cell::new(0x949ba4) };
+    static TEXT: Cell<u32> = const { Cell::new(0xf1f2fb) };
+    static MUTED: Cell<u32> = const { Cell::new(0x9ba5c3) };
 }
 
 pub fn mention_color() -> u32 {

@@ -1,6 +1,26 @@
-# Ren's Yapfast workspace
+# Ren's Harmony workspace
 
-## Layout
+## Current checkout
+
+- Editable source: `C:\Users\ren\Documents\Apps\Harmony` (renamed from `yapfast`).
+- Integration branch: `harmony/upstream-0.4.1-branding`.
+- Harmony version: `1.1.0`; upstream stable baseline: Yapfast `v0.4.1`.
+- Installed Update 4 (`53ccbfe3`) is the preserved fork baseline for the merge.
+- Native Cargo binary target: `Harmony`; Windows output: `target/fast/Harmony.exe`.
+- Linux packaging installs the native `Harmony` build as `harmony`.
+- Default Windows data stays `%LOCALAPPDATA%\Harmony\data`; legacy credential
+  identifiers remain unchanged. Never copy tokens or remove saved data to rebrand.
+- Original dirty work, staged/unstaged patches, untracked-file ZIP and a complete
+  Git bundle are preserved in sibling `Harmony-preserved-20261116-203135`.
+  Its `preservation.json` records the stash and permanent backup branch; all
+  33 relocated linked worktrees were checked after `git worktree repair`.
+- Current verification/deployment evidence is under
+  `.local/evidence/upstream-041-branding`; historical sections below describe
+  earlier milestones, not verification of this integration candidate.
+- Stock upstream auto-update remains disabled. Do not allow it to install a
+  Yapfast executable over Harmony.
+
+## Historical setup
 
 - Editable repository: `C:\Users\ren\Documents\Apps\yapfast`
 - Local customization branch: `ren/custom-client`

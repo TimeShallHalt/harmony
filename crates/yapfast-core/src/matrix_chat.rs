@@ -58,7 +58,7 @@ use crate::{
     chat::{
         Attachment, ChatMember, ChatMessage, ChatRoom, ChatServer, Command, Contact, Delivery,
         Direction, Event, ForwardFailure, History, MAX_MESSAGE_BYTES, MAX_PREVIEW_DOWNLOAD_BYTES,
-        Notification, Picture, Placement, Reaction, Reactor, Reply, Role, RoomIndex, Start,
+        Notification, Picture, Placement, Reaction, Reactor, Reacts, Reply, Role, RoomIndex, Start,
         decode_preview, decode_view, notification_text, plain_snippet, sort_members,
     },
     matrix_media,
@@ -69,7 +69,7 @@ use crate::{
 
 /// Synapse's default upload limit; the send queue holds the whole file in memory.
 const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
-/// How long a recoverable send failure pauses a room's queue before Yapfast retries.
+/// How long a recoverable send failure pauses a room's queue before Harmony retries.
 const QUEUE_RETRY: Duration = Duration::from_secs(10);
 /// How many events a page of earlier history asks the homeserver for.
 const HISTORY_PAGE: u16 = 30;
@@ -224,7 +224,7 @@ impl Matrix {
             trusted,
             storage: session.storage_notice(),
         });
-        // Messages queued before Yapfast closed are sent again from the encrypted store.
+        // Messages queued before Harmony closed are sent again from the encrypted store.
         client.send_queue().set_enabled(true).await;
         client
             .send_queue()
@@ -266,7 +266,7 @@ impl Matrix {
             },
         );
         // New messages the account's push rules say should notify. The first sync also
-        // brings messages from before Yapfast started, which don't.
+        // brings messages from before Harmony started, which don't.
         let started = matrix_sdk::ruma::MilliSecondsSinceUnixEpoch::now();
         let notify = events.clone();
         client
@@ -409,7 +409,7 @@ impl Matrix {
                     client.send_queue().set_enabled(true).await;
                 }
                 if self.online && !self.stale_voice_checked {
-                    // Synced sticky memberships now show whether Yapfast was
+                    // Synced sticky memberships now show whether Harmony was
                     // killed during a call; remove what this device left.
                     self.stale_voice_checked = true;
                     voice.command(voice::Command::LeaveStale);
@@ -602,14 +602,14 @@ impl Matrix {
                     result,
                 });
             }
-            // Yapfast removes others' Matrix reactions only as Discord's.
+            // Harmony removes others' Matrix reactions only as Discord's.
             Command::RemoveReactor { .. } => {}
-            // Yapfast shows only Discord's polls.
+            // Harmony shows only Discord's polls.
             Command::Vote { .. }
             | Command::SendPoll { .. }
             | Command::EndPoll { .. }
             | Command::Voters { .. } => {}
-            // Yapfast pins only Discord's messages.
+            // Harmony pins only Discord's messages.
             Command::Pin { .. } => {}
             // Matrix's attachments have no address, which copying asks for.
             Command::CopyAttachment { .. } => {}
@@ -797,7 +797,7 @@ impl Matrix {
                 if !found {
                     let _ = events.send(Event::RoomError {
                         room: room.clone(),
-                        message: "Yapfast couldn't find that message.".into(),
+                        message: "Harmony couldn't find that message.".into(),
                     });
                 }
                 // Said before the window is published; see Command::Around.
@@ -886,12 +886,16 @@ impl Matrix {
                 }
             }
             // `Command::route` sends these elsewhere.
-            // Matrix videos are files to save for now.
+            // Matrix videos and voice messages are files to save for now.
             Command::Voice(_)
             | Command::Discord(_)
             | Command::Aside(_)
             | Command::PlayVideo { .. }
-            | Command::Video(_) => {}
+            | Command::Video(_)
+            | Command::PlayVoiceMessage { .. }
+            | Command::MoveVoiceMessage { .. }
+            | Command::PauseVoiceMessage
+            | Command::TuneVoiceMessage(_) => {}
         }
         true
     }
@@ -1079,6 +1083,7 @@ fn load_members(open: &mut OpenRoom, events: &UnboundedSender<Event>) {
                 let mut members: Vec<_> = members
                     .iter()
                     .map(|member| ChatMember {
+                        bot: false,
                         id: member.user_id().to_string(),
                         name: member
                             .display_name()
@@ -1104,6 +1109,10 @@ fn load_members(open: &mut OpenRoom, events: &UnboundedSender<Event>) {
                         roles: Default::default(),
                         timed_out_until: None,
                         tag: None,
+                        decoration: None,
+                        nameplate: None,
+                        style: None,
+                        boosting_since: None,
                     })
                     .collect();
                 sort_members(&mut members);
@@ -1198,6 +1207,7 @@ async fn room_index(client: &Client) -> RoomIndex {
             locked: false,
             join_locked: false,
             read_only: false,
+            reacts: Reacts::Any,
             slowed: false,
             timed_out_until: None,
             category: String::new(),
@@ -1214,11 +1224,16 @@ async fn room_index(client: &Client) -> RoomIndex {
             activities: Default::default(),
             parent: None,
             forum: false,
+            mark: Default::default(),
             unlisted: false,
             tag: None,
+            decoration: None,
+            nameplate: None,
+            style: None,
             official: false,
             empty: false,
             preview: None,
+            voice_started: None,
         });
     }
     result.sort_by(|a, b| {
@@ -1330,7 +1345,7 @@ fn active_timeline<'a>(open: Option<&'a OpenRoom>, room: &str) -> Option<&'a Tim
         .map(|open| open.timeline.as_ref())
 }
 
-/// Yapfast sends only from a cross-signed device, into joined encrypted rooms.
+/// Harmony sends only from a cross-signed device, into joined encrypted rooms.
 async fn writable<'a>(
     session: &Session,
     open: Option<&'a OpenRoom>,
@@ -1391,13 +1406,13 @@ async fn send(
                     .room()
                     .make_reply_event(content, reply)
                     .await
-                    .map_err(|_| "Yapfast could not find the message to reply to.")?;
+                    .map_err(|_| "Harmony could not find the message to reply to.")?;
                 timeline.send(content.into()).await
             }
         }
         None => timeline.send(content.with_relation(None).into()).await,
     };
-    queued.map_err(|_| "Yapfast could not queue this message. Your draft is kept.")?;
+    queued.map_err(|_| "Harmony could not queue this message. Your draft is kept.")?;
     // The queue owns the message now, including across restarts.
     let _ = timeline.room().clear_composer_draft(None).await;
     Ok(())
@@ -1460,7 +1475,7 @@ async fn forward(
         .map(|_| ())
         .map_err(|_| {
             ForwardFailure::Note(
-                "Yapfast could not queue the message you added. Check your connection.".into(),
+                "Harmony could not queue the message you added. Check your connection.".into(),
             )
         })
 }
@@ -1509,7 +1524,7 @@ async fn forward_message(
         .send(RoomMessageEventContent::new(content).into())
         .await
         .map_err(
-            |_| "Yapfast could not queue the forwarded message. Check your connection and retry.",
+            |_| "Harmony could not queue the forwarded message. Check your connection and retry.",
         )?;
     Ok(target)
 }
@@ -1557,7 +1572,7 @@ async fn attach(
     let timeline = writable(session, open, room).await?;
     let metadata = tokio::fs::metadata(path)
         .await
-        .map_err(|_| "Yapfast could not read that file.")?;
+        .map_err(|_| "Harmony could not read that file.")?;
     if !metadata.is_file() {
         return Err("Choose a file to send.");
     }
@@ -1602,7 +1617,7 @@ async fn attach(
         )
         .use_send_queue()
         .await
-        .map_err(|_| "Yapfast could not queue that file. Check that it is readable and retry.")
+        .map_err(|_| "Harmony could not queue that file. Check that it is readable and retry.")
 }
 
 /// The media source and display name of an item's attachment.
@@ -1682,7 +1697,7 @@ async fn view_image(
                         "This image is too large to show here. Save it to open it elsewhere."
                     }
                     _ => {
-                        "Yapfast couldn't download this image. Check your connection and try again."
+                        "Harmony couldn't download this image. Check your connection and try again."
                     }
                 })
         },
@@ -1721,17 +1736,17 @@ async fn save_attachment(
     matrix_media::save(client, &source, MAX_SAVE_BYTES, path)
         .await
         .map_err(|failed| match failed {
-            matrix_media::Failed::TooLarge => "This file is larger than Yapfast saves.",
+            matrix_media::Failed::TooLarge => "This file is larger than Harmony saves.",
             matrix_media::Failed::Write => {
-                "Yapfast could not write the file there. Choose another folder."
+                "Harmony could not write the file there. Choose another folder."
             }
             matrix_media::Failed::Download | matrix_media::Failed::Decrypt => {
-                "Yapfast could not download or decrypt this file. Check your connection and retry."
+                "Harmony could not download or decrypt this file. Check your connection and retry."
             }
         })
 }
 
-/// The largest attachment Yapfast saves. It goes to disk as it arrives; a
+/// The largest attachment Harmony saves. It goes to disk as it arrives; a
 /// sender can't make it larger by saying it's small.
 const MAX_SAVE_BYTES: u64 = 4 << 30;
 
@@ -1742,8 +1757,8 @@ fn media_key(source: &MediaSource) -> String {
     }
 }
 
-/// A Matrix notification as Yapfast shows it: a new message the push rules say should
-/// notify, sent by someone else since Yapfast started.
+/// A Matrix notification as Harmony shows it: a new message the push rules say should
+/// notify, sent by someone else since Harmony started.
 async fn notification_of(
     notification: matrix_sdk::sync::Notification,
     room: &Room,
@@ -1959,6 +1974,7 @@ async fn publish_timeline(
                             spoiler: false,
                             video: false,
                             preview: cached.flatten(),
+                            description: None,
                         }];
                     }
                     MessageType::File(content) => {
@@ -1979,6 +1995,7 @@ async fn publish_timeline(
                             url: None,
                             spoiler: false,
                             video: false,
+                            description: None,
                         }];
                     }
                     MessageType::Video(content) => {
@@ -1999,6 +2016,7 @@ async fn publish_timeline(
                             url: None,
                             spoiler: false,
                             video: false,
+                            description: None,
                         }];
                     }
                     MessageType::Audio(content) => {
@@ -2019,6 +2037,7 @@ async fn publish_timeline(
                             url: None,
                             spoiler: false,
                             video: false,
+                            description: None,
                         }];
                     }
                     _ => message.body = text.body().to_owned(),
@@ -3524,7 +3543,7 @@ mod tests {
             })
             .await;
 
-            // Close Yapfast while offline; the next run sends from the encrypted store.
+            // Close Harmony while offline; the next run sends from the encrypted store.
             commands.send(Command::CloseRoom).unwrap();
             drop(commands);
             tokio::time::timeout(Duration::from_secs(10), actor)
@@ -3612,7 +3631,7 @@ mod tests {
             commands
                 .send(Command::Send {
                     room: room.clone(),
-                    body: "Welcome to **Yapfast**, with `code` and a [link](https://matrix.org)"
+                    body: "Welcome to **Harmony**, with `code` and a [link](https://matrix.org)"
                         .into(),
                     reply: None,
                     options: Default::default(),

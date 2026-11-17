@@ -1,24 +1,24 @@
-//! Starting Yapfast when the person signs in to their computer: a value in the
+//! Starting Harmony when the person signs in to their computer: a value in the
 //! registry's Run key on Windows, an XDG autostart entry on Linux. The entry is
 //! the setting, so one turned off in Task Manager, or a deleted file, shows as
-//! off in Settings too. It starts Yapfast with `--background`, in the tray.
+//! off in Settings too. It starts Harmony with `--background`, in the tray.
 
 use std::path::PathBuf;
 
-/// Whether this platform can start Yapfast at sign-in.
+/// Whether this platform can start Harmony at sign-in.
 pub const SUPPORTED: bool = cfg!(any(target_os = "linux", windows));
 
 /// The name the entry goes by: the Run key's value, and the Inno Setup
 /// installer's, which writes the same one.
 #[cfg(windows)]
-const NAME: &str = "Yapfast";
+const NAME: &str = "Harmony";
 
-/// Whether Yapfast starts when the person signs in.
+/// Whether Harmony starts when the person signs in.
 pub fn enabled() -> bool {
     platform::enabled()
 }
 
-/// Starts Yapfast at sign-in, or stops it.
+/// Starts Harmony at sign-in, or stops it.
 pub fn set(on: bool) -> std::io::Result<()> {
     match on {
         true => platform::write(&command()?),
@@ -26,8 +26,13 @@ pub fn set(on: bool) -> std::io::Result<()> {
     }
 }
 
-/// Points an entry at this Yapfast, after its folder moved or an update.
+/// Points an entry at this Harmony, after its folder moved or an update.
 pub fn refresh() {
+    #[cfg(target_os = "linux")]
+    if let Err(error) = linux::refresh() {
+        tracing::warn!(%error, "could not update starting at sign-in");
+    }
+    #[cfg(not(target_os = "linux"))]
     if enabled()
         && let Err(error) = set(true)
     {
@@ -35,7 +40,7 @@ pub fn refresh() {
     }
 }
 
-/// What starts Yapfast in the tray, with the data folder this one uses.
+/// What starts Harmony in the tray, with the data folder this one uses.
 fn command() -> std::io::Result<Vec<String>> {
     let program = std::env::current_exe()?;
     #[cfg(target_os = "linux")]
@@ -118,22 +123,54 @@ mod linux {
     use crate::desktop_entry;
 
     pub fn enabled() -> bool {
-        config().is_some_and(|config| entry_enabled(&config))
+        super::command()
+            .ok()
+            .is_some_and(|command| config().is_some_and(|config| entry_enabled(&config, &command)))
     }
 
     pub fn write(command: &[String]) -> std::io::Result<()> {
         let config = config().ok_or_else(|| std::io::Error::other("no home folder"))?;
-        write_entry(&config, command)
+        let legacy = legacy_entry(&config);
+        let legacy_owned = std::fs::read_to_string(&legacy)
+            .is_ok_and(|text| desktop_entry::identity::owned(&text, command));
+        // Keep an existing fork-owned legacy ID instead of inventing a global
+        // alias or creating a second active autostart entry. An explicit setting
+        // can enable an owned off entry; refresh below cannot.
+        if !entry(&config).try_exists()? && legacy_owned {
+            write_entry_at(&legacy, command)
+        } else {
+            write_entry(&config, command)
+        }
     }
 
     pub fn remove() -> std::io::Result<()> {
-        match config() {
-            Some(config) => match std::fs::remove_file(entry(&config)) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                result => result,
-            },
-            None => Ok(()),
+        let Some(config) = config() else {
+            return Ok(());
+        };
+        let command = super::command()?;
+        for path in [entry(&config), legacy_entry(&config)] {
+            if std::fs::read_to_string(&path)
+                .is_ok_and(|text| desktop_entry::identity::owned(&text, &command))
+            {
+                std::fs::remove_file(path)?;
+            }
         }
+        Ok(())
+    }
+
+    pub fn refresh() -> std::io::Result<()> {
+        let Some(config) = config() else {
+            return Ok(());
+        };
+        let command = super::command()?;
+        for path in [entry(&config), legacy_entry(&config)] {
+            if let Ok(current) = std::fs::read_to_string(&path)
+                && let Some(updated) = desktop_entry::identity::refreshed(&current, &command)
+            {
+                desktop_entry::write(&path, updated.as_bytes())?;
+            }
+        }
+        Ok(())
     }
 
     /// `$XDG_CONFIG_HOME`, or `~/.config`.
@@ -147,32 +184,38 @@ mod linux {
             .join(format!("{}.desktop", crate::icon::APP_ID))
     }
 
-    /// The entry is there and not turned off, as desktops turn one off
-    /// without deleting it.
-    pub(super) fn entry_enabled(config: &Path) -> bool {
-        std::fs::read_to_string(entry(config)).is_ok_and(|entry| {
-            !entry.lines().any(|line| {
-                matches!(
-                    line.replace(' ', "").as_str(),
-                    "Hidden=true" | "X-GNOME-Autostart-enabled=false"
-                )
+    fn legacy_entry(config: &Path) -> PathBuf {
+        config
+            .join("autostart")
+            .join(format!("{}.desktop", desktop_entry::LEGACY_ID))
+    }
+
+    /// A legacy ID counts only with Harmony's name and exact launch context.
+    pub(super) fn entry_enabled(config: &Path, command: &[String]) -> bool {
+        [entry(config), legacy_entry(config)]
+            .into_iter()
+            .any(|path| {
+                std::fs::read_to_string(path).is_ok_and(|text| {
+                    desktop_entry::identity::owned(&text, command)
+                        && desktop_entry::identity::active(&text)
+                })
             })
-        })
     }
 
     pub(super) fn write_entry(config: &Path, command: &[String]) -> std::io::Result<()> {
-        let exec: Vec<String> = command
-            .iter()
-            .map(|argument| desktop_entry::quoted(argument))
-            .collect();
+        write_entry_at(&entry(config), command)
+    }
+
+    fn write_entry_at(path: &Path, command: &[String]) -> std::io::Result<()> {
+        let exec = desktop_entry::identity::exec(command);
         let text = format!(
-            "[Desktop Entry]\nType=Application\nName=Yapfast\n\
-             Comment=Starts Yapfast in the system tray when you sign in\n\
+            "[Desktop Entry]\nType=Application\nName=Harmony\n\
+             Comment=Starts Harmony in the system tray when you sign in\n\
              Exec={}\nIcon={}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
-            exec.join(" "),
+            exec,
             crate::icon::APP_ID,
         );
-        desktop_entry::write(&entry(config), text.as_bytes())
+        desktop_entry::write(path, text.as_bytes())
     }
 
     #[cfg(test)]
@@ -182,32 +225,64 @@ mod linux {
         #[test]
         fn writes_an_entry_that_starts_in_the_tray() {
             let config = tempfile::tempdir().unwrap();
-            assert!(!entry_enabled(config.path()));
             let command = [
-                "/opt/Yapfast Builds/yapfast".to_owned(),
+                "/opt/Harmony Builds/harmony".to_owned(),
                 "--background".to_owned(),
                 "--data-dir".to_owned(),
                 "/home/a/100% $data".to_owned(),
             ];
+            assert!(!entry_enabled(config.path(), &command));
             write_entry(config.path(), &command).unwrap();
-            assert!(entry_enabled(config.path()));
+            assert!(entry_enabled(config.path(), &command));
             let text = std::fs::read_to_string(entry(config.path())).unwrap();
             assert!(text.contains(
-                r#"Exec="/opt/Yapfast Builds/yapfast" --background --data-dir "/home/a/100%% \$data""#
+                r#"Exec="/opt/Harmony Builds/harmony" --background --data-dir "/home/a/100%% \$data""#
             ));
-            assert!(text.contains("Name=Yapfast\n"));
+            assert!(text.contains("Name=Harmony\n"));
+        }
+
+        #[test]
+        fn legacy_startup_requires_harmony_name_launch_context_and_active_state() {
+            let config = tempfile::tempdir().unwrap();
+            let command = [
+                "/opt/Harmony/harmony",
+                "--background",
+                "--data-dir",
+                "/home/a/live",
+            ]
+            .map(str::to_owned);
+            let mut old = command.clone();
+            old[0] = "/opt/Harmony/yapfast".to_owned();
+            let path = legacy_entry(config.path());
+            write_entry_at(&path, &old).unwrap();
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(entry_enabled(config.path(), &command));
+            assert!(
+                !entry(config.path()).exists(),
+                "recognition must not create the new ID"
+            );
+            for changed in [
+                text.replace("Name=Harmony", "Name=Yapfast"),
+                text.replace("/home/a/live", "/home/a/isolated"),
+                format!("{text}Hidden=true\n"),
+                text.replace("enabled=true", "enabled=false"),
+            ] {
+                std::fs::write(&path, changed).unwrap();
+                assert!(!entry_enabled(config.path(), &command));
+            }
         }
 
         #[test]
         fn an_entry_a_desktop_turned_off_is_off() {
             let config = tempfile::tempdir().unwrap();
-            write_entry(config.path(), &["yapfast".to_owned()]).unwrap();
+            let command = ["/opt/Harmony/harmony".to_owned(), "--background".to_owned()];
+            write_entry(config.path(), &command).unwrap();
             let path = entry(config.path());
             let text = std::fs::read_to_string(&path).unwrap();
             std::fs::write(&path, text.replace("enabled=true", "enabled=false")).unwrap();
-            assert!(!entry_enabled(config.path()));
+            assert!(!entry_enabled(config.path(), &command));
             std::fs::write(&path, "[Desktop Entry]\nHidden=true\n").unwrap();
-            assert!(!entry_enabled(config.path()));
+            assert!(!entry_enabled(config.path(), &command));
         }
     }
 }
@@ -340,7 +415,7 @@ mod windows {
             remove().unwrap();
             assert!(!enabled());
             write(&[
-                r"C:\Program Files\Yapfast\yapfast.exe".into(),
+                r"C:\Program Files\Harmony\Harmony.exe".into(),
                 "--background".into(),
             ])
             .unwrap();
@@ -353,7 +428,7 @@ mod windows {
                 .collect();
             assert_eq!(
                 String::from_utf16(&text).unwrap(),
-                r#""C:\Program Files\Yapfast\yapfast.exe" --background"#
+                r#""C:\Program Files\Harmony\Harmony.exe" --background"#
             );
             // Task Manager turns it off with an odd first byte.
             let disabled = [3u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -369,7 +444,7 @@ mod windows {
             };
             checked(status).unwrap();
             assert!(!enabled());
-            write(&["yapfast.exe".into()]).unwrap();
+            write(&["Harmony.exe".into()]).unwrap();
             assert!(enabled(), "turning it on here turns it on in Task Manager");
             remove().unwrap();
             assert!(!enabled());
@@ -403,8 +478,8 @@ mod tests {
     fn quotes_windows_arguments_as_windows_splits_them() {
         assert_eq!(windows_argument("--background"), "--background");
         assert_eq!(
-            windows_argument(r"C:\Users\A B\Yapfast\yapfast.exe"),
-            r#""C:\Users\A B\Yapfast\yapfast.exe""#
+            windows_argument(r"C:\Users\A B\Harmony\Harmony.exe"),
+            r#""C:\Users\A B\Harmony\Harmony.exe""#
         );
         assert_eq!(windows_argument(r"C:\A B\"), r#""C:\A B\\""#);
         assert_eq!(windows_argument(r#"say "hi""#), r#""say \"hi\"""#);
@@ -414,12 +489,12 @@ mod tests {
     #[test]
     fn quotes_a_program_whether_or_not_it_needs_it() {
         assert_eq!(
-            windows_program(r"C:\Apps\Yapfast\yapfast.exe"),
-            r#""C:\Apps\Yapfast\yapfast.exe""#
+            windows_program(r"C:\Apps\Harmony\Harmony.exe"),
+            r#""C:\Apps\Harmony\Harmony.exe""#
         );
         assert_eq!(
-            windows_program(r"C:\A B\yapfast.exe"),
-            r#""C:\A B\yapfast.exe""#
+            windows_program(r"C:\A B\Harmony.exe"),
+            r#""C:\A B\Harmony.exe""#
         );
     }
 }

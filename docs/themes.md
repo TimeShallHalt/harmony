@@ -2,16 +2,18 @@
 
 Harmony also supports data-only native [theme packs](theme-packs.md): semantic
 colors, bounded layout/typography/motion tokens, and a local static PNG logo.
-Existing built-in IDs and palette credits below are unchanged.
+The new default is `harmony`. Existing built-in IDs and palette credits are
+preserved, including `yap`, now displayed as **Harmony Classic**; saved themes
+and imported-logo overrides are not renamed or discarded.
 
-Settings → Appearance shows the window in one of the themes Yapfast comes with,
+Settings → Appearance shows the window in one of the themes Harmony comes with,
 or one of the person's own. Each is a full set of the colours of the Slint
 global `Theme` (`ui/theme.slint`), plus whether it's dark, which sets the
 std-widgets' colour scheme and the scrollbars'. `src/ui/theme.rs` holds the built-in ones as
 `BUILT_IN`; `ui/theme.slint` says what each colour paints. The choice
 is kept in `layout.json` as `theme`, the theme's id, and applied before the
-window's first frame, and again to a window made anew. An id Yapfast doesn't
-know, or a deleted theme's, shows Yap.
+window's first frame, and again to a window made anew. An id Harmony doesn't
+know, or a deleted theme's, shows Harmony (`harmony`).
 
 ## Custom themes
 
@@ -22,7 +24,7 @@ for a copy of any other. The editor lists every colour by its name in
 window is the preview. Save keeps the theme and chooses it; Cancel, leaving
 Appearance or closing settings shows the theme from before. A saved theme's
 card has a pencil that opens it again to rename, change or delete it;
-deleting the chosen one shows Yap. A window rebuilt while the editor is open,
+deleting the chosen one shows Harmony. A window rebuilt while the editor is open,
 as closing to the [tray](tray.md) does, drops the unsaved edit.
 
 `layout.json` keeps them in `custom_themes`, in the order Appearance shows
@@ -38,19 +40,23 @@ them after the built-in ones:
 }
 ```
 
+The example intentionally keeps the legacy `yap` base (Harmony Classic).
+Use `harmony` for the new default palette.
+
 `base` is the built-in theme the first copy came from (a copy of a custom
-theme takes its base). Yapfast writes every colour, but a colour that's missing,
+theme takes its base). Harmony writes every colour, but a colour that's missing,
 such as one added in a later version, or that isn't a colour, takes the
-base's value, and a name Yapfast doesn't know is ignored, so themes survive new
+base's value, and a name Harmony doesn't know is ignored, so themes survive new
 colours. Ids are `custom:` and a number, and no built-in id has a colon, so
-they can't collide; on reading, Yapfast gives a fresh one to any custom theme
+they can't collide; on reading, Harmony gives a fresh one to any custom theme
 whose id isn't of that form or repeats another's. The editor's rows are a
 Slint model only while it's open; otherwise a custom theme costs its parsed
 colours and a card.
 
 | Theme | Id | Dark | Accent | From |
 | --- | --- | --- | --- | --- |
-| Yap | `yap` | yes | marigold | Yapfast's own, the default |
+| Harmony | `harmony` | yes | lavender | Harmony's indigo/lavender palette, the default |
+| Harmony Classic | `yap` | yes | marigold | Original Yapfast Yap palette, retained for compatibility |
 | Bonfire | `bonfire` | yes | blurple | Discord's Dark theme |
 | Catppuccin Mocha | `catppuccin-mocha` | yes | mauve | [Catppuccin](https://github.com/catppuccin/catppuccin) |
 | Dracula | `dracula` | yes | purple | [Dracula](https://draculatheme.com/contribute) |
@@ -59,13 +65,14 @@ colours and a card.
 | Tokyo Night | `tokyo-night` | yes | blue | [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme), Night style |
 | Catppuccin Latte | `catppuccin-latte` | no | mauve | [Catppuccin](https://github.com/catppuccin/catppuccin) |
 | Rosé Pine Dawn | `rose-pine-dawn` | no | rose | [Rosé Pine](https://rosepinetheme.com/palette/) |
-| Sakura | `sakura` | no | blossom pink | Yapfast's own |
+| Sakura | `sakura` | no | blossom pink | Original Yapfast palette |
 
 The palettes of Catppuccin, Dracula, Nord, Gruvbox, Tokyo Night and Rosé Pine
 are published under the MIT licence; thanks to their authors. For Tokyo
 Night, the steps between its grounds and text (bg_highlight, fg_gutter, dark3,
-dark5) are named as folke's tokyonight.nvim names them. Yapfast takes their
-colours, not their names for UI parts, so each mapping is Yapfast's:
+dark5) are named as folke's tokyonight.nvim names them. Harmony takes their
+colours, not their names for UI parts; the mappings below retain Yapfast's
+original palette work:
 
 - The ground steps go rail, sidebar, chat from the deepest to the one text
   sits on, with raised surfaces (popovers, reactions, stage tiles) and the
@@ -74,7 +81,7 @@ colours, not their names for UI parts, so each mapping is Yapfast's:
   darken it, and hover and some row grounds are halfway mixes of two palette
   colours.
 - Text, secondary, muted and faint take the palette's text ramp; faint keeps
-  at least 2.5:1 against the sidebar, near Yap's 2.8:1.
+  at least 2.5:1 against the sidebar, near the original Yap palette's 2.8:1.
 - Content on the accent and on red (on-accent, on-danger) takes the palette's
   darkest or lightest colour, whichever reads; on pastel accents, as in
   Catppuccin and Tokyo Night, that's dark.
@@ -98,4 +105,4 @@ on it), red `--control-critical-primary-background-default` (#d22d39), live
 no Discord name or logo.
 
 Discord role colours stay as servers set them, and some read faintly on a
-light theme; Yapfast doesn't adjust them yet.
+light theme; Harmony doesn't adjust them yet.

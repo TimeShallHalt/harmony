@@ -23,7 +23,7 @@ INPUT = runpy.run_path(str(ROOT / 'scripts/framework-input'))
 INPUT['require_private_display']()
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output', type=Path, required=True)
-parser.add_argument('--exe', type=Path, default=ROOT / 'target/fast/yapfast')
+parser.add_argument('--exe', type=Path, default=ROOT / 'target/fast/Harmony')
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 BROKEN_EGL = {'__EGL_VENDOR_LIBRARY_FILENAMES': '/nonexistent/yapfast-no-egl-vendor.json'}

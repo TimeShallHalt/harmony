@@ -1,6 +1,6 @@
 //! Favourite GIFs' thumbnails: an animation encoded as VP9 at a constant
 //! quality, through native/clip.c and the libvpx inside libwebrtc, in a WebM
-//! file of its own. Yapfast plays it as any video, at a fraction of a GIF's size
+//! file of its own. Harmony plays it as any video, at a fraction of a GIF's size
 //! and decoding work: a tenth of a WebP's size, measured on Tenor's GIFs.
 
 use std::ffi::{c_int, c_longlong, c_uchar, c_uint, c_ulong, c_void};
@@ -220,8 +220,8 @@ fn webm(width: u32, height: u32, frames: &[Encoded], duration: u64) -> Vec<u8> {
     uint(&mut info, TIMESTAMP_SCALE, 1_000_000);
     head(&mut info, DURATION, 8);
     info.extend((duration as f64).to_be_bytes());
-    bytes(&mut info, MUXING_APP, b"Yapfast");
-    bytes(&mut info, WRITING_APP, b"Yapfast");
+    bytes(&mut info, MUXING_APP, b"Harmony");
+    bytes(&mut info, WRITING_APP, b"Harmony");
     let mut video = Vec::new();
     uint(&mut video, PIXEL_WIDTH, width.into());
     uint(&mut video, PIXEL_HEIGHT, height.into());

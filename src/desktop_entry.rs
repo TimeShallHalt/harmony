@@ -16,8 +16,11 @@ use std::{
 
 use crate::icon::APP_ID;
 
+/// Compatibility lookup only, never an unconditional alias for stock Yapfast.
+pub(crate) const LEGACY_ID: &str = "io.github.yapfast.Yapfast";
+
 /// The entry a package installs, whose Exec line names the AppImage instead.
-const ENTRY: &str = include_str!("../packaging/linux/io.github.yapfast.Yapfast.desktop");
+const ENTRY: &str = include_str!("../packaging/linux/io.github.TimeShallHalt.Harmony.desktop");
 const ICON: &[u8] = include_bytes!("../packaging/icon.svg");
 
 /// The AppImage this Yapfast runs from. An AppImage runs from a temporary
@@ -85,7 +88,7 @@ pub(crate) fn install_in(data: &Path, system: &[PathBuf], image: &Path) -> io::R
 fn entry(image: &str) -> String {
     let tried = image.replace('\\', "\\\\");
     ENTRY.replace(
-        "\nExec=yapfast --open-link %u\n",
+        "\nExec=harmony --open-link %u\n",
         &format!("\nTryExec={tried}\nExec={} --open-link %u\n", quoted(image)),
     )
 }
@@ -169,6 +172,214 @@ pub(crate) fn quoted(argument: &str) -> String {
     quoted
 }
 
+// BEGIN pure Linux desktop ownership (also exercised on non-Linux hosts).
+pub(crate) mod identity {
+    /// Only unambiguous fields from the main group count. Duplicate fields or
+    /// groups and oversized files cannot establish launch-context ownership.
+    fn field<'a>(text: &'a str, key: &str) -> Result<Option<&'a str>, ()> {
+        if text.len() > 65_536 || text.contains('\0') {
+            return Err(());
+        }
+        let mut in_entry = false;
+        let mut seen_entry = false;
+        let mut value = None;
+        for line in text.lines().map(str::trim) {
+            if line.starts_with('[') {
+                in_entry = line == "[Desktop Entry]";
+                if in_entry && seen_entry {
+                    return Err(());
+                }
+                seen_entry |= in_entry;
+            } else if in_entry
+                && let Some((name, text)) = line.split_once('=')
+                && name.trim() == key
+            {
+                if value.is_some() {
+                    return Err(());
+                }
+                value = Some(text.trim());
+            }
+        }
+        Ok(value)
+    }
+
+    pub(crate) fn exec(command: &[String]) -> String {
+        command
+            .iter()
+            .enumerate()
+            .map(|(at, arg)| {
+                if arg == "%u"
+                    && at + 1 == command.len()
+                    && at > 0
+                    && command[at - 1] == "--open-link"
+                {
+                    arg.clone()
+                } else {
+                    super::quoted(arg)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn absolute(program: &str) -> bool {
+        program.starts_with('/')
+            && !program.starts_with("//")
+            && !program.split('/').any(|part| matches!(part, "." | ".."))
+            && !program.chars().any(char::is_control)
+    }
+
+    /// Same absolute launch context only. Bare commands (PATH-dependent), a
+    /// different data root, a stock Name=Yapfast and argument mentions fail
+    /// closed. Predecessor filenames are bounded to this installation folder.
+    pub(crate) fn owned(text: &str, command: &[String]) -> bool {
+        let Some(program) = command.first().filter(|program| absolute(program)) else {
+            return false;
+        };
+        if field(text, "Name") != Ok(Some("Harmony"))
+            || field(text, "Type") != Ok(Some("Application"))
+        {
+            return false;
+        }
+        let Ok(Some(registered)) = field(text, "Exec") else {
+            return false;
+        };
+        if registered == exec(command) {
+            return true;
+        }
+        let Some((parent, filename)) = program.rsplit_once('/') else {
+            return false;
+        };
+        let old = match filename {
+            "harmony" => "yapfast",
+            "Harmony.AppImage" => "Yapfast.AppImage",
+            _ => return false,
+        };
+        let mut legacy = command.to_vec();
+        legacy[0] = format!("{parent}/{old}");
+        registered == exec(&legacy)
+    }
+
+    pub(crate) fn active(text: &str) -> bool {
+        matches!(field(text, "Hidden"), Ok(None) | Ok(Some("false")))
+            && matches!(
+                field(text, "X-GNOME-Autostart-enabled"),
+                Ok(None) | Ok(Some("true"))
+            )
+    }
+
+    /// Retarget in place only when active and proven owned. Hidden/off entries
+    /// retain their exact bytes; retaining the legacy ID creates no alias and
+    /// cannot shadow a coinstalled stock entry under a new ID.
+    pub(crate) fn refreshed(text: &str, command: &[String]) -> Option<String> {
+        if !owned(text, command) || !active(text) {
+            return None;
+        }
+        let old = field(text, "Exec").ok()??;
+        let new = exec(command);
+        if old == new {
+            return None;
+        }
+        let mut in_entry = false;
+        Some(
+            text.split_inclusive('\n')
+                .map(|line| {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with('[') {
+                        in_entry = trimmed == "[Desktop Entry]";
+                    }
+                    if in_entry
+                        && let Some((key, _)) = line.split_once('=')
+                        && key.trim() == "Exec"
+                    {
+                        let ending = if line.ends_with("\r\n") {
+                            "\r\n"
+                        } else if line.ends_with('\n') {
+                            "\n"
+                        } else {
+                            ""
+                        };
+                        format!("{key}={new}{ending}")
+                    } else {
+                        line.to_owned()
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        fn command() -> Vec<String> {
+            [
+                "/opt/Harmony Builds/harmony",
+                "--background",
+                "--data-dir",
+                "/home/a/100% $data",
+            ]
+            .map(str::to_owned)
+            .to_vec()
+        }
+        fn legacy() -> String {
+            let mut command = command();
+            command[0] = "/opt/Harmony Builds/yapfast".into();
+            format!(
+                "[Desktop Entry]\nType=Application\nName=Harmony\nExec={}\n",
+                exec(&command)
+            )
+        }
+
+        #[test]
+        fn legacy_harmony_requires_exact_name_and_launch_context() {
+            assert!(owned(&legacy(), &command()));
+            let mut isolated = command();
+            isolated[3] = "/home/a/isolated".into();
+            assert!(!owned(&legacy(), &isolated));
+            assert!(!owned(
+                &legacy().replace("Name=Harmony", "Name=Yapfast"),
+                &command()
+            ));
+            assert!(!owned(
+                &legacy().replace("/opt/Harmony Builds/yapfast", "/opt/Yapfast/yapfast"),
+                &command()
+            ));
+        }
+
+        #[test]
+        fn linux_stock_bare_commands_and_argument_mentions_fail_closed() {
+            for exec in [
+                "yapfast --background",
+                "/other --background /opt/Harmony\\ Builds/harmony",
+                "/opt/Yapfast/yapfast --background",
+            ] {
+                let text =
+                    format!("[Desktop Entry]\nType=Application\nName=Harmony\nExec={exec}\n");
+                assert!(!owned(&text, &command()));
+            }
+            assert!(!owned(&(legacy() + "Exec=/other\n"), &command()));
+            assert!(!owned(
+                &(legacy() + "[Desktop Entry]\nName=Harmony\n"),
+                &command()
+            ));
+        }
+
+        #[test]
+        fn hidden_and_disabled_legacy_entries_stay_off_and_unchanged() {
+            for flag in ["Hidden=true", "X-GNOME-Autostart-enabled=false"] {
+                let text = format!("{}{flag}\n", legacy());
+                assert!(owned(&text, &command()));
+                assert!(!active(&text));
+                assert!(refreshed(&text, &command()).is_none());
+            }
+            assert!(active(&legacy()));
+            let updated = refreshed(&legacy(), &command()).unwrap();
+            assert!(updated.contains(&format!("Exec={}\n", exec(&command()))));
+        }
+    }
+}
+// END pure Linux desktop ownership.
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,7 +398,7 @@ mod tests {
         assert!(text.contains(&format!(
             "\nTryExec={IMAGE}\nExec=\"{IMAGE}\" --open-link %u\n"
         )));
-        assert!(text.contains("\nMimeType=x-scheme-handler/yapfast;\n"));
+        assert!(text.contains("\nMimeType=x-scheme-handler/harmony;\n"));
         assert!(text.contains(&format!("\nIcon={APP_ID}\n")));
         let icon = data
             .path()

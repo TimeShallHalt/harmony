@@ -1,12 +1,13 @@
 //! Plays a video file in the stream worker ([`crate::stream_worker::Job::Play`]),
-//! so FFmpeg reads files people sent outside Yapfast's window, and its memory
-//! goes when playing stops. The file may still be downloading: reading past
-//! its end waits for more.
+//! so FFmpeg reads files people sent outside Harmony's window, and its memory
+//! goes when playing stops. The file may still be downloading, in any order
+//! ([`crate::playback`]): a read waits for the bytes it needs, and reports
+//! where it waits, so the download can go there.
 //!
 //! Three threads share one [`State`]: the decoder fills queues of pictures
 //! and sound, a few hundred milliseconds ahead; the sound thread plays the
 //! sound on PulseAudio, matched to the clock; and the job's own thread shows
-//! each picture when the clock reaches it, takes Yapfast's controls and reports
+//! each picture when the clock reaches it, takes Harmony's controls and reports
 //! back. The clock is the system's, held while there's nothing to play, as
 //! when the download falls behind.
 
@@ -16,7 +17,7 @@ use std::{
     io::{Read, Seek, SeekFrom},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc as channel,
     },
     time::{Duration, Instant},
@@ -31,7 +32,7 @@ use crate::{
     video::{Next, Source, Video, fit},
 };
 
-/// What the sound plays at: 48 kHz stereo, as Yapfast's other sound does.
+/// What the sound plays at: 48 kHz stereo, as Harmony's other sound does.
 const RATE: u32 = 48_000;
 const CHANNELS: usize = 2;
 /// How far ahead the decoder fills its queues.
@@ -42,74 +43,175 @@ const SOUND_AHEAD_MS: u64 = 500;
 /// How far sound may stray from the clock before it's skipped or waited for.
 const SOUND_SLACK_MS: u64 = 80;
 
-/// A file Yapfast is still downloading, which reading waits for.
+/// A file Harmony is still downloading, perhaps out of order: reading reads
+/// only the bytes Harmony said arrived, and waits for the rest.
 struct Download {
     file: File,
+    /// Where the next read starts, as the file's own position is.
+    at: u64,
     progress: Arc<Progress>,
-    /// Set when a read should give up: Yapfast stops or moves elsewhere.
+    /// Set when a read should give up: Harmony stops or moves elsewhere.
     interrupt: Arc<AtomicBool>,
 }
 
-/// How a download is going, which Yapfast tells the worker.
-#[derive(Default)]
-pub struct Progress {
-    /// [`DOWNLOADING`], [`DOWNLOADED`] or [`FAILED`].
-    state: AtomicU8,
-    /// The file's size, once known; 0 before.
-    size: AtomicU64,
+/// Which bytes of a file are there: sorted, separate, half-open ranges.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Ranges(Vec<(u64, u64)>);
+
+impl Ranges {
+    /// Adds the bytes from `from` up to `to`, joining the ranges they touch.
+    pub(crate) fn add(&mut self, from: u64, to: u64) {
+        if from >= to {
+            return;
+        }
+        // The first range that ends at or after `from`, and the first that
+        // starts after `to`: those between join the new one.
+        let first = self.0.partition_point(|&(_, end)| end < from);
+        let last = self.0.partition_point(|&(start, _)| start <= to);
+        let joined = self.0[first..last]
+            .iter()
+            .fold((from, to), |(from, to), &(start, end)| {
+                (from.min(start), to.max(end))
+            });
+        self.0.splice(first..last, [joined]);
+    }
+
+    /// How many bytes from `at` are there in a row.
+    pub(crate) fn run(&self, at: u64) -> u64 {
+        let index = self.0.partition_point(|&(_, end)| end <= at);
+        match self.0.get(index) {
+            Some(&(start, end)) if start <= at => end - at,
+            _ => 0,
+        }
+    }
+
+    /// The first byte from `at` that isn't there, and the next one that is
+    /// after it, if any.
+    pub(crate) fn gap(&self, at: u64) -> (u64, Option<u64>) {
+        let from = at + self.run(at);
+        let next = self.0.partition_point(|&(start, _)| start <= from);
+        (from, self.0.get(next).map(|&(start, _)| start))
+    }
 }
 
-const DOWNLOADING: u8 = 0;
-const DOWNLOADED: u8 = 1;
-const FAILED: u8 = 2;
+/// How a download is going, which Harmony tells the worker.
+#[derive(Default)]
+pub struct Progress {
+    state: Mutex<Arrival>,
+    arrived: Condvar,
+}
+
+#[derive(Default)]
+struct Arrival {
+    ranges: Ranges,
+    /// The file's size, once known.
+    size: Option<u64>,
+    failed: bool,
+    /// The byte a read waits for, and the one last reported, so each wait
+    /// is reported once.
+    needed: Option<u64>,
+    reported: Option<u64>,
+}
 
 impl Progress {
     fn new(size: Option<u64>) -> Self {
         Self {
-            state: AtomicU8::new(DOWNLOADING),
-            size: AtomicU64::new(size.unwrap_or(0)),
+            state: Mutex::new(Arrival {
+                size,
+                ..Arrival::default()
+            }),
+            arrived: Condvar::new(),
         }
     }
 
+    fn lock(&self) -> MutexGuard<'_, Arrival> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn arrived(&self, from: u64, to: u64, size: Option<u64>) {
+        let mut state = self.lock();
+        state.ranges.add(from, to);
+        state.size = state.size.or(size);
+        self.arrived.notify_all();
+    }
+
     fn downloaded(&self, size: u64) {
-        self.size.store(size, Ordering::Relaxed);
-        self.state.store(DOWNLOADED, Ordering::Release);
+        self.arrived(0, size, Some(size));
     }
 
     fn failed(&self) {
-        self.state.store(FAILED, Ordering::Release);
+        self.lock().failed = true;
+        self.arrived.notify_all();
+    }
+
+    /// The byte a read waits for, once for each wait.
+    fn needed(&self) -> Option<u64> {
+        let mut state = self.lock();
+        let needed = state.needed.filter(|at| state.reported != Some(*at))?;
+        state.reported = Some(needed);
+        Some(needed)
     }
 }
 
 impl Read for Download {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let mut state = self.progress.lock();
         loop {
-            let read = self.file.read(buffer)?;
-            if read > 0 || buffer.is_empty() {
+            let run = state.ranges.run(self.at);
+            if run > 0 {
+                // A wait that's over is reported again when it comes back.
+                state.needed = None;
+                state.reported = None;
+                drop(state);
+                let wanted = buffer.len().min(usize::try_from(run).unwrap_or(usize::MAX));
+                let read = self.file.read(&mut buffer[..wanted])?;
+                self.at += read as u64;
                 return Ok(read);
             }
-            match self.progress.state.load(Ordering::Acquire) {
-                DOWNLOADED => return Ok(0),
-                FAILED => return Err(std::io::Error::other("the download failed")),
-                _ => {}
+            if state.size.is_some_and(|size| self.at >= size) {
+                return Ok(0);
+            }
+            if state.failed {
+                return Err(std::io::Error::other("the download failed"));
             }
             if self.interrupt.load(Ordering::Relaxed) {
                 return Err(std::io::ErrorKind::Interrupted.into());
             }
-            std::thread::sleep(Duration::from_millis(20));
+            state.needed = Some(self.at);
+            state = self
+                .progress
+                .arrived
+                .wait_timeout(state, Duration::from_millis(20))
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
         }
     }
 }
 
 impl Seek for Download {
     fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
-        self.file.seek(to)
+        let to = match to {
+            SeekFrom::Start(at) => Some(at),
+            SeekFrom::Current(by) => self.at.checked_add_signed(by),
+            SeekFrom::End(by) => self
+                .size()
+                .ok_or(std::io::ErrorKind::Unsupported)?
+                .checked_add_signed(by),
+        }
+        .ok_or(std::io::ErrorKind::InvalidInput)?;
+        self.at = self.file.seek(SeekFrom::Start(to))?;
+        Ok(self.at)
     }
 }
 
 impl Source for Download {
     fn size(&mut self) -> Option<u64> {
-        Some(self.progress.size.load(Ordering::Relaxed)).filter(|size| *size > 0)
+        self.progress.lock().size
     }
 }
 
@@ -245,7 +347,7 @@ impl Shared {
 /// What the job needs besides its file.
 pub struct Playing {
     pub path: std::path::PathBuf,
-    /// The file's size, when Yapfast knows it before it's downloaded.
+    /// The file's size, when Harmony knows it before it's downloaded.
     pub size: Option<u64>,
     /// Pictures are drawn to fit this.
     pub width: u32,
@@ -256,7 +358,7 @@ pub struct Playing {
     pub volume: f32,
 }
 
-/// Plays the video until Yapfast stops it, reporting what it does.
+/// Plays the video until Harmony stops it, reporting what it does.
 pub fn play(
     job: Playing,
     mut writer: Writer,
@@ -268,6 +370,7 @@ pub fn play(
     let interrupt = Arc::new(AtomicBool::new(false));
     let download = Download {
         file: File::open(&job.path).context("could not open the video")?,
+        at: 0,
         progress: progress.clone(),
         interrupt: interrupt.clone(),
     };
@@ -322,7 +425,7 @@ pub fn play(
 }
 
 /// The job's own thread: shows pictures as the clock reaches them and takes
-/// Yapfast's controls, until it stops.
+/// Harmony's controls, until it stops.
 fn show(
     shared: &Shared,
     writer: &mut Writer,
@@ -355,6 +458,9 @@ fn show(
         let mut state = shared.lock();
         if let Some(error) = state.failed.take() {
             anyhow::bail!(error);
+        }
+        if let Some(at) = progress.needed() {
+            report(Report::Needs { at });
         }
         if !opened && let Some(file) = &state.opened {
             opened = true;
@@ -408,7 +514,7 @@ fn show(
     Ok(())
 }
 
-/// Applies one of Yapfast's controls.
+/// Applies one of Harmony's controls.
 fn take(shared: &Shared, progress: &Progress, control: Control) {
     let mut state = shared.lock();
     match control {
@@ -436,6 +542,7 @@ fn take(shared: &Shared, progress: &Progress, control: Control) {
                 }
             }
         }
+        Control::Arrived { from, to, size } => progress.arrived(from, to, size),
         Control::Downloaded { size } => match size {
             Some(size) => progress.downloaded(size),
             None => progress.failed(),
@@ -464,7 +571,7 @@ fn decode(download: Download, sound: bool, shared: &Shared) {
     let Some(mut video) = Video::open(download, sound) else {
         let mut state = shared.lock();
         if !state.stop {
-            state.failed = Some("Yapfast can't play this video.".into());
+            state.failed = Some("Harmony can't play this video.".into());
         }
         return;
     };
@@ -718,7 +825,7 @@ impl Resampler {
         }
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.position = 0.0;
         self.last = None;
     }
@@ -848,6 +955,13 @@ mod tests {
         let frames = crate::frames::Frames::create(160, 90).unwrap();
         let writer = Writer::open(&frames.path().unwrap()).unwrap();
         let (controls, received) = channel::channel();
+        controls
+            .send(Control::Arrived {
+                from: 0,
+                to: video.len() as u64 / 2,
+                size: None,
+            })
+            .unwrap();
         let (reports, reported) = channel::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let job = Playing {
@@ -1003,6 +1117,7 @@ mod tests {
             let interrupt = Arc::new(AtomicBool::new(false));
             let download = Download {
                 file: File::open(&path).unwrap(),
+                at: 0,
                 progress,
                 interrupt: interrupt.clone(),
             };
@@ -1031,30 +1146,149 @@ mod tests {
     }
 
     #[test]
+    fn ranges_join_and_tell_their_gaps() {
+        let mut ranges = Ranges::default();
+        ranges.add(10, 20);
+        ranges.add(30, 40);
+        assert_eq!((ranges.run(5), ranges.run(10), ranges.run(15)), (0, 10, 5));
+        assert_eq!(ranges.run(20), 0);
+        assert_eq!(ranges.gap(0), (0, Some(10)));
+        assert_eq!(ranges.gap(12), (20, Some(30)));
+        assert_eq!(ranges.gap(35), (40, None));
+        ranges.add(20, 30);
+        assert_eq!(ranges, Ranges(vec![(10, 40)]), "touching ranges join");
+        ranges.add(0, 5);
+        ranges.add(3, 50);
+        assert_eq!(ranges, Ranges(vec![(0, 50)]));
+        ranges.add(7, 7);
+        assert_eq!(ranges, Ranges(vec![(0, 50)]), "nothing added");
+    }
+
+    #[test]
     fn reading_waits_for_the_download() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("video");
-        std::fs::write(&path, b"abc").unwrap();
+        // Bytes in the file count once Harmony says they arrived: until
+        // then, they may be a hole the download hasn't filled.
+        std::fs::write(&path, b"abcdef").unwrap();
         let progress = Arc::new(Progress::new(None));
+        progress.arrived(0, 3, None);
         let mut download = Download {
             file: File::open(&path).unwrap(),
+            at: 0,
             progress: progress.clone(),
             interrupt: Arc::new(AtomicBool::new(false)),
         };
         assert_eq!(download.size(), None);
-        let writer = {
-            let (path, progress) = (path.clone(), progress.clone());
+        let reader = std::thread::spawn(move || {
+            let mut read = Vec::new();
+            download.read_to_end(&mut read).unwrap();
+            (read, download.size())
+        });
+        // It reports the byte it waits for, once.
+        let started = Instant::now();
+        let needed = loop {
+            if let Some(needed) = progress.needed() {
+                break needed;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "it waits");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(needed, 3);
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(progress.needed(), None, "reported once");
+        progress.downloaded(6);
+        let (read, size) = reader.join().unwrap();
+        assert_eq!(read, b"abcdef");
+        assert_eq!(size, Some(6));
+    }
+
+    /// An MP4 whose index comes last, as OBS and many recorders write them,
+    /// opens from its last bytes, before the rest arrives: its read past
+    /// the pictures reports the byte it needs.
+    #[test]
+    fn opens_from_an_index_at_the_end() {
+        let video = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testing/fixtures/gif-av1.mp4"),
+        )
+        .unwrap();
+        // Its boxes: ftyp, free, mdat, moov. A megabyte of `free` before the
+        // moov stands for a long video's pictures, leaving their offsets as
+        // they are.
+        let mut at = 0;
+        let mut moov = None;
+        while at + 8 <= video.len() {
+            let size = u32::from_be_bytes(video[at..at + 4].try_into().unwrap()) as usize;
+            if &video[at + 4..at + 8] == b"moov" {
+                moov = Some(at);
+            }
+            at += size;
+        }
+        let moov = moov.expect("an index at the end");
+        let padding = 1 << 20;
+        let mut file = video[..moov].to_vec();
+        file.extend_from_slice(&(padding as u32 + 8).to_be_bytes());
+        file.extend_from_slice(b"free");
+        file.resize(file.len() + padding, 0);
+        let index = file.len() as u64;
+        file.extend_from_slice(&video[moov..]);
+        let size = file.len() as u64;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("video.mp4");
+        std::fs::write(&path, &file).unwrap();
+        let frames = crate::frames::Frames::create(160, 90).unwrap();
+        let writer = Writer::open(&frames.path().unwrap()).unwrap();
+        let (controls, received) = channel::channel();
+        let (reports, reported) = channel::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        // The start, as FFmpeg probes its first 2 KB, then the pictures.
+        controls
+            .send(Control::Arrived {
+                from: 0,
+                to: moov as u64 + 4096,
+                size: Some(size),
+            })
+            .unwrap();
+        let job = Playing {
+            path,
+            size: Some(size),
+            width: 80,
+            height: 80,
+            sound: false,
+            speakers: None,
+            volume: 1.0,
+        };
+        let player = {
+            let stop = stop.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(50));
-                let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
-                std::io::Write::write_all(&mut file, b"def").unwrap();
-                progress.downloaded(6);
+                play(job, writer, received, &stop, &mut |report| {
+                    let _ = reports.send(report);
+                })
             })
         };
-        let mut read = Vec::new();
-        download.read_to_end(&mut read).unwrap();
-        writer.join().unwrap();
-        assert_eq!(read, b"abcdef");
-        assert_eq!(download.size(), Some(6));
+        let report = || reported.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(report(), Report::Needs { at: index });
+        controls
+            .send(Control::Arrived {
+                from: index,
+                to: size,
+                size: Some(size),
+            })
+            .unwrap();
+        assert!(matches!(report(), Report::Opened { .. }), "opened");
+        controls
+            .send(Control::Downloaded { size: Some(size) })
+            .unwrap();
+        let started = Instant::now();
+        while frames.take_timed(|_, _, _| ()).is_none() {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "a picture shows"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        stop.store(true, Ordering::Relaxed);
+        player.join().unwrap().unwrap();
     }
 }

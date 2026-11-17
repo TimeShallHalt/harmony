@@ -11,7 +11,7 @@ Each profile opens #general, warms up, samples Yapfast's process while idle, the
 samples again while Bob posts a message every 2 s in the open channel. Voice
 isn't measured: the fake Discord has no voice server.
 
-Start the local stack (scripts/test-stack up). Copy target/measure/yapfast, built
+Start the local stack (scripts/test-stack up). Copy target/measure/Harmony, built
 with each feature set, into --builds (target/networks) as yapfast-matrix,
 yapfast-discord and yapfast-combined; docs/measurements/README.md gives the builds.
 Find the yapfast-core test binary with
@@ -271,7 +271,7 @@ def prewarm(executable, data):
 builds = {name: (args.builds / f'yapfast-{name}').resolve() for name in ('matrix', 'discord', 'combined')}
 for name, path in builds.items():
     if not path.exists():
-        raise SystemExit(f'missing {path}; copy each feature build of target/measure/yapfast there')
+        raise SystemExit(f'missing {path}; copy each feature build of target/measure/Harmony there')
 results = []
 load = discord = None
 executable = str(args.load_executable.resolve()) if args.load_executable else test_binary()

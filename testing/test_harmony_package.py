@@ -26,6 +26,27 @@ class HarmonyPackageTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 self.assertEqual(archive.read('Fixture-source/Cargo.toml'),b'fixture source bytes\n')
 
+    def test_source_snapshot_rejects_a_link_before_copying_private_bytes(self):
+        import tempfile
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('release_package', ROOT/'scripts/release_package.py')
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)/'input'
+            root.mkdir()
+            temporary = Path(folder)/'stage'
+            temporary.mkdir()
+            output = Path(folder)/'source.zip'
+            # Inject link detection without needing Windows symlink privileges.
+            with patch.object(mod,'ROOT',root), patch.object(mod.subprocess,'check_output',return_value=b'Cargo.toml\0'), \
+                 patch.object(Path,'is_symlink',return_value=True), patch.object(mod.shutil,'copy2') as copy:
+                with self.assertRaisesRegex(ValueError,'must not dereference links'):
+                    mod.source_snapshot({'packages':[]},'Fixture',temporary,output)
+                copy.assert_not_called()
+            self.assertFalse(output.exists())
+
     def test_notice_hash_inputs_disable_checkout_newline_conversion(self):
         import subprocess
         value = subprocess.check_output(['git','check-attr','text','--','packaging/licenses/SPDX-MIT.txt'],cwd=ROOT,text=True)
@@ -45,9 +66,9 @@ class HarmonyPackageTests(unittest.TestCase):
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        stamp = {'version':'1.0.0','build_id':1,'commit':'a'*40,'dirty':False,'platform':'windows','architecture':'x86_64','upstream':'Yapfast 0.3.0','license':'GPL-3.0-or-later'}
+        stamp = {'version':'1.0.0','build_id':1,'commit':'a'*40,'dirty':False,'platform':'windows','architecture':'x86_64','upstream':'Yapfast 0.4.1','license':'GPL-3.0-or-later'}
         mod.validate_stamp(stamp, 'a'*40, '1.0.0')
-        for change in ({'dirty':True},{'commit':'b'*40},{'build_id':0},{'platform':'linux'},{'license':'MIT'},{'build_id':True}):
+        for change in ({'dirty':True},{'commit':'b'*40},{'build_id':0},{'platform':'linux'},{'license':'MIT'},{'build_id':True},{'upstream':'Yapfast 0.3.0'}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 mod.validate_stamp(dict(stamp,**change),'a'*40,'1.0.0')
 

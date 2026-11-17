@@ -1,6 +1,6 @@
 //! Discord's captchas, which it asks for before a risky request such as
 //! trading a QR login's ticket: hCaptcha, with a site key and request data
-//! that change each time. Yapfast has no web view, so it serves a page with
+//! that change each time. Harmony has no web view, so it serves a page with
 //! the challenge on this machine's loopback address and opens it in the
 //! browser. The page tells hCaptcha it's on discord.com, as hCaptcha's
 //! mobile SDKs name their host, and posts the solution back. The request is
@@ -237,7 +237,7 @@ fn page(captcha: &Captcha) -> String {
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width">
-<title>Link Discord to Yapfast</title>
+<title>Link Discord to Harmony</title>
 <style>
   body {{ margin: 0; min-height: 100vh; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 16px;
@@ -245,7 +245,7 @@ fn page(captcha: &Captcha) -> String {
   h1 {{ font-size: 20px; margin: 0; }}
   p {{ margin: 0; color: #b5bac1; }}
 </style>
-<h1>Link Discord to Yapfast</h1>
+<h1>Link Discord to Harmony</h1>
 <p id="note">Discord wants to check you're a person before it links your account.</p>
 <div id="captcha"></div>
 <script>
@@ -257,14 +257,14 @@ fn page(captcha: &Captcha) -> String {
     if (rqdata) hcaptcha.setData(id, {{ rqdata }});
   }}
   async function solved(solution) {{
-    note.textContent = "Sending it to Yapfast...";
+    note.textContent = "Sending it to Harmony...";
     try {{
       const answer = await fetch(location.pathname, {{ method: "POST", body: solution }});
       note.textContent = answer.ok
-        ? "Done. You can close this page and go back to Yapfast."
-        : "Yapfast didn't take it. Start linking again in Yapfast.";
+        ? "Done. You can close this page and go back to Harmony."
+        : "Harmony didn't take it. Start linking again in Harmony.";
     }} catch {{
-      note.textContent = "Yapfast stopped waiting. Start linking again in Yapfast.";
+      note.textContent = "Harmony stopped waiting. Start linking again in Harmony.";
     }}
   }}
 </script>

@@ -114,7 +114,7 @@ finally:
     keep_shots()
     (args.output / 'results.json').write_text(json.dumps({
         'recorded_on': time.strftime('%Y-%m-%d'),
-        'binary': str(ROOT / 'target/measure/yapfast'),
+        'binary': str(ROOT / 'target/measure/Harmony'),
         'os': f'{platform.system()} {platform.release()}', 'machine': platform.machine(),
         'isolation': 'scripts/ui-session: private headless Weston and PulseAudio',
         'remote_load': f'testing/fake_discord.ts; Bob, Carol and Dave film {args.camera.name} at 30 frames '

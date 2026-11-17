@@ -6,6 +6,8 @@
 #![cfg_attr(not(any(feature = "matrix", feature = "discord")), allow(dead_code))]
 
 use anyhow::Context;
+#[cfg(any(windows, target_os = "linux", test))]
+mod data_directory;
 /// The Discord protocol, for clients that hand the application Discord's
 /// state themselves, as the UI's tests do.
 #[cfg(feature = "discord")]
@@ -14,6 +16,7 @@ pub use yapfast_discord;
 pub mod appearance;
 pub mod application;
 mod audio_io;
+pub use audio_io::set_windows_effects;
 pub mod backend;
 pub mod blocks;
 #[cfg(feature = "matrix")]
@@ -92,6 +95,9 @@ pub mod video_player;
 pub mod voice;
 #[cfg(feature = "matrix")]
 pub mod voice_demo;
+#[cfg(feature = "discord")]
+mod voice_message;
+pub mod voice_roster;
 pub mod volume;
 
 /// Install the TLS provider before starting Matrix or calling services.
@@ -101,11 +107,32 @@ pub fn init_tls() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("could not initialize the TLS provider"))
 }
 
-/// Where Yapfast keeps its sessions and local settings unless given --data-dir.
+/// Where Harmony keeps sessions and local settings unless given --data-dir.
+/// This selects a path only: it never moves stores or credential entries.
 pub fn default_directory() -> anyhow::Result<std::path::PathBuf> {
-    directories::ProjectDirs::from("io.github", "yapfast", "Yapfast")
-        .map(|dirs| dirs.data_local_dir().to_owned())
-        .context("could not find an application data directory; pass --data-dir")
+    #[cfg(windows)]
+    {
+        directories::BaseDirs::new()
+            .map(|dirs| data_directory::windows(dirs.data_local_dir()))
+            .context("could not find an application data directory; pass --data-dir")
+    }
+    #[cfg(not(windows))]
+    {
+        let preferred = directories::ProjectDirs::from("io.github", "TimeShallHalt", "Harmony")
+            .map(|dirs| dirs.data_local_dir().to_owned())
+            .context("could not find an application data directory; pass --data-dir")?;
+        #[cfg(target_os = "linux")]
+        {
+            // A bounded compatibility lookup for installations predating the
+            // Harmony identity. Credential namespaces deliberately stay stable.
+            let legacy = directories::ProjectDirs::from("io.github", "yapfast", "Yapfast")
+                .map(|dirs| dirs.data_local_dir().to_owned());
+            data_directory::preferred_or_legacy(preferred, legacy)
+                .context("could not inspect the Harmony data directory; pass --data-dir")
+        }
+        #[cfg(not(target_os = "linux"))]
+        Ok(preferred)
+    }
 }
 
 /// Keeps the cookies Discord sets, and the account as last seen, in `root`

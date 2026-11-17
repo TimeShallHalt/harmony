@@ -1,28 +1,74 @@
-#!/usr/bin/env bash
-# Sets Yapfast's version in Cargo.toml and Cargo.lock, as the nightly release
-# does before building: `scripts/set-version 0.2.0-nightly.20261020.5`.
-# The app, the packages' names and SOURCE.txt's release link all take it. A
-# stable version also goes into the Arch PKGBUILD, which builds its tag, and
-# into the metainfo's releases, dated today: `scripts/set-version 0.2.0`
-# before committing and tagging v0.2.0. The README names no version, so
-# nothing else needs changing.
-set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-version=${1:?usage: scripts/set-version VERSION}
-# Cargo takes only SemVer; a prerelease's numeric parts can't start with 0.
-number='(0|[1-9][0-9]*)' part='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
-if ! [[ $version =~ ^$number\.$number\.$number(-$part(\.$part)*)?$ ]]; then
-  echo "scripts/set-version: $version isn't a SemVer version" >&2
-  exit 2
-fi
-# The package's version is the manifest's first; the lockfile's follows its name.
-sed -i "0,/^version = /s/^version = .*/version = \"$version\"/" Cargo.toml
-sed -i "/^name = \"yapfast\"$/{n;s/^version = .*/version = \"$version\"/}" Cargo.lock
-# A pkgver can't hold a prerelease's "-", and nightlies don't build from a tag.
-if [[ $version != *-* ]]; then
-  sed -i -e "s/^pkgver=.*/pkgver=$version/" -e "s/^pkgrel=.*/pkgrel=1/" packaging/arch/PKGBUILD
-  metainfo=packaging/linux/io.github.yapfast.Yapfast.metainfo.xml
-  if ! grep -q "<release version=\"$version\"" "$metainfo"; then
-    sed -i "s|^  <releases>$|&\n    <release version=\"$version\" date=\"$(date +%F)\"/>|" "$metainfo"
-  fi
-fi
+#!/usr/bin/env python3
+"""Set Harmony's SemVer and synchronize native packaging identities.
+
+Usage: scripts/set-version VERSION
+Does not commit, tag, publish or activate an updater. All edits are validated
+before writing; stable release metadata is dated when this command is run.
+"""
+from datetime import date
+from pathlib import Path
+import re
+import sys
+
+NUMBER = r"(0|[1-9][0-9]*)"
+PART = r"(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+SEMVER = re.compile(rf"{NUMBER}\.{NUMBER}\.{NUMBER}(-{PART}(\.{PART})*)?", re.ASCII)
+
+
+def replace_one(text, pattern, replacement):
+    value, count = re.subn(pattern, replacement, text, flags=re.MULTILINE)
+    if count != 1:
+        raise ValueError(f"Expected exactly one version field for {pattern!r}; got {count}")
+    return value
+
+
+def plan(root, version, day):
+    if SEMVER.fullmatch(version) is None:
+        raise ValueError(f"{version!r} is not a canonical supported SemVer version")
+    numeric = version.split("-", 1)[0].split(".")
+    if any(int(n) > 65535 for n in numeric):
+        raise ValueError("Windows resource version components must fit unsigned 16-bit values")
+    files = {}
+    for relative in ("Cargo.toml", "Cargo.lock", "packaging/windows/harmony.rc"):
+        files[relative] = (root / relative).read_text(encoding="utf-8")
+    files["Cargo.toml"] = replace_one(files["Cargo.toml"], r'(^version = ")[^"]+("$)', lambda m: m[1] + version + m[2])
+    files["Cargo.lock"] = replace_one(files["Cargo.lock"], r'(^name = "yapfast"\nversion = ")[^"]+("$)', lambda m: m[1] + version + m[2])
+    rc = files["packaging/windows/harmony.rc"]
+    for key in ("FILEVERSION", "PRODUCTVERSION"):
+        rc = replace_one(rc, rf"^{key} [0-9,]+$", f"{key} {','.join(numeric)},0")
+    for key in ("FileVersion", "ProductVersion"):
+        rc = replace_one(rc, rf'(VALUE "{key}", ")[^"\\]+', lambda m: m[1] + version)
+    files["packaging/windows/harmony.rc"] = rc
+    if "-" not in version:
+        arch = "packaging/arch/PKGBUILD"
+        files[arch] = replace_one((root / arch).read_text(encoding="utf-8"), r"^pkgver=.*$", f"pkgver={version}")
+        files[arch] = replace_one(files[arch], r"^pkgrel=.*$", "pkgrel=1")
+        name = "packaging/linux/io.github.TimeShallHalt.Harmony.metainfo.xml"
+        xml = (root / name).read_text(encoding="utf-8")
+        if f'<release version="{version}"' not in xml:
+            release = f'    <release version="{version}" date="{day}"/>'
+            if "<releases>" in xml:
+                xml = xml.replace("<releases>", "<releases>\n" + release, 1)
+            else:
+                xml = xml.replace("</component>", "  <releases>\n" + release + "\n  </releases>\n</component>", 1)
+        files[name] = xml
+    return files
+
+
+def main():
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: scripts/set-version VERSION")
+    root = Path(__file__).resolve().parents[1]
+    try:
+        changes = plan(root, sys.argv[1], date.today().isoformat())
+    except (ValueError, OSError) as error:
+        raise SystemExit(f"scripts/set-version: {error}") from error
+    for relative, contents in changes.items():
+        path = root / relative
+        if path.read_text(encoding="utf-8") != contents:
+            path.write_text(contents, encoding="utf-8", newline="\n")
+    print(f"Harmony {sys.argv[1]}: synchronized {len(changes)} source/packaging files")
+
+
+if __name__ == "__main__":
+    main()

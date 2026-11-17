@@ -40,7 +40,7 @@ const BITRATE: i32 = 64_000;
 /// one playing a watched stream, and Discord's own client and those built
 /// on it.
 fn is_discord_client(name: &str) -> bool {
-    if name == "Yapfast" {
+    if matches!(name, "Harmony" | "Yapfast") {
         return true;
     }
     let name = name.to_lowercase();
@@ -435,6 +435,7 @@ mod tests {
     #[test]
     fn leaves_out_other_discord_clients() {
         for client in [
+            "Harmony",
             "Yapfast",
             "Discord",
             "DiscordCanary",

@@ -10,7 +10,7 @@
 # distribution it runs on.
 { pkgs, yapfast }:
 let
-  id = "io.github.yapfast.Yapfast";
+  id = "io.github.TimeShallHalt.Harmony";
   native = import ./native.nix { inherit pkgs; };
   # The newest glibc and libstdc++ the binary may ask for: Ubuntu 24.04's and
   # Fedora 40's. Nix builds against a newer glibc, so a nixpkgs update can
@@ -29,8 +29,8 @@ let
     url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
     sha256 = "0396xi3km1yd0z4329lbjxmv82ddc40gd0x8hca0ylcj7i28pjig";
   };
-  # Where AppImageUpdate and the AppImage managers look for a newer release.
-  updateInformation = "gh-releases-zsync|yapfast|yapfast|latest|Yapfast-*-x86_64.AppImage.zsync";
+  # Harmony has no upstream update channel or AppImageUpdate feed.
+  updateInformation = "";
   # What scripts/package-linux.py adds to the release's BUILD.json.
   build = builtins.toJSON {
     glibc_floor = glibcFloor;
@@ -43,7 +43,7 @@ let
     update_information = updateInformation;
   };
 in
-pkgs.runCommand "yapfast-appdir-${yapfast.version}" {
+pkgs.runCommand "harmony-appdir-${yapfast.version}" {
   nativeBuildInputs = with pkgs; [ patchelf binutils librsvg ];
   inherit (yapfast) version;
   inherit updateInformation build;
@@ -53,24 +53,24 @@ pkgs.runCommand "yapfast-appdir-${yapfast.version}" {
   printf '%s\n' "$build" > "$out/build.json"
   mkdir -p "$appdir/usr/bin"
   # wrapProgram's wrapper sets Nix's library path; the binary itself is beside it.
-  cp ${yapfast}/bin/.yapfast-wrapped "$appdir/usr/bin/yapfast"
-  chmod u+w "$appdir/usr/bin/yapfast"
-  patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$appdir/usr/bin/yapfast"
+  cp ${yapfast}/bin/.harmony-wrapped "$appdir/usr/bin/harmony"
+  chmod u+w "$appdir/usr/bin/harmony"
+  patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$appdir/usr/bin/harmony"
 
-  needed=$(readelf -d "$appdir/usr/bin/yapfast" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
+  needed=$(readelf -d "$appdir/usr/bin/harmony" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
   for library in $needed; do
     case " ${toString hostLibraries} " in
       *" $library "*) ;;
-      *) echo "yapfast links $library, which not every distribution has; bundle it or load it at runtime" >&2; exit 1 ;;
+      *) echo "harmony links $library, which not every distribution has; bundle it or load it at runtime" >&2; exit 1 ;;
     esac
   done
   newest() {
-    readelf -V "$appdir/usr/bin/yapfast" | grep -o "Name: $1_[0-9.]*" | sed "s/Name: $1_//" | sort -uV | tail -1
+    readelf -V "$appdir/usr/bin/harmony" | grep -o "Name: $1_[0-9.]*" | sed "s/Name: $1_//" | sort -uV | tail -1
   }
   for pair in GLIBC:${glibcFloor} GLIBCXX:${libstdcxxFloor}; do
     name=''${pair%%:*} floor=''${pair#*:} asked=$(newest "''${pair%%:*}")
     if [ "$(printf '%s\n' "$asked" "$floor" | sort -V | tail -1)" != "$floor" ]; then
-      echo "yapfast asks for $name $asked, newer than the $floor the AppImage promises" >&2
+      echo "harmony asks for $name $asked, newer than the $floor the AppImage promises" >&2
       exit 1
     fi
   done
@@ -78,16 +78,16 @@ pkgs.runCommand "yapfast-appdir-${yapfast.version}" {
   share=${yapfast}/share
   cp -r "$share" "$appdir/usr/share"
   chmod -R u+w "$appdir/usr/share"
-  ln -s usr/bin/yapfast "$appdir/AppRun"
+  ln -s usr/bin/harmony "$appdir/AppRun"
   ln -s usr/share/applications/${id}.desktop "$appdir/${id}.desktop"
   ln -s usr/share/icons/hicolor/scalable/apps/${id}.svg "$appdir/${id}.svg"
   # File managers show .DirIcon as the AppImage's thumbnail, and want a PNG.
   rsvg-convert -w 256 -h 256 "$share/icons/hicolor/scalable/apps/${id}.svg" -o "$appdir/.DirIcon"
 
-  # The runtime keeps a section for the update information.
+  # Explicitly zero the runtime's update section, even if a future pinned
+  # runtime carries defaults. Never embed upstream release/download URLs.
   install -m755 ${runtime} "$out/runtime"
   read -r offset size < <(readelf -SW "$out/runtime" |
     sed -n 's/^ *\[ *[0-9]*\] //p' | awk '$1 == ".upd_info" { print $4, $5 }')
-  [ ''${#updateInformation} -lt $((16#$size)) ] || { echo "update information too long" >&2; exit 1; }
-  printf '%s' "$updateInformation" | dd of="$out/runtime" bs=1 seek=$((16#$offset)) conv=notrunc status=none
+  dd if=/dev/zero of="$out/runtime" bs=1 seek=$((16#$offset)) count=$((16#$size)) conv=notrunc status=none
 ''

@@ -4,10 +4,10 @@
 //! details it needs to connect.
 //!
 //! A lost connection resumes the session where it can, as Discord asks of
-//! every client: Yapfast connects to the session's resume address, sends RESUME
+//! every client: Harmony connects to the session's resume address, sends RESUME
 //! with the last sequence number, and Discord replays what was missed. A new
 //! IDENTIFY, which Discord limits, follows only when Discord won't resume,
-//! and [`Reconnects`] spaces those out and caps them. Yapfast also keeps under
+//! and [`Reconnects`] spaces those out and caps them. Harmony also keeps under
 //! Discord's limit on what a connection sends, in the connection's own task,
 //! so commands held back don't hold back the heartbeats.
 
@@ -61,6 +61,7 @@ const STREAM_WATCH: u64 = 20;
 const STREAM_SET_PAUSED: u64 = 22;
 const REQUEST_SOUNDBOARD_SOUNDS: u64 = 31;
 const GUILD_SUBSCRIPTIONS_BULK: u64 = 37;
+const REQUEST_CHANNEL_INFO: u64 = 43;
 
 /// Discord closed the gateway, with its close code.
 #[derive(Debug)]
@@ -110,7 +111,7 @@ impl std::fmt::Display for Invalidated {
 
 impl std::error::Error for Invalidated {}
 
-/// Discord allows 120 gateway commands a minute on a connection; Yapfast keeps
+/// Discord allows 120 gateway commands a minute on a connection; Harmony keeps
 /// a margin for heartbeats.
 const SEND_LIMIT: usize = 110;
 const SEND_WINDOW: Duration = Duration::from_secs(60);
@@ -128,10 +129,10 @@ fn presence_window() -> Duration {
         Duration::from_secs(20)
     }
 }
-/// The longest Yapfast holds back member requests for a server when Discord
+/// The longest Harmony holds back member requests for a server when Discord
 /// asks it to wait.
 const MEMBERS_HELD: Duration = Duration::from_secs(5 * 60);
-/// How many times a lost connection tries to resume before Yapfast identifies
+/// How many times a lost connection tries to resume before Harmony identifies
 /// again.
 const RESUME_TRIES: u32 = 3;
 /// A resume that didn't hold waits this long, doubled with each try so far,
@@ -141,7 +142,7 @@ const RESUME_WAIT: Duration = Duration::from_secs(1);
 #[cfg(test)]
 const RESUME_WAIT: Duration = Duration::from_millis(10);
 /// How long opening a connection, Discord's HELLO, or sending may take before
-/// Yapfast gives up on the connection.
+/// Harmony gives up on the connection.
 #[cfg(not(test))]
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
@@ -153,18 +154,18 @@ const FIRST_RETRY: Duration = Duration::from_secs(2);
 const LAST_RETRY: Duration = Duration::from_secs(60);
 /// A session up this long counts as working, and the wait starts over.
 const STABLE: Duration = Duration::from_secs(60);
-/// The most IDENTIFYs Yapfast sends in [`IDENTIFY_WINDOW`]. Discord flags
-/// accounts that keep identifying, so Yapfast stops rather than go past this.
+/// The most IDENTIFYs Harmony sends in [`IDENTIFY_WINDOW`]. Discord flags
+/// accounts that keep identifying, so Harmony stops rather than go past this.
 const IDENTIFY_LIMIT: usize = 10;
 const IDENTIFY_WINDOW: Duration = Duration::from_secs(60 * 60);
 
-/// Yapfast sent [`IDENTIFY_LIMIT`] IDENTIFYs within the hour, and stopped.
+/// Harmony sent [`IDENTIFY_LIMIT`] IDENTIFYs within the hour, and stopped.
 #[derive(Debug)]
 pub struct TooManyIdentifies;
 
 impl std::fmt::Display for TooManyIdentifies {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Yapfast started too many Discord gateway sessions within the hour")
+        f.write_str("Harmony started too many Discord gateway sessions within the hour")
     }
 }
 
@@ -245,7 +246,7 @@ pub struct Gateway {
     /// Dispatched events, and last, the error that ended the session.
     events: mpsc::UnboundedReceiver<Result<Dispatch>>,
     task: JoinHandle<()>,
-    /// Servers whose members Discord said Yapfast asked about too often, with
+    /// Servers whose members Discord said Harmony asked about too often, with
     /// when it may ask again.
     members_held: HashMap<String, Instant>,
 }
@@ -298,6 +299,13 @@ impl Gateway {
         };
         let limiter = Limiter::new(SEND_LIMIT, SEND_WINDOW);
         Self::connect_to(&url, token, presence, reconnects, limiter).await
+    }
+
+    /// Connects as [`Self::connect`] does, to a fake Discord at `url`.
+    #[cfg(test)]
+    pub(crate) async fn connect_at(url: &str, presence: Value) -> Result<(Self, Value)> {
+        let limiter = Limiter::new(SEND_LIMIT, SEND_WINDOW);
+        Self::connect_to(url, "token", presence, &mut Reconnects::default(), limiter).await
     }
 
     async fn connect_to(
@@ -462,7 +470,20 @@ impl Gateway {
             .await
     }
 
-    /// Whether Discord asked Yapfast to wait before asking about `guild_id`'s
+    /// Asks when the session of each of a server's busy voice channels
+    /// started, as the web client does when the server opens. Discord
+    /// answers with CHANNEL_INFO, and says when one starts or ends with
+    /// VOICE_CHANNEL_START_TIME_UPDATE. It asks for the channels' statuses
+    /// too, unused, as the web client always asks for both.
+    pub async fn request_channel_info(&mut self, guild_id: &str) -> Result<()> {
+        self.send(
+            REQUEST_CHANNEL_INFO,
+            json!({"guild_id": guild_id, "fields": ["status", "voice_start_time"]}),
+        )
+        .await
+    }
+
+    /// Whether Discord asked Harmony to wait before asking about `guild_id`'s
     /// members again; requests until then aren't sent.
     pub fn members_held(&mut self, guild_id: &str) -> bool {
         let now = Instant::now();
@@ -525,7 +546,7 @@ impl Gateway {
     }
 
     /// Discord refused a command for being sent too often. Only member
-    /// requests are limited this way, per server; Yapfast holds them back for
+    /// requests are limited this way, per server; Harmony holds them back for
     /// as long as Discord asks.
     fn rate_limited(&mut self, data: &Value) {
         let opcode = data["opcode"].as_u64();
@@ -533,7 +554,7 @@ impl Gateway {
         tracing::warn!(
             ?opcode,
             wait,
-            "Discord's gateway asked Yapfast to slow down"
+            "Discord's gateway asked Harmony to slow down"
         );
         if opcode != Some(REQUEST_GUILD_MEMBERS) {
             return;
@@ -1071,8 +1092,8 @@ mod tests {
             loop {
                 let message = timeout(Duration::from_secs(5), self.socket.next())
                     .await
-                    .expect("Yapfast sent nothing")
-                    .expect("Yapfast closed the connection")
+                    .expect("Harmony sent nothing")
+                    .expect("Harmony closed the connection")
                     .unwrap();
                 let Message::Text(text) = message else {
                     continue;
@@ -1298,7 +1319,7 @@ mod tests {
         peer.dispatch("TYPING_START", json!({})).await;
         assert_eq!(next(&mut gateway).await.unwrap().event, Event::TypingStart);
 
-        // An event Yapfast doesn't know passes through by name, with its data.
+        // An event Harmony doesn't know passes through by name, with its data.
         peer.dispatch("GUILD_AUDIT_LOG_ENTRY_CREATE", json!({"id": "7"}))
             .await;
         let other = next(&mut gateway).await.unwrap();
@@ -1320,7 +1341,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(heartbeat.to_text().unwrap().contains(r#""op":1"#));
-        // No acknowledgement: by the next one, Yapfast connects again.
+        // No acknowledgement: by the next one, Harmony connects again.
         let mut peer = discord.accept(SLOW_HEARTBEAT).await;
         assert_eq!(peer.command().await["op"], RESUME);
     }
@@ -1397,7 +1418,7 @@ mod tests {
             reconnects.identify(now).unwrap();
         }
         let accept = async {
-            // Yapfast opens the connection, then sends nothing.
+            // Harmony opens the connection, then sends nothing.
             let mut peer = discord.accept(SLOW_HEARTBEAT).await;
             timeout(Duration::from_millis(200), peer.socket.next()).await
         };

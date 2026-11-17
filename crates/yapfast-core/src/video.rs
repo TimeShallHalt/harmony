@@ -1,6 +1,6 @@
 //! Video files, through native/video.c: MP4, MOV and WebM, with H264, VP8,
 //! VP9 or AV1 pictures and AAC, Opus, MP3, Vorbis or FLAC sound. Tenor and
-//! Giphy GIFs reach Discord as MP4s, which Yapfast decodes into an animation as
+//! Giphy GIFs reach Discord as MP4s, which Harmony decodes into an animation as
 //! it does a GIF's frames; [`crate::video_player`] plays the rest.
 
 use std::{
@@ -157,7 +157,7 @@ pub struct Video<'a> {
     pub height: u32,
     /// How long it plays, when the file says.
     pub duration_ms: Option<u64>,
-    /// Its sound's sample rate and channels, when it has sound and Yapfast was
+    /// Its sound's sample rate and channels, when it has sound and Harmony was
     /// asked for it.
     pub sound: Option<(u32, usize)>,
 }
@@ -167,7 +167,7 @@ pub struct Video<'a> {
 unsafe impl Send for Video<'_> {}
 
 impl<'a> Video<'a> {
-    /// Opens the file's first video, when it has one Yapfast can decode, and
+    /// Opens the file's first video, when it has one Harmony can decode, and
     /// with `sound`, its sound.
     pub fn open(source: impl Source + 'a, sound: bool) -> Option<Self> {
         let threads = std::thread::available_parallelism().map_or(1, |cores| cores.get().min(4));
@@ -240,7 +240,7 @@ impl<'a> Video<'a> {
             2 => Ok(Some(Next::Sound(time))),
             0 => Ok(Some(Next::End)),
             3 => Ok(None),
-            -2 => bail!("the video's pictures are in a format Yapfast doesn't show"),
+            -2 => bail!("the video's pictures are in a format Harmony doesn't show"),
             _ => bail!("could not decode the video ({got})"),
         }
     }
@@ -459,6 +459,18 @@ mod tests {
             assert!(picture.rgba.chunks_exact(4).all(|pixel| pixel[3] == 255));
         }
         assert!(decode_animation(b"\0\0\0\x20ftypisom not really", 32, 32).is_none());
+    }
+
+    #[test]
+    fn keeps_a_webms_transparency() {
+        // The left half of each picture is see-through, the right half solid.
+        let data = fixture("gif-vp9-alpha.webm");
+        let picture = crate::chat::decode_picture(&data, 32, 18).unwrap();
+        for frame in picture.frames() {
+            let alpha = |x: usize, y: usize| frame[(y * 32 + x) * 4 + 3];
+            assert!(alpha(4, 9) < 8, "left {}", alpha(4, 9));
+            assert!(alpha(28, 9) > 247, "right {}", alpha(28, 9));
+        }
     }
 
     #[test]

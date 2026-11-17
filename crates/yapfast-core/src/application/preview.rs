@@ -196,6 +196,7 @@ pub(super) fn preview_room(id: &str, name: &str, direct: bool, members: u64) -> 
         locked: false,
         join_locked: false,
         read_only: false,
+        reacts: Reacts::Any,
         slowed: false,
         timed_out_until: None,
         category: String::new(),
@@ -206,17 +207,22 @@ pub(super) fn preview_room(id: &str, name: &str, direct: bool, members: u64) -> 
         ringing: vec![],
         incoming: false,
         avatar: None,
+        decoration: None,
+        nameplate: None,
+        style: None,
         upload_limit: 50 * 1024 * 1024,
         presence: None,
         activity: None,
         activities: Default::default(),
         parent: None,
         forum: false,
+        mark: Default::default(),
         unlisted: false,
         tag: None,
         official: false,
         empty: false,
         preview: None,
+        voice_started: None,
     }
 }
 
@@ -240,11 +246,15 @@ pub(super) fn preview_members(room: &str) -> Vec<ChatMember> {
     let mut members: Vec<_> = people
         .iter()
         .map(|&(name, role)| ChatMember {
+            bot: false,
             id: format!("@{}:preview.local", name.to_lowercase()),
             name: name.into(),
             username: None,
             role,
             avatar: None,
+            decoration: None,
+            nameplate: None,
+            style: None,
             group: None,
             presence: None,
             color: None,
@@ -255,6 +265,7 @@ pub(super) fn preview_members(room: &str) -> Vec<ChatMember> {
             tag: None,
             group_icon: None,
             role_icon: None,
+            boosting_since: None,
         })
         .collect();
     chat::sort_members(&mut members);

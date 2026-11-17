@@ -3,11 +3,13 @@ import { SettingsNavigation } from "yapfast/settings-nav.slint";
 import { ClientStyle } from "yapfast/style.slint";
 import { ComboBox } from "std-widgets.slint";
 import { ScrollView } from "scrollview.slint";
-import { Theme, Middle, Label, Tip, Popup } from "theme.slint";
-import { ActionButton, IconButton, Avatar, SensitivitySlider, VolumeSlider, TextField, StatusText } from "controls.slint";
+import { Theme, Middle, Label, Tip, Popup, Looks } from "theme.slint";
+import { ActionButton, IconButton, Avatar, SensitivitySlider, VolumeSlider, TextField, StatusText, AccountLook } from "controls.slint";
 import { DiscordLinkPanel } from "discord.slint";
 import { ChannelRow } from "rail.slint";
 import { Soundboard, SoundRow } from "voice.slint";
+
+import { NewTag, NewTags } from "yapfast/new-tags.slint";
 
 // Settings: a section's title, a group's heading, a switch with what it does, and
 // a row of exclusive choices with the current one raised.
@@ -28,6 +30,9 @@ export component SettingsSwitch inherits Rectangle {
     in property <bool> enabled: true;
     /// Why it can't change, shown while the pointer is on the switch.
     in property <string> locked-tip;
+    /// The key under which new_tags.rs lists this setting, if it is a new one:
+    /// a NEW tag follows its name until the page has been seen.
+    in property <string> new-key;
     /// Its owner sets `checked`, from what a flip asks for: the switch only
     /// says it was flipped, so a binding to it stays.
     in property <bool> controlled;
@@ -56,6 +61,7 @@ export component SettingsSwitch inherits Rectangle {
                     text: root.text; color: root.enabled ? Theme.text : Theme.muted; font-size: 15px;
                     vertical-alignment: center; wrap: word-wrap;
                 }
+                if root.new-key != "" && NewTags.is-new(root.new-key, NewTags.revision): Middle { NewTag { } }
                 // Discord's lock after the title, with why on hover.
                 if !root.enabled && root.locked-tip != "": Middle {
                     Image {
@@ -187,9 +193,11 @@ export component UnsavedBar inherits Rectangle {
         animate x { duration: 50ms; }
         width: root.width;
         padding: 12px; padding-left: root.pad; spacing: 8px;
+        // It goes onto two lines where the bar is narrow, as in the
+        // profile editor's middle column.
         Middle {
             Text {
-                text: "Careful — you have unsaved changes!"; font-size: 14px; font-weight: 600; overflow: elide;
+                text: "Careful — you have unsaved changes!"; font-size: 14px; font-weight: 600; wrap: word-wrap;
                 color: root.red ? Theme.on-danger : Theme.text;
             }
         }
@@ -228,6 +236,8 @@ export component SettingsFrame inherits Rectangle {
     in property <bool> with-discord;
     in property <bool> may-edit-profile;
     callback edit-profile;
+    /// Puts text on the clipboard, for the version under the sections.
+    callback copy-text(string);
     /// Room below the section, for a bar over its bottom.
     in property <length> bottom: 56px;
     /// The page fills the frame's height instead of scrolling in it, for
@@ -259,6 +269,7 @@ export component SettingsFrame inherits Rectangle {
                 may-edit-profile: root.may-edit-profile;
                 chose(id) => { root.chose(id); }
                 edit-profile => { root.edit-profile(); }
+                copy-text(text) => { root.copy-text(text); }
             }
             if !root.discord-layout: Rectangle {
                 background: Theme.sidebar; horizontal-stretch: 0; min-width: 232px;
@@ -354,7 +365,7 @@ export component SettingsCard inherits Rectangle {
 export component SettingsScreen inherits Rectangle {
     /// The section showing: 0 account, 1 voice and video, 2 messages,
     /// 3 notifications, 4 Discord, 5 sounds, 6 advanced, 7 appearance,
-    /// 8 game activity, 9 Harmony About.
+    /// 8 game activity, 9 about, 10 keybinds.
     in-out property <int> settings-section;
     in property <bool> discord-build;
     in property <bool> preview;
@@ -368,29 +379,32 @@ export component SettingsScreen inherits Rectangle {
     callback close;
     callback edit-profile;
     callback refresh-devices;
+    callback copy-text(string);
     property <[SettingsRow]> with-discord: [
         { heading: true, text: "SETTINGS" },
         { text: "My account", icon: @image-url("icons/user.svg"), id: 0 },
         { text: "Appearance", icon: @image-url("icons/palette.svg"), id: 7 },
         { text: "Voice & video", icon: @image-url("icons/headphones.svg"), id: 1 },
+        { text: "Keybinds", icon: @image-url("icons/keyboard.svg"), id: 10 },
         { text: "Messages", icon: @image-url("icons/message-circle.svg"), id: 2 },
         { text: "Notifications", icon: @image-url("icons/bell.svg"), id: 3 },
         { text: "Sounds", icon: @image-url("icons/volume-2.svg"), id: 5 },
         { text: "Discord", icon: @image-url("icons/discord.svg"), id: 4 },
         { text: "Game activity", icon: @image-url("icons/play.svg"), id: 8 },
         { text: "Advanced", icon: @image-url("icons/settings.svg"), id: 6 },
-        { text: "About", icon: @image-url("icons/id-filled.svg"), id: 9 },
+        { text: "About", icon: @image-url("icons/help-circle.svg"), id: 9 },
     ];
     property <[SettingsRow]> without-discord: [
         { heading: true, text: "SETTINGS" },
         { text: "My account", icon: @image-url("icons/user.svg"), id: 0 },
         { text: "Appearance", icon: @image-url("icons/palette.svg"), id: 7 },
         { text: "Voice & video", icon: @image-url("icons/headphones.svg"), id: 1 },
+        { text: "Keybinds", icon: @image-url("icons/keyboard.svg"), id: 10 },
         { text: "Messages", icon: @image-url("icons/message-circle.svg"), id: 2 },
         { text: "Notifications", icon: @image-url("icons/bell.svg"), id: 3 },
         { text: "Sounds", icon: @image-url("icons/volume-2.svg"), id: 5 },
         { text: "Advanced", icon: @image-url("icons/settings.svg"), id: 6 },
-        { text: "About", icon: @image-url("icons/id-filled.svg"), id: 9 },
+        { text: "About", icon: @image-url("icons/help-circle.svg"), id: 9 },
     ];
     SettingsCard {
         motion: root.motion;
@@ -401,12 +415,14 @@ export component SettingsScreen inherits Rectangle {
             page-title: root.settings-section == 0 ? "My Account" : root.settings-section == 1 ? "Voice & Video"
                 : root.settings-section == 2 ? "Messages" : root.settings-section == 3 ? "Notifications"
                 : root.settings-section == 4 ? "Discord" : root.settings-section == 5 ? "Sounds"
-                : root.settings-section == 6 ? "Advanced" : root.settings-section == 7 ? "Appearance" : root.settings-section == 9 ? "About" : "Game Activity";
+                : root.settings-section == 6 ? "Advanced" : root.settings-section == 7 ? "Appearance"
+                : root.settings-section == 9 ? "About" : root.settings-section == 10 ? "Keybinds" : "Game Activity";
             account-name: root.account-name; account-initial: root.account-initial;
             account-tint: root.account-tint; account-picture: root.account-picture;
             with-discord: root.discord-build && !root.preview;
             may-edit-profile: root.may-edit-profile;
             edit-profile => { root.edit-profile(); }
+            copy-text(text) => { root.copy-text(text); }
             rows: root.discord-build && !root.preview ? root.with-discord : root.without-discord;
             selected: root.settings-section;
             chose(id) => {
@@ -443,7 +459,7 @@ export component AccountSettings inherits VerticalLayout {
         background: Theme.sidebar; border-radius: 8px;
         HorizontalLayout {
             padding: 16px; spacing: 16px;
-            Middle { Avatar { size: 64px; initial: root.account-initial; tint: root.account-tint; picture: root.account-picture; } }
+            Middle { Avatar { size: 64px; initial: root.account-initial; tint: root.account-tint; picture: root.account-picture; decoration-url: AccountLook.decoration-url; } }
             VerticalLayout {
                 alignment: center; spacing: 2px; horizontal-stretch: 1;
                 Text { text: root.account-name; color: Theme.text; font-size: 20px; font-weight: 700; overflow: elide; }
@@ -475,6 +491,103 @@ export component AccountSettings inherits VerticalLayout {
     }
 }
 
+// A keybind's keys and the button that records them: while recording, the
+// keys pressed so far.
+component KeyRecorder inherits HorizontalLayout {
+    in property <string> label;
+    /// The keybind's keys, empty while there are none.
+    in property <string> keys;
+    in property <bool> recording;
+    in property <string> recorded-keys;
+    in property <length> box-width: 200px;
+    callback record(bool);
+    spacing: 8px; alignment: start;
+    Rectangle {
+        width: root.box-width; height: 36px; border-radius: 8px; background: Theme.sunken;
+        border-width: root.recording ? 2px : 0px; border-color: Theme.accent;
+        accessible-role: text;
+        accessible-label: root.label;
+        accessible-value: root.recording ? root.recorded-keys : root.keys != "" ? root.keys : "No keybind set";
+        Text {
+            x: 12px; width: parent.width - 24px; overflow: elide; font-size: 14px;
+            text: root.recording ? (root.recorded-keys != "" ? root.recorded-keys : "Press a key...")
+                : root.keys != "" ? root.keys : "No keybind set";
+            color: root.keys != "" && !root.recording ? Theme.text : Theme.muted;
+            font-weight: root.keys != "" && !root.recording ? 600 : 400;
+        }
+    }
+    ActionButton {
+        text: root.recording ? "Stop recording" : root.keys == "" ? "Record keybind" : "Edit keybind";
+        danger: root.recording;
+        clicked => { root.record(!root.recording); }
+    }
+}
+
+/// A keybind on the Keybinds page: its action's place in the page's list,
+/// its keys' name or "", what the action does, and what the desktop did with
+/// it, while the desktop runs keybinds.
+export struct KeybindRow { action: int, keys: string, description: string, desktop: string }
+
+// Settings: keybinds, as Discord's Keybinds page.
+export component KeybindSettings inherits VerticalLayout {
+    in property <[KeybindRow]> rows;
+    /// Where keybinds work.
+    in property <string> note;
+    /// The row whose keys are being recorded, or -1, and the keys so far.
+    in property <int> recording: -1;
+    in property <string> recorded-keys;
+    callback add;
+    callback remove(int);
+    callback action-chosen(int, int);
+    /// Starts or stops recording a row's keys.
+    callback record(int, bool);
+    spacing: 16px;
+    HorizontalLayout {
+        spacing: 16px;
+        SettingsTitle { text: "Keybinds"; horizontal-stretch: 1; }
+        Middle { ActionButton { text: "Add a Keybind"; clicked => { root.add(); } } }
+    }
+    Label { text: root.note != "" ? root.note : "Keybinds mute, deafen or talk from any app. Add one, choose what it does, and record its keys."; }
+    for row[index] in root.rows: Rectangle {
+        border-radius: 8px; background: Theme.sunken;
+        accessible-role: groupbox; accessible-label: "Keybind " + (index + 1);
+        VerticalLayout {
+            padding: 16px; spacing: 12px;
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    // As wide as the longest action, so rows line up.
+                    width: 220px; spacing: 8px; alignment: start;
+                    SettingsHeading { text: "ACTION"; }
+                    Picker {
+                        model: ["Unassigned", "Push to Talk (Normal)", "Push to Mute", "Toggle Mute", "Toggle Deafen", "Toggle VAD"];
+                        chosen: row.action; accessible-label: "Action";
+                        selected => { root.action-chosen(index, self.current-index); }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 8px; horizontal-stretch: 1; alignment: start;
+                    SettingsHeading { text: "KEYBIND"; }
+                    KeyRecorder {
+                        label: "Keybind"; keys: row.keys; box-width: 180px;
+                        recording: root.recording == index; recorded-keys: root.recorded-keys;
+                        record(on) => { root.record(index, on); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: start;
+                    IconButton {
+                        icon: @image-url("icons/x.svg"); label: "Remove Keybind"; size: 32px; glyph: 16px;
+                        clicked => { root.remove(index); }
+                    }
+                }
+            }
+            Label { text: row.description; }
+            if row.desktop != "": Label { text: row.desktop; }
+        }
+    }
+}
+
 // Settings: the audio devices and camera, and how calls start and sound.
 export component VoiceSettings inherits VerticalLayout {
     in property <[string]> microphones;
@@ -499,6 +612,10 @@ export component VoiceSettings inherits VerticalLayout {
     in-out property <int> noise-strength;
     /// Discord calls take the room's reverb out of the microphone.
     in-out property <bool> dereverb;
+    /// Windows runs its microphone effects in Discord calls; the switch shows
+    /// where there are any, on Windows.
+    in-out property <bool> windows-effects;
+    in property <bool> windows-effects-choice;
     /// The quietest speech Discord calls send, in dBFS; and the microphone as
     /// the voice gate hears it, refreshed while this shows.
     in-out property <int> sensitivity: -60;
@@ -508,10 +625,11 @@ export component VoiceSettings inherits VerticalLayout {
     in property <string> gate-meter-note;
     /// How calls send the microphone: 0 voice activity, 1 push to talk.
     in-out property <int> input-mode;
-    /// The push-to-talk key's name, empty while there's none, and whether
-    /// the next key pressed becomes it.
+    /// The push-to-talk keybind's name, empty while there's none, and
+    /// whether the keys pressed next become it, and those pressed so far.
     in property <string> talk-key;
     in-out property <bool> talk-recording;
+    in property <string> recorded-keys;
     /// How long the microphone keeps sending after the key comes up, in ms.
     in-out property <int> talk-delay: 20;
     /// Where the key works: in every app, or only in Yapfast and why.
@@ -547,7 +665,7 @@ export component VoiceSettings inherits VerticalLayout {
     callback select-camera(int);
     callback refresh-devices;
     callback preferences-changed;
-    /// Starts or stops recording the push-to-talk key.
+    /// Starts or stops recording the push-to-talk keybind.
     callback record-talk-key(bool);
     spacing: 16px;
     SettingsTitle { text: "Voice & video"; }
@@ -710,6 +828,12 @@ export component VoiceSettings inherits VerticalLayout {
         checked <=> root.dereverb;
         toggled => { root.preferences-changed(); }
     }
+    if root.discord && root.windows-effects-choice: SettingsSwitch {
+        text: "Let Windows process your microphone in Discord calls";
+        description: "Runs the effects Windows and your sound driver add to the microphone, such as their own noise suppression. Off, Harmony skips them, as they can muffle your voice on top of Harmony's. Turn it on if your microphone sounds worse without them, as some laptop microphones can.";
+        checked <=> root.windows-effects;
+        toggled => { root.preferences-changed(); }
+    }
     VerticalLayout {
         spacing: 8px;
         SettingsHeading { text: "INPUT MODE"; }
@@ -726,29 +850,13 @@ export component VoiceSettings inherits VerticalLayout {
     if root.input-mode == 1: VerticalLayout {
         spacing: 8px;
         SettingsHeading { text: "PUSH TO TALK KEYBIND"; }
-        HorizontalLayout {
-            spacing: 8px; alignment: start;
-            Rectangle {
-                width: 200px; height: 36px; border-radius: 8px; background: Theme.sunken;
-                border-width: root.talk-recording ? 2px : 0px; border-color: Theme.accent;
-                accessible-role: text;
-                accessible-label: "Push to talk keybind";
-                accessible-value: root.talk-key != "" ? root.talk-key : "No keybind set";
-                Text {
-                    x: 12px; width: parent.width - 24px; overflow: elide; font-size: 14px;
-                    text: root.talk-recording ? "Press a key..." : root.talk-key != "" ? root.talk-key : "No keybind set";
-                    color: root.talk-key != "" && !root.talk-recording ? Theme.text : Theme.muted;
-                    font-weight: root.talk-key != "" && !root.talk-recording ? 600 : 400;
-                }
-            }
-            ActionButton {
-                text: root.talk-recording ? "Stop recording" : root.talk-key == "" ? "Record keybind" : "Edit keybind";
-                danger: root.talk-recording;
-                clicked => { root.record-talk-key(!root.talk-recording); }
-            }
+        KeyRecorder {
+            label: "Push to talk keybind"; keys: root.talk-key;
+            recording: root.talk-recording; recorded-keys: root.recorded-keys;
+            record(on) => { root.record-talk-key(on); }
         }
         Label {
-            text: root.talk-recording ? "Press the key to hold while you talk. Escape stops without changing it."
+            text: root.talk-recording ? "Press the keys to hold while you talk, then let go. Escape stops without changing it."
                 : root.talk-key == "" ? "Push to talk is on, but no keybind is set, so your microphone sends nothing."
                 : root.talk-note;
         }
@@ -910,6 +1018,8 @@ component ThemeColourRow inherits HorizontalLayout {
 // changes show at once too; Save keeps them, Cancel restores the theme from
 // before.
 export component AppearanceSettings inherits VerticalLayout {
+    callback preferences-changed();
+    in-out property <bool> show-nameplates;
     in property <[ThemeCard]> themes;
     in property <string> theme-id;
     in property <string> pack-name;
@@ -1002,6 +1112,52 @@ export component AppearanceSettings inherits VerticalLayout {
         checked <=> root.system-title-bar;
         toggled => { root.title-bar-toggled(); }
     }
+    if !root.editor: VerticalLayout {
+        spacing: 12px;
+        SettingsHeading { text: "PROFILES"; }
+        SettingsSwitch {
+            text: "Play profile effects";
+            description: "The animations some people put over their profile cards.";
+            checked <=> Looks.profile-effects;
+            toggled => { root.preferences-changed(); }
+        }
+        SettingsSwitch {
+            text: "Show avatar decorations";
+            description: "The pictures around people's avatars.";
+            checked <=> Looks.decorations;
+            toggled => { root.preferences-changed(); }
+        }
+        SettingsSwitch {
+            text: "Show nameplates";
+            description: "The pictures Discord members equip behind their rows in the member list and on your account card.";
+            checked <=> root.show-nameplates;
+            toggled => { root.preferences-changed(); }
+        }
+        SettingsSwitch {
+            text: "Animate decorations and nameplates";
+            description: "They play when pointed at, as in Discord. Off, they hold still.";
+            checked <=> Looks.moving;
+            toggled => { root.preferences-changed(); }
+        }
+        SettingsSwitch {
+            text: "Show name styles";
+            description: "The fonts and colours people give their display names.";
+            checked <=> Looks.name-styles;
+            toggled => { root.preferences-changed(); }
+        }
+        SettingsSwitch {
+            text: "Show server tags";
+            description: "The tag and its badge beside people's names.";
+            checked <=> Looks.server-tags;
+            toggled => { root.preferences-changed(); }
+        }
+        SettingsSwitch {
+            text: "Show profile frames";
+            description: "The frames some people put around their profile cards.";
+            checked <=> Looks.profile-frames;
+            toggled => { root.preferences-changed(); }
+        }
+    }
     if root.editor: form := VerticalLayout {
         property <bool> confirming;
         spacing: 16px;
@@ -1075,6 +1231,8 @@ export component MessageSettings inherits VerticalLayout {
     /// Message text: 0 small, 1 default, 2 large.
     in-out property <int> text-size;
     in-out property <bool> link-previews;
+    in-out property <bool> collapse-long;
+    in-out property <bool> boost-gems;
     in-out property <bool> share-typing;
     /// When animations play: 0 while Yapfast has the focus, 1 always, 2 never.
     in-out property <int> animate;
@@ -1149,6 +1307,18 @@ export component MessageSettings inherits VerticalLayout {
         text: "Show link previews";
         description: "Cards for links, videos and bots under messages. Linked pictures still show.";
         checked <=> root.link-previews;
+        toggled => { root.preferences-changed(); }
+    }
+    SettingsSwitch {
+        text: "Collapse long messages";
+        description: "Long messages and code show their first lines, with Show more to see the rest.";
+        checked <=> root.collapse-long;
+        toggled => { root.preferences-changed(); }
+    }
+    SettingsSwitch {
+        text: "Show boost gems";
+        description: "A gem by the name of each member boosting their Discord server, in the member list.";
+        checked <=> root.boost-gems;
         toggled => { root.preferences-changed(); }
     }
     SettingsSwitch {
@@ -1261,7 +1431,8 @@ export component SoundSettings inherits VerticalLayout {
 
 // Settings: how Yapfast draws its window and encodes a shared screen. Slint
 // picks a renderer once per process, so a change to that waits for a
-// restart, which this offers; encoding changes from the next stream.
+// restart, which this offers; encoding changes from the next stream. Also
+// Developer Mode, which shows Copy ID in menus.
 export component AdvancedSettings inherits VerticalLayout {
     in-out property <bool> gpu-rendering;
     in-out property <bool> gpu-encoding;
@@ -1269,6 +1440,7 @@ export component AdvancedSettings inherits VerticalLayout {
     in-out property <bool> close-to-tray;
     in property <bool> tray-available;
     in-out property <bool> multiple-windows;
+    in-out property <bool> developer-mode;
     in-out property <bool> start-on-sign-in;
     in property <bool> autostart-available;
     in-out property <bool> discord-links;
@@ -1327,11 +1499,19 @@ export component AdvancedSettings inherits VerticalLayout {
         checked <=> root.gpu-encoding;
         toggled => { root.preferences-changed(); }
     }
+    SettingsSwitch {
+        text: "Developer Mode";
+        description: "Menus offer Copy ID for servers, channels and people, which helps when you write apps that use the Discord API.";
+        checked <=> root.developer-mode;
+        toggled => { root.preferences-changed(); }
+    }
     Label {
         text: "Icons from Solar by 480 Design (CC BY 4.0), many of them adapted, and from Lucide (ISC).";
         font-size: 12px; color: Theme.faint;
     }
 }
+
+
 
 // Settings: linking a Discord account.
 export component DiscordLinkSettings inherits VerticalLayout {

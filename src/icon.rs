@@ -6,7 +6,7 @@
 use slint::winit_030::winit::window::WindowAttributes;
 
 /// The window's app ID on Linux, and the name of its desktop entry and icon.
-pub const APP_ID: &str = "io.github.yapfast.Yapfast";
+pub const APP_ID: &str = "io.github.TimeShallHalt.Harmony";
 
 /// Gives each window Slint makes the icon.
 pub fn attributes(attributes: WindowAttributes) -> WindowAttributes {
@@ -41,7 +41,7 @@ mod platform {
         GetSystemMetrics, SM_CXICON, SM_CXSMICON, SYSTEM_METRICS_INDEX,
     };
 
-    /// The icon in packaging/windows/yapfast.rc.
+    /// The icon in packaging/windows/harmony.rc.
     const ICON: u16 = 1;
 
     /// The title bar's small icon and the taskbar's large one, each loaded at

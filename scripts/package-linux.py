@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Package the Linux release as an AppImage: nix/appimage.nix's AppDir, with
+"""Package Harmony for Linux as an AppImage: nix/appimage.nix's AppDir, with
 the dependencies' licenses and notices added, packed behind the AppImage
-runtime. Beside it go the .zsync file AppImageUpdate reads, which the release
-must carry too, and the source snapshot.
+runtime. Matching source is included and also supplied beside it. The fork
+has no automatic updater and does not publish AppImageUpdate/zsync metadata.
 
 scripts/build-appimage runs it inside the development shell."""
 import argparse
@@ -44,11 +44,15 @@ def main():
     webrtc = Path(os.environ["LK_CUSTOM_WEBRTC"])
     output = args.output
     output.mkdir(parents=True, exist_ok=True)
-    base = f"Yapfast-{version}"
+    if any(output.iterdir()):
+        raise SystemExit("Output must be empty; never overwrite a release")
+    base = f"Harmony-{version}"
     image = output / f"{base}-x86_64.AppImage"
     source_path = output / f"{base}-source.zip"
     build = json.loads((parts / "build.json").read_text())
-    with tempfile.TemporaryDirectory(prefix="yapfast-linux-package-") as temporary:
+    if build.get("update_information"):
+        raise SystemExit("Harmony AppImages must not contain upstream update information; rebuild nix/appimage.nix with updates disabled")
+    with tempfile.TemporaryDirectory(prefix="harmony-linux-package-") as temporary:
         temporary = Path(temporary)
         rtc = source_snapshot(metadata, base, temporary, source_path)
         if rtc:
@@ -58,20 +62,21 @@ def main():
         shutil.copytree(parts / "AppDir", appdir, symlinks=True)
         for directory in [appdir, *(path for path in appdir.rglob("*") if path.is_dir() and not path.is_symlink())]:
             directory.chmod(0o755)
-        executable = appdir / "usr/bin/yapfast"
+        executable = appdir / "usr/bin/harmony"
         contents = executable.read_bytes()
         if names_home(contents):
             raise SystemExit(f"{executable} names {Path.home()}; it should come from the Nix build")
         del contents
 
-        doc = appdir / "usr/share/doc/yapfast"
+        doc = appdir / "usr/share/doc/harmony"
         doc.mkdir(parents=True)
         shutil.copy2(ROOT / "LICENSE", doc / "LICENSE")
+        (doc / "corresponding-source").mkdir()
+        shutil.copy2(source_path, doc / "corresponding-source" / source_path.name)
         (doc / "SOURCE.txt").write_text(
-            f"The source code of this build of Yapfast {version} is published with it:\n\n"
-            f"  https://github.com/yapfast/yapfast/releases/tag/v{version}\n"
-            f"  {source_path.name}, SHA-256 in BUILD.json\n\n"
-            "and in the repository, https://github.com/yapfast/yapfast. The licenses folder\n"
+            f"The source code of this build of Harmony {version} accompanies it:\n\n"
+            f"  corresponding-source/{source_path.name}, SHA-256 in BUILD.json\n\n"
+            "Based on Yapfast 0.4.1, https://github.com/yapfast/yapfast. The licenses folder\n"
             "holds every dependency's own license and notices.\n",
             encoding="utf-8",
         )
@@ -90,6 +95,7 @@ def main():
             "executable_sha256": digest(executable),
             "source_archive_sha256": digest(source_path),
             **build,
+            "application": "Harmony", "upstream": "Yapfast 0.4.1", "updater_included": False,
         }
         (doc / "BUILD.json").write_text(json.dumps(build, indent=2) + "\n", encoding="utf-8")
 
@@ -112,16 +118,13 @@ def main():
     if int(offset) != (parts / "runtime").stat().st_size:
         raise SystemExit(f"{image} finds its filesystem at {offset}, not after the runtime")
     update = subprocess.check_output([image, "--appimage-updateinformation"], text=True, timeout=30).strip()
-    if update != build["update_information"]:
-        raise SystemExit(f"{image} has the update information {update!r}")
-    zsync = output / f"{image.name}.zsync"
-    subprocess.run(["zsyncmake", "-u", image.name, "-o", zsync, image], check=True, timeout=600,
-                   stdout=subprocess.DEVNULL)
+    if update:
+        raise SystemExit(f"Harmony AppImage unexpectedly contains update information {update!r}")
     hashes = output / "SHA256SUMS.txt"
-    artifacts = [image, zsync, source_path]
+    artifacts = [image, source_path]
     hashes.write_text("".join(f"{digest(path)}  {path.name}\n" for path in artifacts), encoding="utf-8")
     print(f"Packaged {image} ({image.stat().st_size / 1024 / 1024:.1f} MiB)")
-    print(f"Update file: {zsync}")
+
     print(f"Source snapshot: {source_path}")
     print(f"Checksums: {hashes}")
 

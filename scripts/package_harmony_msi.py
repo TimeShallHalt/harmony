@@ -16,6 +16,17 @@ import xml.etree.ElementTree as ET
 WIX_NS = 'http://wixtoolset.org/schemas/v4/wxs'
 UI_NS = 'http://wixtoolset.org/schemas/v4/wxs/ui'
 UPGRADE_CODE = uuid.uuid5(uuid.NAMESPACE_URL, 'https://github.com/TimeShallHalt/harmony/windows-msi/per-user/x64')
+# First production MSI whose executable is Harmony.exe: app 1.1.0 build 1.
+# Quarantine older products even if their component key path needs repair.
+FIRST_REBRANDED_MSI_VERSION = '1.1.1'
+LEGACY_MIGRATION_CONDITION = 'Installed OR NOT (HARMONY_LEGACY_MSI OR HARMONY_LEGACY_COMPONENT)'
+LEGACY_MIGRATION_MESSAGE = (
+    'A pre-rebrand Harmony MSI or its yapfast.exe installer component was found. '
+    'Setup stopped before removing the old product. Keep it installed and keep your data. '
+    'Use the portable Harmony.exe in a separate folder; migrate only your existing owned '
+    'shortcuts/handlers, preserving arguments and data folders, before explicitly uninstalling '
+    'the old MSI. See packaging/windows-msi.md: Manual legacy MSI migration.'
+)
 ET.register_namespace('', WIX_NS)
 ET.register_namespace('ui', UI_NS)
 
@@ -36,7 +47,12 @@ def msi_version(version, build_id):
 def generate_wxs(payload, info, *, test_namespace=None, test_version=None):
     """Author only private program files; never own user data, launchers or processes."""
     payload = Path(payload)
+    payload_names = {path.name.casefold(): path.name for path in payload.iterdir()}
+    if test_namespace is None and (payload_names.get('harmony.exe') != 'Harmony.exe' or not (payload / 'Harmony.exe').is_file() or 'yapfast.exe' in payload_names):
+        raise ValueError('Production MSI requires Harmony.exe, not a legacy yapfast.exe payload')
     version = msi_version(info['version'], info['build_id'])
+    if test_namespace is None and tuple(map(int, version.split('.'))) < tuple(map(int, FIRST_REBRANDED_MSI_VERSION.split('.'))):
+        raise ValueError('Harmony.exe MSI requires app 1.1.0 build 1 or later; never reuse a legacy ProductCode')
     registry = r'Software\Harmony\Installer'
     upgrade_code = UPGRADE_CODE
     name = 'Harmony'
@@ -69,9 +85,28 @@ def generate_wxs(payload, info, *, test_namespace=None, test_version=None):
         element(package, 'Property', Id='ARPSYSTEMCOMPONENT', Value='1')
     element(package, 'SummaryInformation', Description=f"Harmony {info['version']} (build {info['build_id']}) manual update")
     element(package, 'MajorUpgrade', Schedule='afterInstallInitialize', DowngradeErrorMessage='A newer Harmony MSI is already installed. Use that version or a newer installer.')
+    # Detection only: never uninstall a legacy product just to rename its binary.
+    # The version range catches damaged old registrations; the exact HKCU component
+    # marker catches a legacy payload even if it used an unexpected product version.
+    legacy_upgrade = element(package, 'Upgrade', Id=str(upgrade_code).upper())
+    element(legacy_upgrade, 'UpgradeVersion', Maximum=FIRST_REBRANDED_MSI_VERSION,
+            IncludeMaximum='no', OnlyDetect='yes', Property='HARMONY_LEGACY_MSI')
+    legacy_component = element(package, 'Property', Id='HARMONY_LEGACY_COMPONENT', Secure='yes')
+    element(legacy_component, 'RegistrySearch', Id='LegacyExecutableComponent', Root='HKCU',
+            Key=registry + r'\Components', Name=identifier('C_', 'yapfast.exe'), Type='raw', Bitness='always64')
+    element(package, 'Launch', Condition=LEGACY_MIGRATION_CONDITION, Message=LEGACY_MIGRATION_MESSAGE)
+    # Make the pre-transaction guard explicit for both interactive and /qn setup.
+    # These are the standard MSI sequence positions; no executable custom action.
+    for sequence in ('InstallUISequence', 'InstallExecuteSequence'):
+        actions = element(package, sequence)
+        element(actions, 'FindRelatedProducts', Sequence='25')
+        element(actions, 'AppSearch', Sequence='50')
+        element(actions, 'LaunchConditions', Sequence='100')
+        if sequence == 'InstallExecuteSequence':
+            element(actions, 'InstallInitialize', Sequence='1500')
     element(package, 'MediaTemplate', EmbedCab='yes', CompressionLevel='high')
     for name, value in {'REINSTALLMODE':'amus','REBOOT':'ReallySuppress','MSIRESTARTMANAGERCONTROL':'DisableShutdown','MSIDISABLERMRESTART':'1',
-                        'WIXUI_EXITDIALOGOPTIONALTEXT':'Open Harmony using your existing shortcut to keep its chosen data folder. Setup does not automatically start the app.'}.items():
+                        'WIXUI_EXITDIALOGOPTIONALTEXT':'Open Harmony.exe using your chosen data folder. Setup does not change shortcuts, protocol handlers or startup entries, or start the app.'}.items():
         element(package, 'Property', Id=name, Value=value)
     element(package, 'SetProperty', Id='ARPINSTALLLOCATION', Value='[INSTALLFOLDER]', After='CostFinalize', Sequence='execute')
     existing = element(package, 'Property', Id='INSTALLFOLDER', Secure='yes')
@@ -147,7 +182,7 @@ def stage_release(manifest_file, destination):
         entries = {}
         roots = set()
         total = 0
-        forbidden = {'layout.json','credentials.json','session.json','discord-account.json','discord-cookies.json','yapfast.log','.env'}
+        forbidden = {'layout.json','credentials.json','session.json','discord-account.json','discord-cookies.json','yapfast.log','harmony.log','.env','yapfast.exe'}
         for item in archive.infolist():
             if item.is_dir():
                 continue
@@ -163,15 +198,19 @@ def stage_release(manifest_file, destination):
             total += item.file_size
             if total > 512 * 1024 * 1024 or item.file_size > 256 * 1024 * 1024:
                 raise ValueError('Application archive exceeds bounded staging limits')
-        if len(roots) != 1 or not {'yapfast.exe','build.json','harmony-build-info.json','license.txt','third-party.json'} <= entries.keys():
+        if len(roots) != 1 or not {'harmony.exe','build.json','harmony-build-info.json','license.txt','third-party.json','source.txt'} <= entries.keys():
             raise ValueError('Application archive lacks its unique root or required metadata')
+        if entries['harmony.exe'][0] != 'Harmony.exe':
+            raise ValueError('Windows executable must have the exact name Harmony.exe')
         read = lambda name: archive.read(entries[name][1])
         info = json.loads(read('harmony-build-info.json'))
         build = json.loads(read('build.json'))
         msi_version(info['version'], info['build_id'])
         if info.get('dirty') is not False or info.get('commit') != manifest['commit'] or info['version'] != manifest['version'] or info['build_id'] != manifest['build_id'] or info.get('platform') != 'windows' or info.get('architecture') != 'x86_64' or info.get('license') != 'GPL-3.0-or-later':
             raise ValueError('Clean Windows build identity does not match the release manifest')
-        raw = read('yapfast.exe')
+        if info.get('upstream') != 'Yapfast 0.4.1' or any(build.get(key) != value for key, value in info.items()) or build.get('updater_included') is not False:
+            raise ValueError('MSI requires the matching updater-free Harmony build and upstream attribution')
+        raw = read('harmony.exe')
         expected_exe = manifest['executable']['sha256']
         if hashlib.sha256(raw).hexdigest() != expected_exe or build.get('executable_sha256') != expected_exe or build.get('source_archive_sha256') != sha(source) or build.get('commit') != info['commit']:
             raise ValueError('Executable, build metadata and corresponding source are not paired')
@@ -197,12 +236,21 @@ def stage_release(manifest_file, destination):
         'Quit Harmony from its tray menu before updating. Closing its window may only hide it.\n'
         'Run this MSI as your normal user. No administrator account is required.\n'
         'Program location: %LOCALAPPDATA%\\Programs\\Harmony. Existing shortcuts are not changed.\n'
-        'After setup, open your existing shortcut so its custom --data-dir arguments are preserved.\n'
-        'Setup never starts the app, joins calls, resumes capture, or force-closes applications.\n'
+        'LEGACY MSI MIGRATION: setup refuses a pre-rebrand Harmony MSI or its exact yapfast.exe\n'
+        'installer component marker before removing any old product, in both wizard and silent mode.\n'
+        'Keep the old MSI installed; first stage portable Harmony.exe in a separate, unowned folder.\n'
+        'Preserve data and all launcher arguments (including --data-dir); manually migrate only\n'
+        'existing owned shortcuts, taskbar pins and already-selected handlers/startup entries.\n'
+        'Do not claim new handlers or enable startup. Verify each existing entry before explicitly\n'
+        'uninstalling the old MSI. See packaging/windows-msi.md: Manual legacy MSI migration.\n'
+        'After setup, open Harmony.exe or your existing Harmony.exe shortcut, preserving custom --data-dir arguments.\n'
+        'Setup never changes shortcuts, protocol handlers or startup entries; never starts the app,\n'
+        'joins calls, resumes capture, or force-closes applications.\n'
         'Settings/account data are outside the installer payload and are not removed on uninstall.\n'
-        'Standard MSI upgrades replace registered older versions; registered newer versions block downgrades.\n'
-        'A newer manually copied, unregistered executable cannot be version-detected because this app\n'
-        'has no PE version resource. Do not use an older MSI over a newer portable/manual build.\n'
+        'After legacy migration, standard MSI upgrades replace older Harmony.exe products;\n'
+        'registered newer versions block downgrades.\n'
+        'A newer manually copied, unregistered executable is not checked by MSI product registration.\n'
+        'Do not use an older MSI over a newer portable/manual build.\n'
         'The installer owns only its enumerated program/notice files. It force-replaces them to update\n'
         'unversioned legacy binaries; it does not delete unrelated files or rollback copies.\n'
         'The corresponding GPL source archive and third-party notices are included next to the program.\n'
@@ -231,8 +279,12 @@ def build_msi(payload, info, output, wix_dll, ui_extension, *, test_namespace=No
     text = (
         f"Harmony {info['version']} (build {info['build_id']})\n\n"
         'Quit Harmony using its tray Quit menu before continuing. This installer updates program files only; '
-        'it does not remove settings/accounts, change your shortcuts, automatically start the app, or stop other programs.\n'
-        'After setup, use your existing shortcut to keep its custom data folder.\n\n'
+        'it does not remove settings/accounts, change shortcuts, protocol handlers or startup entries, '
+        'automatically start the app, or stop other programs.\n'
+        'Legacy MSI upgrades are refused before removing the old product; see '
+        'packaging/windows-msi.md: Manual legacy MSI migration. Keep the old installation '
+        'until its exact owned launchers have been migrated to a separate portable folder.\n'
+        'After setup, use Harmony.exe or an existing Harmony.exe shortcut, preserving its custom data folder.\n\n'
         + (Path(payload) / 'LICENSE.txt').read_text(encoding='utf-8')
     )
     escaped = text.replace('\\', r'\\').replace('{', r'\{').replace('}', r'\}').replace('\n', '\\par\n')
@@ -274,7 +326,7 @@ def main():
     result = build_msi(payload,info,args.output,args.wix_dll,args.ui_extension)
     with args.output.open('rb') as stream:
         digest = hashlib.file_digest(stream,'sha256').hexdigest()
-    result.update({'application_commit':info['commit'],'executable_sha256':files['yapfast.exe'],'msi_sha256':digest,
+    result.update({'application_commit':info['commit'],'executable_sha256':files['Harmony.exe'],'msi_sha256':digest,
                    'msi_bytes':args.output.stat().st_size,'payload_root':str(payload),'payload_files':files,'unsigned':True,
                    'scope':'per-user x64; manual MSI only; no accounts/user-data/shortcut changes, no in-app updater',
                    'producer_manifest_sha256':hashlib.sha256(args.manifest.read_bytes()).hexdigest()})

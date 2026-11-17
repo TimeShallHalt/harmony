@@ -94,6 +94,7 @@ pub fn member_server(alice: &[&str]) -> Application {
             name: "Dave".into(),
             avatar: String::new(),
             nickname: None,
+            since: None,
             presence: None,
             presence_observation: None,
             activity: None,
@@ -136,11 +137,15 @@ pub fn member_server(alice: &[&str]) -> Application {
     app.dispatch(Action::Navigate(Navigation::Server("discord:10".into())));
     app.dispatch(Action::SelectRoom("discord:10:11".into()));
     let listed = |id: &str, name: &str| ChatMember {
+        bot: false,
         id: id.into(),
         name: name.into(),
         username: None,
         role: Role::Member,
         avatar: None,
+        decoration: None,
+        nameplate: None,
+        style: None,
         group: None,
         presence: None,
         color: None,
@@ -151,6 +156,7 @@ pub fn member_server(alice: &[&str]) -> Application {
         tag: None,
         group_icon: None,
         role_icon: None,
+        boosting_since: None,
     };
     app.apply(Event::Members {
         room: "discord:10:11".into(),

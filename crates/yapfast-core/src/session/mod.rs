@@ -82,7 +82,7 @@ impl Session {
         client
             .matrix_auth()
             .login_username(username, password)
-            .initial_device_display_name("Yapfast")
+            .initial_device_display_name("Harmony")
             .send()
             .await
             .map_err(|_| {
@@ -171,7 +171,7 @@ impl Session {
 
     pub async fn start_sync(&self) -> Result<SessionSync> {
         // Offline mode keeps probing the homeserver after a network failure and
-        // resumes by itself; Yapfast then re-enables the paused send queue.
+        // resumes by itself; Harmony then re-enables the paused send queue.
         let service = SyncService::builder(self.client.clone())
             .with_offline_mode()
             .build()
@@ -287,7 +287,7 @@ async fn build_client(homeserver: &str, path: PathBuf, passphrase: &str) -> Resu
     if !url.username().is_empty() || url.password().is_some() {
         bail!("homeserver URLs must not contain credentials")
     }
-    // Keep the URL checked above: a login response must not move Yapfast to
+    // Keep the URL checked above: a login response must not move Harmony to
     // another, possibly plain-HTTP, homeserver address. The session lock keeps
     // the stores to this process, so the SDK's cross-process lock, which
     // rewrites its lease in the crypto store every 50 ms, stays off.

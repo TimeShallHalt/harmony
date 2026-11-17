@@ -51,8 +51,11 @@ def source_snapshot(metadata, base, temporary, destination):
     tracked = subprocess.check_output(["git", "ls-files", "-z", "--", *SOURCE_FILES, *SOURCE_DIRECTORIES],
                                       cwd=ROOT, timeout=30).decode().split("\0")
     for name in filter(None, tracked):
+        original = ROOT / name
+        if original.is_symlink() or original.is_junction():
+            raise ValueError("Tracked source must not dereference links into external or private files")
         (source / name).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / name, source / name)
+        shutil.copy2(original, source / name)
     # Only the Matrix flavour builds the AGPL RTC dependencies.
     rtc = next((package for package in metadata["packages"] if package["name"] == "matrix-rtc-core"), None)
     if rtc:
@@ -88,6 +91,7 @@ def dependency_notices(metadata, package, licenses, skia_archive, skia_source, w
     for path in sorted((ROOT / "ui/fonts").iterdir()):
         if license_file(path) or path.name == "README.md":
             shutil.copy2(path, font_notices / path.name)
+    shutil.copy2(ROOT / "src/LICENSE-emojibase.txt", licenses / "LICENSE-emojibase.txt")
     for item in sorted(metadata["packages"], key=lambda value: (value["name"], value["version"])):
         if item["name"] == "yapfast":
             continue

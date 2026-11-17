@@ -16,6 +16,36 @@ use libpulse_simple_binding::Simple;
 use super::Format;
 use crate::voice::NAMED;
 
+/// Real-time priority for Harmony's audio threads: above every ordinary
+/// thread, and below PipeWire's own, which run at 88 or more. A
+/// microphone's thread runs a step below those that play.
+#[cfg_attr(not(feature = "discord"), allow(dead_code))]
+const REALTIME: i32 = 10;
+
+/// Says how it raised the calling thread, or why it couldn't.
+#[cfg_attr(not(feature = "discord"), allow(dead_code))]
+pub fn raise_priority(priority: super::Priority) -> Result<&'static str, String> {
+    let (sched_priority, how) = match priority {
+        super::Priority::Playback => (REALTIME, "SCHED_FIFO 10"),
+        super::Priority::Capture => (REALTIME - 1, "SCHED_FIFO 9"),
+    };
+    let param = libc::sched_param { sched_priority };
+    // SAFETY: 0 is the calling thread, and `param` outlives the call. Threads
+    // it starts later begin at normal priority again.
+    let raised = unsafe {
+        libc::sched_setscheduler(0, libc::SCHED_FIFO | libc::SCHED_RESET_ON_FORK, &param)
+    };
+    if raised != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(how)
+}
+
+/// Linux neither throttles a background window's process nor needs a
+/// finer timer.
+#[cfg(feature = "discord")]
+pub fn full_speed(_: bool) {}
+
 pub struct Output(Simple);
 
 impl Output {
@@ -116,7 +146,7 @@ fn open(
         rate: format.rate,
     };
     Simple::new(
-        None, "Yapfast", direction, device, name, &spec, None, attributes,
+        None, "Harmony", direction, device, name, &spec, None, attributes,
     )
     .map_err(|error| anyhow!("{error}"))
 }
@@ -182,7 +212,7 @@ struct Listed {
 /// Every sink, or every source that is not a monitor.
 fn list(sinks: bool) -> Result<Vec<Listed>> {
     let mut mainloop = Mainloop::new().context("no PulseAudio main loop")?;
-    let mut context = Context::new(&mainloop, "Yapfast").context("no PulseAudio context")?;
+    let mut context = Context::new(&mainloop, "Harmony").context("no PulseAudio context")?;
     context
         .connect(None, ContextFlags::NOFLAGS, None)
         .map_err(|error| anyhow!("{error}"))
@@ -192,7 +222,7 @@ fn list(sinks: bool) -> Result<Vec<Listed>> {
         match context.get_state() {
             context::State::Ready => break,
             context::State::Failed | context::State::Terminated => {
-                bail!("the sound server refused Yapfast")
+                bail!("the sound server refused Harmony")
             }
             _ => {}
         }
@@ -344,7 +374,7 @@ mod others {
         let heard: Shared = Rc::new(RefCell::new(heard));
         let mut mainloop = Mainloop::new().context("no PulseAudio main loop")?;
         let context = Rc::new(RefCell::new(
-            Context::new(&mainloop, "Yapfast").context("no PulseAudio context")?,
+            Context::new(&mainloop, "Harmony").context("no PulseAudio context")?,
         ));
         context
             .borrow_mut()
@@ -389,7 +419,7 @@ mod others {
             });
         let _ = ready.send(Ok(()));
 
-        // Yapfast's own processes: this worker and the Yapfast that started it.
+        // Harmony's own processes: this worker and the Harmony that started it.
         let excluded = [std::process::id(), std::os::unix::process::parent_id()];
         let mut streams = Monitors::new();
         while !stop.load(Ordering::Relaxed) {
@@ -503,7 +533,7 @@ mod others {
             rate: RATE,
             channels: 2,
         };
-        let stream = Stream::new(context, "Yapfast stream sound", &spec, None)
+        let stream = Stream::new(context, "Harmony stream sound", &spec, None)
             .context("PulseAudio refused a capture stream")?;
         let stream = Rc::new(RefCell::new(stream));
         stream

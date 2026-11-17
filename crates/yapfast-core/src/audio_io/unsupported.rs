@@ -1,4 +1,4 @@
-//! Systems Yapfast has no sound backend for yet.
+//! Systems Harmony has no sound backend for yet.
 
 use std::time::Duration;
 
@@ -6,7 +6,15 @@ use anyhow::{Result, bail};
 
 use super::Format;
 
-const UNSUPPORTED: &str = "Yapfast has no sound on this system yet.";
+const UNSUPPORTED: &str = "Harmony has no sound on this system yet.";
+
+#[cfg_attr(not(feature = "discord"), allow(dead_code))]
+pub fn raise_priority(_: super::Priority) -> Result<&'static str, String> {
+    Err(UNSUPPORTED.to_owned())
+}
+
+#[cfg(feature = "discord")]
+pub fn full_speed(_: bool) {}
 
 pub struct Output;
 
@@ -53,5 +61,5 @@ pub fn others(
     _: super::Hear,
     _: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<std::thread::JoinHandle<()>> {
-    bail!("Yapfast shares sound on Linux only for now")
+    bail!("Harmony shares sound on Linux only for now")
 }

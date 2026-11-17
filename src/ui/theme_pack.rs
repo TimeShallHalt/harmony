@@ -50,6 +50,7 @@ pub const COLOR_NAMES: &[&str] = &[
     "avatar",
 ];
 pub const BASES: &[&str] = &[
+    "harmony",
     "yap",
     "bonfire",
     "catppuccin-mocha",

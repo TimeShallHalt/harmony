@@ -257,7 +257,7 @@ impl Shell {
         }
         #[cfg(not(feature = "discord"))]
         let _ = link;
-        tracing::warn!("a later start handed Yapfast a link it can't open");
+        tracing::warn!("a later start handed Harmony a link it can't open");
     }
 
     /// Opens the window on a conversation, as a clicked notification does.
@@ -347,10 +347,17 @@ pub(super) fn launched(launch: crate::instance::Launch) {
     let Some(shell) = SHELL.with(|shell| shell.borrow().upgrade()) else {
         return;
     };
-    tracing::info!("Yapfast started again; showing the window");
+    tracing::info!("Harmony started again; showing the window");
     if let Some(link) = link {
         shell.queue_link(link);
     }
+    open_with(&shell, token);
+}
+
+/// Shows the window, taking the focus with an xdg-activation token from the
+/// input that asked for it, where there is one: a window made again takes it
+/// through winit, a shown one through `instance::activate`.
+fn open_with(shell: &Rc<Shell>, token: Option<String>) {
     let Some(window) = shell.window() else {
         crate::instance::give_next_window(token);
         shell.open();
@@ -373,9 +380,7 @@ fn chosen(choice: Choice) {
         return;
     };
     match choice {
-        Choice::Open => {
-            shell.open();
-        }
+        Choice::Open => open_with(&shell, crate::tray::take_activation_token()),
         Choice::Disconnect => shell.act(Action::Voice(voice::Command::Leave)),
         Choice::Quit => {
             let _ = slint::quit_event_loop();
@@ -404,6 +409,9 @@ impl Adapter {
     /// The window closed: what only it used stops with it. The models stay, so
     /// the next window shows them without building them again.
     pub(super) fn detach(&mut self) {
+        // A recorder belongs to the window; a hidden recorder must not keep
+        // global keybinds paused until another window receives a key event.
+        crate::keybinds::pause(false);
         self.latest_due = false;
         self.present_selection = None;
         self.start_selection = None;

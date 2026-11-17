@@ -94,7 +94,7 @@ pub fn emit() {
     let platform = std::env::var("CARGO_CFG_TARGET_OS").expect("target OS");
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").expect("target architecture");
     let json = format!(
-        "{{\"version\":\"{version}\",\"build_id\":{},\"commit\":\"{}\",\"dirty\":{},\"platform\":\"{platform}\",\"architecture\":\"{arch}\",\"upstream\":\"Yapfast 0.3.0\",\"license\":\"GPL-3.0-or-later\"}}\n",
+        "{{\"version\":\"{version}\",\"build_id\":{},\"commit\":\"{}\",\"dirty\":{},\"platform\":\"{platform}\",\"architecture\":\"{arch}\",\"upstream\":\"Yapfast 0.4.1\",\"license\":\"GPL-3.0-or-later\"}}\n",
         stamp.build_id, stamp.commit, stamp.dirty
     );
     std::fs::write(

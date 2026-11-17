@@ -1,4 +1,4 @@
-//! Camera video in Matrix calls, over LiveKit. Yapfast publishes its camera as a
+//! Camera video in Matrix calls, over LiveKit. Harmony publishes its camera as a
 //! simulcast video track, and shows each remote camera through a feed made
 //! at its tile's size. A camera whose tile is out of sight is paused at the
 //! server, so nothing arrives to decode.
@@ -70,7 +70,7 @@ impl Filming {
         let source = webrtc_sys::video_track::ffi::last_video_track_source();
         anyhow::ensure!(!source.is_null(), "Could not start your camera's video.");
         let track =
-            LocalVideoTrack::create_video_track("Yapfast camera", RtcVideoSource::Native(video));
+            LocalVideoTrack::create_video_track("Harmony camera", RtcVideoSource::Native(video));
         Ok(Self {
             feed: Feed::new(),
             source,

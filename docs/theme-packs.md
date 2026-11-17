@@ -37,9 +37,11 @@ put `$schema` in the pack itself: unknown keys are rejected.
   the whole import. Missing values inherit the selected base/native defaults;
   importing a second pack does not retain overrides from the first.
 
-Base IDs, unchanged from built-in themes:
-`yap`, `bonfire`, `catppuccin-mocha`, `dracula`, `nord`, `gruvbox-dark`,
+Base IDs match the built-in themes, with `harmony` added as the new default:
+`harmony`, `yap`, `bonfire`, `catppuccin-mocha`, `dracula`, `nord`, `gruvbox-dark`,
 `tokyo-night`, `catppuccin-latte`, `rose-pine-dawn`, `sakura`.
+`yap` is the preserved Harmony Classic ID for the original Yapfast palette.
+Existing packs keep that base and any imported logo; no migration is required.
 The base supplies unspecified colors and `dark`; it does not change the
 presentation mode. Existing palette credits remain in [themes.md](themes.md).
 
@@ -163,7 +165,7 @@ unrelated preferences. Imported files and their source assets are never edited.
 - **Edit pack colors** uses the shared live color editor. Save changes the saved
   pack snapshot (colors/dark/name only), preserving layout, typography, motion,
   logo and reload source. Cancel/leave Appearance restores the saved pack,
-  including the correct Bonfire default when no theme was explicitly selected.
+  including the Harmony default when no theme was explicitly selected.
 - **New theme** copies colors into the existing standalone custom palette system.
   Saving it clears pack style overrides; cancel preserves the pack. Existing
   custom IDs/storage remain unchanged.

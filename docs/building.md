@@ -1,11 +1,22 @@
 # Native builds
 
+Harmony is an independently versioned fork of Yapfast 0.4.1 by wiredtenshi and
+contributors, under GPL-3.0-or-later. The technical dependency notes below retain
+upstream patch history and attribution; identifiers such as `yapfast-core`,
+`YAPFAST_*`, `yapfast:` and `README.yapfast.md` are intentional compatibility or
+source names, not commands to rename. Cargo package `yapfast` has an explicit
+`Harmony` binary target: native outputs are `target/<profile>/Harmony` on Linux
+and `target/<profile>/Harmony.exe` on Windows. Linux packages install `harmony`.
+The fork has no active stock updater; updates are manual. See
+[packaging](packaging.md) for source/license pairing and verification boundaries.
+
 ## Shells
 
 Three Nix shells cover the work:
 
 - `nix develop path:./nix` is the development shell. Run every `cargo` command
-  in it, as `nix develop path:./nix --command cargo ...`. It also provides
+  in it on Linux, as `nix develop path:./nix --command cargo ...`, unless using
+  an explicitly prepared native environment below. It also provides
   `bun` for the fake Discord.
 - `nix-shell --impure testing/display/shell.nix` adds Weston,
   PulseAudio, the ALSA plugins and FFmpeg to it, for the private display that
@@ -13,10 +24,11 @@ Three Nix shells cover the work:
 - `nix develop path:./nix#windows` cross-builds for Windows; see the
   [Windows beta guide](windows-beta.md).
 
-The repository's own `flake.nix` builds no shell, only the package that
-`nix profile add github:yapfast/yapfast#yapfast` installs: the Discord-only
-release build, from `nix/package.nix`. It shares libwebrtc, Skia and the
-system libraries with the development shell through `nix/native.nix`, and pins
+The repository's own `flake.nix` builds no shell. `nix build .#harmony`
+builds this checkout's Discord-only package from `nix/package.nix`; `nix build`
+selects the same default. The `yapfast` flake attribute remains a compatibility
+alias, not an instruction to install the upstream repository. It shares
+libwebrtc, Skia and the system libraries with the development shell through `nix/native.nix`, and pins
 the same nixpkgs in its own `flake.lock`. `nix build` puts it in `result`.
 It also builds the AppDir that the [AppImage](packaging.md#linux-appimage) is packed from.
 `nix/package.nix` holds one hash per Git dependency's repository and commit,
@@ -25,7 +37,7 @@ hash there; a `nix build` with the old one prints it.
 
 ## Dependencies
 
-Yapfast pins Rust 1.97.1, Slint's master at `ac7d423f` and Skia 0.157.0.
+Harmony pins Rust 1.97.1, Slint's master at `ac7d423f` and Skia 0.157.0.
 Cargo.lock pins the complete Rust graph. That commit calls itself 1.19.0, which
 isn't released: `[patch.crates-io]` in Cargo.toml takes `=1.19.0` and the crates
 it needs from the commit. Its generated Rust compiles in half the time of
@@ -41,10 +53,10 @@ prebuilt Skia with Skia's own FreeType: the one built for the system's FreeType
 lacks FreeType's COLRv1 calls, so it drew nothing for the COLRv1 build of Noto
 Color Emoji, the only one Fedora installs. Rust-skia builds that Skia only with
 its text layout, which the linker leaves out, and without Vulkan, so the
-renderer goes without wgpu, whose Vulkan surface needs it. On Linux Yapfast
+renderer goes without wgpu, whose Vulkan surface needs it. On Linux Harmony
 asks for Skia OpenGL or Skia Software by name; the wgpu renderers the winit
 backend still names make surfaces that fail to start. Windows turns wgpu back
-on through a dependency in Yapfast's own `Cargo.toml`, for Skia GPU on Direct3D
+on through a dependency in Harmony's own `Cargo.toml`, for Skia GPU on Direct3D
 12 (see `src/graphics.rs`). Each change is marked `Yapfast:` in
 `itemrenderer.rs`, `cached_image.rs`, `lib.rs`, `font_cache.rs` or
 `Cargo.toml`. Copy the matching release over it, and reapply them, when
@@ -52,16 +64,16 @@ upgrading Slint.
 
 `vendor/i-slint-core` is Slint's core at that commit with `StyledText` always
 selectable, across the texts around it, where upstream's `selectable` property
-selects inside one text and Yapfast leaves it unset. Dragging selects, a double press selects a
+selects inside one text and Harmony leaves it unset. Dragging selects, a double press selects a
 word and a triple press a paragraph. Dragging past a text carries the selection
 on through the texts and pictures around it: those sharing its nearest flickable,
 such as a list's rows, in reading order. Pictures are the `Image`s with
 an `accessible-label`, and copy as `[Picture]`. Ctrl+C copies the selection
 as read, without its Markdown: texts level with each other joined by a space, the
-rest by line breaks. Yapfast shows message authors and times as `StyledText` so the
+rest by line breaks. Harmony shows message authors and times as `StyledText` so the
 selection takes them in. The selection is kept as positions in the list's model,
 so it survives its rows scrolling away. Dragging near the top or bottom of the
-list scrolls it, and Yapfast supplies the text of the rows in between through
+list scrolls it, and Harmony supplies the text of the rows in between through
 `yapfast_selection::set_row_text`. A click that selects nothing still follows a
 link and leaves the focus where it was. A left press anywhere clears the
 selection, as does Escape. Other buttons pass through a text to the items around
@@ -85,7 +97,9 @@ The core of it is `yapfast_selection.rs`. The other changes are marked `Yapfast:
 - `textlayout/sharedparley.rs` again, where a `StyledText` lets its text 4px past
   its box, and a `TextInput` up and down, as an emoji is taller than its line
 - `textlayout/sharedparley/draw.rs`, which draws mention pills under their
-  text and opaque covers over hidden Discord spoilers, links to `yapfast:spoiler/`
+  text, opaque covers over hidden Discord spoilers, links to `yapfast:spoiler/`,
+  and the underline of the link under the pointer, which `items/text.rs` keeps;
+  shaping gives links no underline of their own
 - `graphics/image.rs`, where no image equals no image; upstream they differ,
   so every list row without a picture counted as changed on each refresh
 
@@ -93,7 +107,7 @@ It also keeps a timeline's rows in place as older messages go in above them.
 Upstream, a `ListView` keeps its rows where they are on screen when rows go in
 above the first one it shows, but rows that go in right above it, as when the
 top of the history is on screen, push everything shown down. Inside
-`yapfast_anchor::hold`, which Yapfast wraps around a page of older messages, those
+`yapfast_anchor::hold`, which Harmony wraps around a page of older messages, those
 count as above it too. That row then keeps its bottom edge where it is in the
 view, rather than its top, while its height settles: it loses its date, its
 author line or the loading notice once the rows before it carry them, and
@@ -116,7 +130,7 @@ warns of a long callback chain. This is `yapfast_layout_end` in
 
 A `TextInput` draws parts of its text as a `StyledText` draws a mention, in
 a colour on a pill of it, so the composer shows whom its message will
-mention. Yapfast marks a text's byte ranges with
+mention. Harmony marks a text's byte ranges with
 `yapfast_marks::mark`, and a `TextInput` showing that text, not a password
 or one composing with an input method, shapes them as links in a colour span.
 Upstream, a `TextInput` has one colour. This is `yapfast_marks.rs` and the
@@ -125,7 +139,7 @@ and `textlayout/sharedparley/shaping.rs`.
 
 A mouse wheel spun fast scrolls farther for each notch. Upstream, each notch
 scrolls 60 pixels however fast the notches come, so a hard spin through a long
-history crawls. Yapfast weighs the recent notches, each counting less with time,
+history crawls. Harmony weighs the recent notches, each counting less with time,
 and above 12 notches a second scales each notch by the speed over 12, at most
 six times. Deltas smaller than a notch, as from touchpads that send no phases,
 keep their pace. These are the changes marked `Yapfast:` around
@@ -137,14 +151,14 @@ away the pointer is from where it clicked, until the next press, key or wheel.
 Holding the button and moving away scrolls until it's let go. A middle press
 in a `TextInput` still pastes there. While it scrolls the window gives the
 pointer's events to it, not to the items under the pointer, and the press
-that ends it goes no further. Yapfast marks where it began through
+that ends it goes no further. Harmony marks where it began through
 `yapfast_autoscroll::on_marker`, with the `Autoscroll` global in
 `ui/scrollview.slint`. Upstream Slint has no autoscroll. This is
 `yapfast_autoscroll.rs` and the changes marked `Yapfast:` about it in
 `items/flickable.rs`, `items/text.rs` and `window.rs`.
 
 A key no item takes, as after a menu closes, goes to the function given to
-`yapfast_typing::on_unclaimed`, which Yapfast points at the composer, as
+`yapfast_typing::on_unclaimed`, which Harmony points at the composer, as
 Discord's window sends typing anywhere to it. Printable text, Backspace, Delete
 and Escape go, and Tab with nothing focused, without Ctrl, Alt or Super held and
 with no popup open. For text, Backspace and Delete the function moves the focus,
@@ -155,29 +169,31 @@ change marked `Yapfast:` about it in `window.rs`.
 Reapply them to the matching release when upgrading Slint. Styled paragraphs now
 have byte ranges as if joined by newlines, where upstream gives them all `0..0`.
 
-`ui/scrollview.slint` is Yapfast's own `ScrollView` and `ListView`, in place of
+`ui/scrollview.slint` is the inherited Yapfast `ScrollView` and `ListView`, in place of
 the std-widgets ones: the Fluent style's from Slint 1.18.1, with its scroll
 arrows copied to `ui/icons/scroll-*.svg`. The Fluent scrollbar starts a thumb
 drag over each time `maximum` changes, dropping part of the pointer's travel,
 and a `ListView`'s `maximum` changes all through a drag as rows are measured,
-so the thumb fell behind the pointer. Yapfast's bar sets the viewport from where
+so the thumb fell behind the pointer. Harmony's bar sets the viewport from where
 the pointer has moved the thumb since the drag began, as a share of the track,
 and again when `maximum` changes. The compiler virtualizes any component named
-`ListView` with the viewport's lengths, so Yapfast's is virtualized as upstream's
+`ListView` with the viewport's lengths, so Harmony's is virtualized as upstream's
 is. Compare it with the Fluent style's when upgrading Slint.
 
 The Matrix SDK revision follows the pinned MatrixRTC revision. Keep those two
 sources together when upgrading.
 
-The picker's, the reaction buttons' and the emoji suggestions' emoji are drawn
-from Twemoji's pictures, the artwork Discord's client uses: `vendor/twemoji` is
+Every emoji Harmony draws, in the picker, reactions, suggestions, names and
+message text, is drawn from Twemoji's pictures, the artwork Discord's client uses: `vendor/twemoji` is
 `assets/72x72` from https://github.com/discord/twemoji at the revision
 `vendor/twemoji/REVISION` names, under CC-BY 4.0, which asks for the attribution
 `vendor/twemoji/README.yapfast.md` gives. `build.rs` makes them one font the program
 carries, which message text draws and maps rather than copies, and
-`src/twemoji.rs` finds a picture in it by the emoji's code points; a code point it has
-no picture for stays a glyph from the system's emoji font (`src/emoji_glyphs.rs`
-draws that once into a picture). `scripts/release_package.py` copies the
+`src/twemoji.rs` finds a picture in it by the emoji's code points. The font also
+maps each single emoji's own code point and joins each sequence of several, such as
+a flag or a skin tone, into its picture with GSUB ligatures, so text that keeps an
+emoji as typed draws Twemoji's picture too; no system emoji font is used, and the
+picker lists only the emoji Twemoji has a picture for. `scripts/release_package.py` copies the
 licences and attribution into each package and `THIRD-PARTY.json`. Update by
 taking the new commit's files over these, as `vendor/twemoji/README.yapfast.md`
 says.
@@ -221,13 +237,15 @@ either way, and one that adds an element in 80 seconds rather than 100. Use it f
 
 ### Dependency sources
 
-Yapfast patches these crates in `vendor/`, through `[patch.crates-io]` or a path
+Harmony retains and extends Yapfast's patches to these crates in `vendor/`, through `[patch.crates-io]` or a path
 dependency in Cargo.toml:
 
 - `i-slint-core`: Slint's core at `ac7d423f` with selectable `StyledText`,
   mentions coloured in a `TextInput`, timelines that keep their place as
   older messages load, a wheel that speeds up when spun fast, and middle-click
-  autoscroll, above.
+  autoscroll, above. Its per-item caches also mark dirty whatever depended on
+  an entry they drop, so a size measured through the text layout cache before
+  the window has a surface, or before a zoom, follows its text afterwards.
 - `i-slint-renderer-skia`: Slint's Skia renderer at `ac7d423f` with slight hinting,
   mipmapped pictures, and Skia's own FreeType on
   Linux without wgpu, above, and a whole frame after every resize: Windows
@@ -302,12 +320,17 @@ nm $LK_CUSTOM_WEBRTC/lib/libwebrtc.a | grep ' T avformat_open_input'
 
 On NixOS, a binary run outside `nix develop` opens NVENC only with
 `LD_LIBRARY_PATH=/run/opengl-driver/lib`, which the dev shell and the Nix
-package's wrapper add. Yapfast names the libva driver for each render node
+package's wrapper add. Harmony names the libva driver for each render node
 itself, but `vainfo` or FFmpeg's command line on a host that sets
 `LIBVA_DRIVER_NAME=nvidia` needs `env -u LIBVA_DRIVER_NAME` to reach AMD's
 or Intel's driver.
 
 ## Checks
+
+These are reproducible checks, not recorded passing results for this integration.
+The merged fork still needs a full Linux/Nix build and platform checks; timings and measurements in this guide describe the inherited upstream
+development setup, not fresh Harmony measurements.
+For documentation-only edits, run `python3 scripts/check-doc-links` without Cargo.
 
 `scripts/check` enters the development shell itself when Nix is installed, and
 uses the tools already installed otherwise. `scripts/check --fast`
@@ -316,7 +339,8 @@ formatting; `scripts/check-doc-links`, which fails on a Markdown link to a
 missing file or heading; Clippy with warnings denied and the tests for the whole workspace
 (the UI crate is outside the workspace, so Clippy checks it only as a
 dependency, with plain rustc, and doesn't lint its generated code); a
-build; and the desktop smoke test, which runs `target/<profile>/yapfast`,
+build; and the desktop smoke test, which runs `target/<profile>/Harmony`
+(or `Harmony.exe` on Windows),
 the desktop build, from that build. These build the default features, the
 release's: Discord on the desktop (see [Networks](#networks)).
 
@@ -356,18 +380,18 @@ checks formatting only, so commits stay quick.
 
 ## Seeing the app
 
-`scripts/ui-session` runs Yapfast on a private Weston display, for screenshots and
+`scripts/ui-session` runs Harmony on a private Weston display, for screenshots and
 checks by hand, without touching the desktop or a real account:
 
 ```sh
 scripts/ui-session start      # the preview; --discord for the fake Discord
 scripts/ui-session do 'click 40 100' 'type hello' 'key enter' 'shot sent'
-scripts/ui-session relaunch   # rebuild and restart Yapfast on the same display
+scripts/ui-session relaunch   # rebuild and restart Harmony on the same display
 scripts/ui-session stop
 ```
 
 `start --discord` builds with the release's features (see
-[Networks](#networks)) into the same `target/fast/yapfast` as a default build
+[Networks](#networks)) into the same `target/fast/Harmony` as a default build
 (`build()` in `scripts/ui-session`). Slint and the UI crate resolve the same
 for both, so switching between the two rebuilds only `yapfast-core`, the
 Discord crate and the app, about 5 to 15 seconds; `--live` changes Slint's
@@ -398,7 +422,7 @@ scripts/ui-session do 'record start tour' 'glide 400 600' 'click 170 264 glide' 
 
 `testing/record_host.rs` takes the frames through Weston's capture protocol
 and ffmpeg encodes them to `.local/ui-session/videos/tour.mp4`, which later
-starts keep. `--zoom` opens Yapfast at that zoom level, `--cursor` shows the
+starts keep. `--zoom` opens Harmony at that zoom level, `--cursor` shows the
 pointer, `glide` and `click … glide` move it as a hand would, and `scroll
 PIXELS SECONDS` scrolls smoothly. Weston's headless display repaints about
 58.5 times a second at most, so about one frame in 40 repeats the one
@@ -461,7 +485,7 @@ Media paths are relative to the environment file. Videos need `ffprobe` and
 and the result is cached in the system's temporary directory. Without
 `--env`, the fake serves its built-in content unchanged, and the tests rely
 on it.
-`YAPFAST_DISCORD_TEST_UNLINKED=1` starts Yapfast unlinked, to link against the fake.
+`YAPFAST_DISCORD_TEST_UNLINKED=1` starts Harmony unlinked, to link against the fake.
 [Network memory](measurements/README.md) compares the three builds.
 
 With [direnv](https://direnv.net/), the repository's `.envrc` loads the Nix
@@ -471,20 +495,23 @@ with nix-direnv, which caches the shell.
 
 ## Windows
 
-The Linux cross-build and portable ZIP route is documented in the
+The Linux cross-build and optional Inno/portable ZIP route is documented in the
 [Windows beta guide](windows-beta.md). It supplies the matching Windows WebRTC
 archive and checksum-pinned Skia source through the Windows Nix shell.
 `scripts/build-windows` prepares and caches a static-runtime Skia build before
-compiling Yapfast. The executable uses static CRT linkage to match LiveKit.
+compiling Harmony. The executable uses static CRT linkage to match LiveKit.
 `scripts/build-windows [discord|full] [options]` builds the Discord-only release,
 the default, or the full preview with Matrix, and passes the options to
 `scripts/package-windows.py`, such as `--no-installer`.
 `scripts/package-windows.py`, which `scripts/build-windows` runs, makes the
-flavour's portable ZIP and compiles the installer, `packaging/windows/yapfast.iss`, with
-Inno Setup 7.1.0 under Wine. The first run downloads Inno Setup's installer,
-pinned by SHA-256, and installs it into its own Wine prefix in
-`.local/windows/inno-setup`, under `xvfb-run`, since it opens windows even
-when silent. `--no-installer` makes only the ZIP.
+flavour's portable ZIP and can compile the optional installer,
+`packaging/windows/harmony.iss`, with Inno Setup 7.1.0 under Wine. It uses
+only an already-installed compiler in
+`.local/windows/inno-setup/7.1.0/drive_c/InnoSetup/ISCC.exe`, or in the prefix
+named by `HARMONY_INNO_PREFIX`; it never downloads or installs Inno.
+`--no-installer` makes the ZIP and matching source without requiring it. This
+route is separate from the fork's primary build-stamped portable producer,
+[`scripts/package-harmony.py`](../scripts/package-harmony.py).
 
 Binaries people download name no folder of the machine that built them.
 Rust embeds source paths for panic messages, and C's `__FILE__` reaches
@@ -504,9 +531,13 @@ its linker also writes a RUNPATH of `$PWD/outputs/out/lib` and Nix store
 folders into the binary; the [AppImage](packaging.md#linux-appimage) avoids both by
 building in the Nix sandbox.
 
-The supported and packaged build route remains the Linux MSVC cross-build.
-A native Windows build is for development only: it names this machine's folders
-and must not be shipped. It needs Rust 1.97.1, Visual Studio C++ tools and the
+The inherited Linux MSVC cross-build remains available. The fork's primary
+Windows package route is the clean, build-stamped native candidate described in
+[packaging](packaging.md#windows-portable-package). A plain native development
+build is not a distribution candidate: it may embed local source paths and lacks
+the required release provenance. Do not ship it merely because it compiled.
+
+Native development needs Rust 1.97.1, Visual Studio C++ tools and the
 Windows 10/11 SDK, LLVM with `clang-cl`, `llvm-rc` and `libclang` on `PATH`
 (the SDK's `rc.exe` can replace `llvm-rc`), and NASM on `PATH`. bindgen, which
 `thorvg-sys` runs, finds `libclang` only through `LIBCLANG_PATH`, `llvm-config
@@ -534,6 +565,7 @@ conflict with a user-level Cargo config would prevent Cargo from starting.
 ```powershell
 python scripts/prepare-windows-skia.py
 python scripts/prepare-windows-skia.py --print-env
+# Apply the printed $env:SKIA_BINARIES_URL assignment in this shell, then:
 cargo build --release
 ```
 
@@ -550,9 +582,9 @@ on the tester's actual GPU.
 
 ## Logs
 
-Yapfast logs only its own operational events at info level and above. Dependency
+Harmony logs only its own operational events at info level and above. Dependency
 logs are disabled on purpose, because they can expose authentication data or
-message content. Yapfast ignores `RUST_LOG`; `YAPFAST_LOG=debug` turns on Yapfast's own
+message content. Harmony ignores `RUST_LOG`; `YAPFAST_LOG=debug` turns on Harmony's own
 debug logs (`crates/yapfast-core/src/logging.rs`).
 Typed text never enters the log. Future errors must use fixed event
 names and safe classifications rather than raw protocol responses or SDK Debug
@@ -561,10 +593,10 @@ output.
 ## Initial resource measurement
 
 After a `measure` build with the release's features (see
-[Networks](#networks)), open `target/measure/yapfast` inside the Nix shell;
+[Networks](#networks)), open `target/measure/Harmony` inside the Nix shell;
 measure `release` only for the shipped build's absolute numbers. Leave it
 inactive for at least 15 seconds, then sample its PID on Linux.
-`scripts/ui-session` writes the PID of the Yapfast it runs to
+`scripts/ui-session` writes the PID of the Harmony it runs to
 `.local/ui-session/yapfast.pid`.
 
 ```sh
@@ -583,7 +615,7 @@ Synapse and the authorization service communicate over an internal TLS listener
 using a throwaway self-signed certificate. LiveKit and authorization share a
 network namespace, and use the same signaling port inside and outside Docker.
 Authorization uses the standalone `/get_token` mode from lk-jwt-service 0.7.0.
-Yapfast's native experiment sets the local authorization fallback explicitly,
+Harmony's native experiment sets the local authorization fallback explicitly,
 because this stack does not advertise a production RTC discovery endpoint.
 See [sessions](sessions.md) for credential storage and headless sign-in.
 

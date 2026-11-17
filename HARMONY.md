@@ -2,7 +2,20 @@
 
 Harmony is Ren's personal Yapfast-based Discord client. Name chosen by Ren as the counterpart to discord. This is a local development brand, not a claim of trademark clearance, domain availability, or Discord affiliation. Public name, trademark, domain and store screening remains to be done before distribution.
 
-## First milestone
+## Identity
+
+Harmony 1.1.0 integrates Yapfast 0.4.1 while retaining the fork's Update 1–4 features.
+The source folder is `Harmony`; Windows builds produce `Harmony.exe`. Linux
+packages install `harmony`. Internal crate names and legacy credential-store keys
+remain stable compatibility identifiers, not product branding.
+
+The original mark is a linked H: two balanced vertical voices connected by one
+flowing stroke. The application icon uses lavender and mint on deep indigo; the
+in-app monochrome version follows the selected theme's semantic color. Explorer,
+window, tray, notification and installer icons use the same source artwork.
+See [branding](docs/branding.md).
+
+## Preserved foundation
 
 - A custom native titlebar integrated into the existing Rust/Slint desktop app.
 - Harmony user-facing branding without renaming internal crates or invalidating saved credentials.
@@ -17,7 +30,9 @@ Preserve all existing built-in themes and custom theme persistence. No new perma
 
 ## Voice and artwork
 
-Calm, clear, friendly. Prefer short action labels and specific error messages. No new avatar/icon artwork is approved yet; keep upstream assets temporarily and retain credits. The initial brand is a Harmony wordmark, not a final logo.
+Calm, clear, friendly. Prefer short action labels and specific error messages.
+The Harmony mark replaces upstream application artwork, not user avatars or
+third-party service logos. Keep credits and legally required notices accessible.
 
 ## Acceptance checks
 

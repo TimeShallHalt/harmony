@@ -1,9 +1,29 @@
-//! Yapfast's icon in the system tray, which keeps Yapfast running with its window
-//! closed: a StatusNotifierItem on Linux, on the session bus Yapfast is given,
+//! Harmony's icon in the system tray, which keeps Harmony running with its window
+//! closed: a StatusNotifierItem on Linux, on the session bus Harmony is given,
 //! and a notification-area icon on Windows. Clicking it opens the window; its
-//! menu opens Yapfast, leaves a call and quits.
+//! menu opens Harmony, leaves a call and quits.
 
 use std::cell::Cell;
+
+/// The xdg-activation token of the tray click or Open Harmony that is
+/// opening the window, which lets a Wayland window come to the front.
+#[cfg(target_os = "linux")]
+static TOKEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The token of the tray click that asked for the window, once.
+pub fn take_activation_token() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        TOKEN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
 
 /// What the tray asks for, or says. Each runs on Slint's event loop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,7 +50,7 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// Puts Yapfast's icon in the tray. `chosen` runs on Slint's event loop with
+    /// Puts Harmony's icon in the tray. `chosen` runs on Slint's event loop with
     /// what the person picked. `None` where there's no tray to use.
     pub fn start(chosen: fn(Choice)) -> Option<Self> {
         let platform = platform::Tray::start(chosen)?;
@@ -54,24 +74,20 @@ impl Tray {
     }
 }
 
-/// Yapfast's logo in Yap's marigold, `size` pixels square, with a red dot for
-/// unread messages cut into its corner.
+/// Harmony's shared application artwork, rendered at the tray's native size.
+/// The unread badge has its own contrasting ring, independent of the logo.
 fn logo(size: u32, unread: bool) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
-    let mut svg = include_str!("../ui/icons/logo.svg")
-        .replacen(
-            r#"width="24" height="24""#,
-            &format!(r#"width="{size}" height="{size}""#),
-            1,
-        )
-        .replacen(r##"fill="#fff" mask"##, r##"fill="#ffbf47" mask"##, 1);
+    let mut svg = include_str!("../packaging/icon.svg").replacen(
+        r#"width="256" height="256""#,
+        &format!(r#"width="{size}" height="{size}""#),
+        1,
+    );
     if unread {
-        svg = svg
-            .replacen("</mask>", r#"<circle cx="74" cy="74" r="21" /></mask>"#, 1)
-            .replacen(
-                "</svg>",
-                r##"<circle cx="74" cy="74" r="15" fill="#f0545e" /></svg>"##,
-                1,
-            );
+        svg = svg.replacen(
+            "</svg>",
+            r##"<circle cx="80" cy="80" r="13" fill="#15192D"/><circle cx="80" cy="80" r="9" fill="#F56D83"/></svg>"##,
+            1,
+        );
     }
     slint::Image::load_from_svg_data(svg.as_bytes())
         .ok()?
@@ -158,12 +174,12 @@ mod linux {
         let chosen = item.chosen;
         // Until registering says otherwise; it reports a missing watcher.
         online.store(true, Ordering::Relaxed);
-        // A tray that starts after Yapfast, or comes back, still gets the icon.
+        // A tray that starts after Harmony, or comes back, still gets the icon.
         let handle = match item.assume_sni_available(true).spawn() {
             Ok(handle) => handle,
             Err(error) => {
                 online.store(false, Ordering::Relaxed);
-                tracing::info!(%error, "no tray icon; closing the window quits Yapfast");
+                tracing::info!(%error, "no tray icon; closing the window quits Harmony");
                 return;
             }
         };
@@ -186,12 +202,21 @@ mod linux {
     }
 
     fn choose(chosen: fn(Choice), choice: Choice) {
+        // KDE Plasma sends a click on the icon or a menu item its
+        // xdg-activation token just before the click, and ksni hands it to
+        // the click. Most other trays, such as Waybar, send none.
+        if choice == Choice::Open {
+            *super::TOKEN
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                ksni::current_xdg_activation_token();
+        }
         let _ = slint::invoke_from_event_loop(move || chosen(choice));
     }
 
     impl ksni::Tray for Item {
         fn id(&self) -> String {
-            "yapfast".into()
+            "harmony".into()
         }
 
         fn title(&self) -> String {
@@ -324,7 +349,7 @@ mod windows {
                 let class = WNDCLASSW {
                     lpfnWndProc: Some(procedure),
                     hInstance: instance,
-                    lpszClassName: w!("YapfastTray"),
+                    lpszClassName: w!("HarmonyTray"),
                     ..std::mem::zeroed()
                 };
                 RegisterClassW(&class);
@@ -332,7 +357,7 @@ mod windows {
                 // which wouldn't hear that Explorer restarted.
                 let window = CreateWindowExW(
                     0,
-                    w!("YapfastTray"),
+                    w!("HarmonyTray"),
                     w!("Harmony"),
                     WS_OVERLAPPED,
                     0,
@@ -365,7 +390,7 @@ mod windows {
                 }
                 let added = notify(NIM_ADD, &data);
                 if !added {
-                    tracing::info!("no notification area; closing the window quits Yapfast");
+                    tracing::info!("no notification area; closing the window quits Harmony");
                 }
                 ICON.set(Some(Icon {
                     data,

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def validate_stamp(stamp, commit, version):
     expected = {'version':version, 'commit':commit, 'dirty':False, 'platform':'windows',
-                'architecture':'x86_64', 'upstream':'Yapfast 0.3.0', 'license':'GPL-3.0-or-later'}
+                'architecture':'x86_64', 'upstream':'Yapfast 0.4.1', 'license':'GPL-3.0-or-later'}
     if (not isinstance(stamp, dict) or set(stamp) != set(expected) | {'build_id'}
             or any(stamp.get(k) != v for k,v in expected.items())
             or stamp.get('dirty') is not False
@@ -61,19 +61,23 @@ def main():
         source_snapshot(metadata,base,temp,source)
         package=temp/f'{base}-windows-x64'
         package.mkdir()
-        shutil.copy2(args.exe,package/'yapfast.exe')
+        shutil.copy2(args.exe,package/'Harmony.exe')
         shutil.copy2(ROOT/'LICENSE',package/'LICENSE.txt')
         shutil.copy2(args.stamp,package/'harmony-build-info.json')
         deps=dependency_notices(metadata,package,package/'licenses',args.skia_archive,args.skia_source,args.webrtc)
         (package/'THIRD-PARTY.json').write_text(json.dumps(deps,indent=2)+'\n',encoding='utf-8')
-        (package/'SOURCE.txt').write_text(f'Harmony {version}, build {stamp["build_id"]}\nCommit: {commit}\nGPL-3.0-or-later.\nMatching source accompanies this package: {source.name}\nSource SHA-256: {digest(source)}\nUpstream: Yapfast 0.3.0, https://github.com/yapfast/yapfast\nDependency notices and licenses are included in licenses/.\n',encoding='utf-8')
-        (package/'README.txt').write_text('Harmony for Windows 10/11 x64\n\nExtract the whole ZIP, then run yapfast.exe.\nUpdater not included. No automatic installation, startup registration or launch by this package.\nDo not replace a running app: close it yourself when convenient before a manual update.\nExisting data and Credential Manager storage keep their legacy Yapfast identity.\nNo credentials, sessions, account cache or user settings are included.\nDiscord does not authorize third-party personal-account clients; use carries account risk.\nGPL-3.0-or-later; see LICENSE.txt, SOURCE.txt and licenses/.\n',encoding='utf-8')
+        (package/'SOURCE.txt').write_text(f'Harmony {version}, build {stamp["build_id"]}\nCommit: {commit}\nGPL-3.0-or-later.\nMatching source accompanies this package: {source.name}\nSource SHA-256: {digest(source)}\nUpstream: Yapfast 0.4.1, https://github.com/yapfast/yapfast\nDependency notices and licenses are included in licenses/.\n',encoding='utf-8')
+        (package/'README.txt').write_text('Harmony for Windows 10/11 x64\n\nExtract the whole ZIP, then run Harmony.exe.\nUpdater not included. No automatic installation, startup registration or launch by this package.\nDo not replace a running app: close it yourself when convenient before a manual update.\nExisting data folders are preserved. The default Windows folder is %LOCALAPPDATA%/Harmony/data; Credential Manager keeps its legacy service IDs for compatibility.\nIf an existing shortcut still targets yapfast.exe, manually retarget it to Harmony.exe while preserving its --data-dir arguments.\nNo credentials, sessions, account cache or user settings are included.\nDiscord does not authorize third-party personal-account clients; use carries account risk.\nGPL-3.0-or-later; see LICENSE.txt, SOURCE.txt and licenses/.\n',encoding='utf-8')
         build=dict(stamp,executable_sha256=digest(args.exe),source_archive_sha256=digest(source),
                    updater_included=False,installation_performed=False,activation_performed=False)
         (package/'BUILD.json').write_text(json.dumps(build,indent=2)+'\n',encoding='utf-8')
         zip_directory(package,archive)
     sums={x.name:digest(x) for x in (archive,source)}
     (output/'SHA256SUMS.txt').write_text(''.join(f'{v}  {k}\n' for k,v in sums.items()),encoding='utf-8')
+    manifest = dict(stamp, executable={'name':'Harmony.exe','sha256':digest(args.exe)},
+                    artifacts=[{'path':str(path),'sha256':sums[path.name]} for path in (archive,source)],
+                    uploaded=False, installed=False)
+    (output/'release-artifacts.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
     print(json.dumps({'commit':commit,'artifacts':sums,'output':str(output),'uploaded':False,'installed':False},indent=2))
 
 if __name__=='__main__':

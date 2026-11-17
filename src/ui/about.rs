@@ -56,5 +56,20 @@ mod tests {
         let layout: Layout = serde_json::from_str(r#"{"harmony_updates":{"consent_version":1,"check_on_startup":true,"download_automatically":true,"check_interval_hours":1}}"#).unwrap();
         let saved = serde_json::to_value(layout).unwrap();
         assert!(saved.get("harmony_updates").is_none());
+        let upstream: Layout = serde_json::from_str(
+            r#"{"check_for_updates":true,"update_nightlies":true,"skipped_update":"v99.0.0","announced_update":"v99.0.0"}"#,
+        ).unwrap();
+        let saved = serde_json::to_value(upstream).unwrap();
+        for key in [
+            "check_for_updates",
+            "update_nightlies",
+            "skipped_update",
+            "announced_update",
+        ] {
+            assert!(
+                saved.get(key).is_none(),
+                "{key} must not revive stock updating"
+            );
+        }
     }
 }

@@ -1,4 +1,4 @@
-//! The gateway session: connecting, then answering Yapfast's requests and
+//! The gateway session: connecting, then answering Harmony's requests and
 //! taking in Discord's events until the connection ends, and reconnecting.
 
 use std::{
@@ -49,7 +49,7 @@ pub(super) fn receive_contacts(
     }
 }
 
-/// What outlasts a session: the handle's channels and what Yapfast has on screen.
+/// What outlasts a session: the handle's channels and what Harmony has on screen.
 pub(super) struct Shared {
     pub(super) snapshots: watch::Sender<Arc<Snapshot>>,
     pub(super) live: broadcast::Sender<Live>,
@@ -65,7 +65,11 @@ pub(super) struct Shared {
     pub(super) activity: watch::Receiver<Option<Arc<Value>>>,
     /// Whether the account shares it, which runs or stops what finds it.
     pub(super) show_game: watch::Sender<bool>,
-    /// Nobody has used Yapfast since then, in Unix milliseconds, and whether
+    /// The song this account plays, from what follows its linked Spotify,
+    /// and those links, which READY and USER_CONNECTIONS_UPDATE give.
+    pub(super) music: watch::Receiver<Option<Arc<Value>>>,
+    pub(super) spotify: watch::Sender<crate::spotify::Accounts>,
+    /// Nobody has used Harmony since then, in Unix milliseconds, and whether
     /// it may show idle; see [`settings::Away`].
     pub(super) inactive: Option<(u64, bool)>,
     /// The server and channel or thread on screen, and a thread beside it,
@@ -99,9 +103,12 @@ pub(super) async fn run(
                 shared.api.learn_build_number().await;
             }
             let playing = *shared.show_game.borrow();
+            let music = shared.music.borrow().clone();
+            let music = music.filter(|_| shared.presence["status"] != "invisible");
             crate::own_activity::merge(
                 &mut shared.presence,
                 shared.activity.borrow().as_deref().filter(|_| playing),
+                music.as_deref(),
             );
             Gateway::connect(&token, shared.presence.clone(), &mut reconnects).await
         };
@@ -130,7 +137,7 @@ pub(super) async fn run(
             Some("Discord refused the saved login. Link your Discord account again.")
         } else if error.downcast_ref::<TooManyIdentifies>().is_some() {
             Some(
-                "Discord keeps ending the connection, so Yapfast stopped reconnecting. Restart Yapfast to try again.",
+                "Discord keeps ending the connection, so Harmony stopped reconnecting. Restart Harmony to try again.",
             )
         } else {
             None
@@ -141,7 +148,7 @@ pub(super) async fn run(
                 snapshot.status = Status::Offline(reason.into());
                 snapshot.voice.clear();
             });
-            // Keep answering until Yapfast drops the handles.
+            // Keep answering until Harmony drops the handles.
             while let Some(request) = requests.recv().await {
                 refuse(request, &mut shared);
             }
@@ -166,7 +173,7 @@ pub(super) async fn run(
     }
 }
 
-/// Discord refreshed the login in READY, and the one Yapfast identified with
+/// Discord refreshed the login in READY, and the one Harmony identified with
 /// is to go: requests, identifying again, the credential store and the
 /// files kept all take the new one. The gateway takes it from READY itself.
 async fn relogin(api: &Api, token: &str) {
@@ -234,6 +241,9 @@ async fn connected_session(
     };
     let mut tracker = Tracker::from_ready(me, &ready, shared.names.clone());
     shared
+        .spotify
+        .send_if_modified(|accounts| accounts.keep(&tracker.me, &ready["connected_accounts"]));
+    shared
         .notes
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -255,6 +265,11 @@ async fn connected_session(
     }
     tracker.beside(shared.beside.as_ref().map(|(_, thread)| thread.as_str()));
     shared.snapshots.send_replace(Arc::new(tracker.snapshot()));
+    // Discord's client counts every command index out of date in a new
+    // session.
+    let _ = shared
+        .live
+        .send(Live::CommandIndexStale(crate::commands::Stale::All));
     let quiet = tracker.next_quiet(now_ms());
     let mut session = Session {
         gateway,
@@ -355,6 +370,7 @@ impl Session<'_> {
                     self.show_presence().await
                 }
                 () = activity_changed(&mut self.shared.activity) => self.show_presence().await,
+                () = activity_changed(&mut self.shared.music) => self.show_presence().await,
                 () = self.away_changes.as_mut(), if self.away_change.is_some() => {
                     self.show_presence().await
                 }
@@ -487,6 +503,27 @@ impl Session<'_> {
                 }
                 Ok(())
             }
+            Request::MarkUnread {
+                channel,
+                last,
+                mentions,
+                sync,
+            } => {
+                self.tracker.unreads.mark_unread(&channel, last, mentions);
+                self.publisher.changed();
+                // A read on its way would read it again.
+                self.acks.forget(&channel);
+                if sync {
+                    let api = self.shared.api.clone();
+                    tokio::spawn(async move {
+                        let last = last.to_string();
+                        if let Err(error) = api.ack_manual(&channel, &last, mentions).await {
+                            tracing::warn!(%error, "could not mark a Discord channel unread");
+                        }
+                    });
+                }
+                Ok(())
+            }
             Request::GoLive {
                 guild,
                 channel,
@@ -569,8 +606,31 @@ impl Session<'_> {
         }
     }
 
+    /// Gives an answer only this account sees the server of its channel,
+    /// which Discord may leave off it, so it isn't taken for a DM's.
+    fn place_ephemeral(&self, dispatch: &mut Dispatch) {
+        let data = &mut dispatch.data;
+        if !matches!(dispatch.event, Event::MessageCreate | Event::MessageUpdate)
+            || !data["guild_id"].is_null()
+            || data["flags"].as_u64().unwrap_or_default() & message::EPHEMERAL == 0
+        {
+            return;
+        }
+        let channel = data["channel_id"].as_str().unwrap_or_default();
+        let guild = self
+            .tracker
+            .servers
+            .iter()
+            .find(|server| server.channel(channel).is_some())
+            .map(|server| Value::from(server.id.as_str()));
+        if let (Some(guild), Some(data)) = (guild, data.as_object_mut()) {
+            data.insert("guild_id".into(), guild);
+        }
+    }
+
     /// Takes in a dispatched event; an error ends the session.
-    async fn event(&mut self, dispatch: Dispatch) -> Result<()> {
+    async fn event(&mut self, mut dispatch: Dispatch) -> Result<()> {
+        self.place_ephemeral(&mut dispatch);
         let (event, data) = (&dispatch.event, &dispatch.data);
         if receive_contacts(&mut self.tracker, &mut self.shared.lists, event, data) {
             self.publisher.changed();
@@ -594,6 +654,11 @@ impl Session<'_> {
                         data["note"].as_str().unwrap_or_default(),
                     );
                 }
+            }
+            Event::ContentInventoryInboxStale => {
+                let _ = self.shared.live.send(Live::ActivityFeedStale {
+                    refresh_after_ms: data["refresh_after_ms"].as_u64(),
+                });
             }
             Event::GuildMembersChunk | Event::RateLimited => {
                 applied = self.searches.answer(&mut self.tracker, &dispatch);
@@ -640,6 +705,17 @@ impl Session<'_> {
             self.publisher.changed();
             self.ask_previews();
         }
+        // A server on screen, back from an outage or joined again, says
+        // afresh when its busy voice channels' calls started.
+        if *event == Event::GuildCreate
+            && data["unavailable"].as_bool() != Some(true)
+            && let Some(guild) = data["id"].as_str()
+        {
+            self.shared
+                .lists
+                .server_back(&mut self.gateway, guild)
+                .await?;
+        }
         // Names took the change in, so what shows the member follows; and
         // this account's messages its new display name and avatar.
         if matches!(event, Event::GuildMemberUpdate | Event::GuildMemberRemove) {
@@ -659,6 +735,9 @@ impl Session<'_> {
         if *event == Event::UserSettingsProtoUpdate {
             self.custom_status_changed();
             self.show_presence().await?;
+        }
+        if *event == Event::UserConnectionsUpdate {
+            self.ask_connections();
         }
         self.shared.lists.group_event(&self.tracker, &dispatch);
         if self.streams.waiting() {
@@ -711,7 +790,13 @@ impl Session<'_> {
         let activity = self.shared.activity.borrow_and_update().clone();
         let activity = activity.filter(|_| self.tracker.show_game);
         self.show_playing(activity.as_deref());
-        crate::own_activity::merge(&mut presence, activity.as_deref());
+        // An invisible account shares no music, as in Discord's client.
+        let music = self.shared.music.borrow_and_update().clone();
+        let music = music.filter(|_| self.tracker.status != "invisible");
+        crate::own_activity::merge(&mut presence, activity.as_deref(), music.as_deref());
+        if self.tracker.shows_here(&presence["activities"]) {
+            self.publisher.changed();
+        }
         if presence != self.shared.presence {
             self.gateway.update_presence(presence.clone()).await?;
             self.shared
@@ -736,6 +821,21 @@ impl Session<'_> {
             self.tracker.playing = playing.map(Arc::new);
             self.publisher.changed();
         }
+    }
+
+    /// Asks Discord for the account's linked services, which changed. Until
+    /// it answers, or if it can't, the links known stay.
+    fn ask_connections(&self) {
+        let (api, spotify) = (self.shared.api.clone(), self.shared.spotify.clone());
+        let me = self.tracker.me.clone();
+        tokio::spawn(async move {
+            match api.connections().await {
+                Ok(connections) => {
+                    spotify.send_if_modified(|accounts| accounts.keep(&me, &connections));
+                }
+                Err(error) => tracing::warn!(%error, "could not load the account's connections"),
+            }
+        });
     }
 
     /// Waits for the custom status as it is now to end by itself.
@@ -794,4 +894,133 @@ fn status_left(tracker: &Tracker) -> Duration {
         .map_or(Duration::from_secs(86_400 * 365), |at| {
             Duration::from_millis(at.saturating_sub(now_ms()))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+        time::timeout,
+    };
+    use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message};
+
+    use super::*;
+    use crate::spotify::Accounts;
+
+    const WAIT: Duration = Duration::from_secs(10);
+
+    /// The activities of the next presence this session sends Discord.
+    async fn sent_activities(peer: &mut WebSocketStream<TcpStream>) -> Value {
+        loop {
+            let message = timeout(WAIT, peer.next()).await.unwrap().unwrap().unwrap();
+            if let Message::Text(text) = message {
+                let mut command: Value = serde_json::from_str(text.as_str()).unwrap();
+                if command["op"] == 3 {
+                    return command["d"]["activities"].take();
+                }
+            }
+        }
+    }
+
+    async fn dispatch(
+        peer: &mut WebSocketStream<TcpStream>,
+        sequence: u64,
+        name: &str,
+        data: Value,
+    ) {
+        let dispatch = json!({"op": 0, "s": sequence, "t": name, "d": data});
+        peer.send(Message::text(dispatch.to_string()))
+            .await
+            .unwrap();
+    }
+
+    /// Over sockets, from READY's links and the song to what Discord hears.
+    #[tokio::test]
+    async fn the_song_joins_the_presence_and_the_links_follow_discord() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let presence = json!({"status": "online", "since": 0, "activities": [], "afk": false});
+        let ready = json!({
+            "session_id": "mine",
+            "user": {"id": "7", "username": "me"},
+            "connected_accounts": [{"type": "spotify", "id": "x", "show_activity": true}],
+        });
+        let (connected, mut peer) =
+            tokio::join!(Gateway::connect_at(&url, presence.clone()), async {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut peer = accept_async(stream).await.unwrap();
+                let hello = json!({"op": 10, "d": {"heartbeat_interval": 45_000}});
+                peer.send(Message::text(hello.to_string())).await.unwrap();
+                // The identify.
+                peer.next().await.unwrap().unwrap();
+                dispatch(&mut peer, 1, "READY", ready).await;
+                peer
+            });
+        let (gateway, ready) = connected.unwrap();
+        // Where the session asks for the links again.
+        let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut api = Api::anonymous().unwrap();
+        api.base = format!("http://{}", http.local_addr().unwrap());
+
+        let (snapshots, _watcher) = watch::channel(Arc::new(Snapshot::default()));
+        let (live, _) = broadcast::channel(16);
+        let names = Arc::new(RwLock::new(Names::default()));
+        let (_game, activity) = watch::channel(None);
+        let (show_game, _shown) = watch::channel(true);
+        let (music, music_seen) = watch::channel(None);
+        let (spotify, mut accounts) = watch::channel(Accounts::default());
+        let mut shared = Shared {
+            snapshots,
+            live: live.clone(),
+            names: names.clone(),
+            notes: super::super::Notes::default(),
+            api: Arc::new(api),
+            lists: MemberLists::new(vec![], live, names, Presence::Online),
+            presence,
+            activity,
+            show_game,
+            music: music_seen,
+            spotify,
+            inactive: None,
+            viewing: None,
+            beside: None,
+        };
+        let (requests, mut received) = mpsc::unbounded_channel();
+        let session = tokio::spawn(async move {
+            connected_session(gateway, ready, &mut received, &mut shared).await;
+        });
+        timeout(WAIT, accounts.changed()).await.unwrap().unwrap();
+
+        let song = json!({"type": 2, "name": "Spotify", "details": "A Song"});
+        music.send_replace(Some(Arc::new(song.clone())));
+        let mut sent = sent_activities(&mut peer).await;
+        while sent != json!([song]) {
+            sent = sent_activities(&mut peer).await;
+        }
+        // Invisible shares none of it, as Discord's client doesn't.
+        requests.send(Request::Status("invisible".into())).unwrap();
+        assert_eq!(sent_activities(&mut peer).await, json!([]));
+        requests.send(Request::Status("online".into())).unwrap();
+        assert_eq!(sent_activities(&mut peer).await, json!([song]));
+        // A pause takes the song out at once.
+        music.send_replace(None);
+        assert_eq!(sent_activities(&mut peer).await, json!([]));
+
+        // The links changed, so Discord is asked which they are: none now.
+        dispatch(&mut peer, 2, "USER_CONNECTIONS_UPDATE", json!({})).await;
+        let (mut asked, _) = timeout(WAIT, http.accept()).await.unwrap().unwrap();
+        let mut line = [0; 4096];
+        let got = asked.read(&mut line).await.unwrap();
+        assert!(String::from_utf8_lossy(&line[..got]).starts_with("GET /users/@me/connections "));
+        asked
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]")
+            .await
+            .unwrap();
+        timeout(WAIT, accounts.changed()).await.unwrap().unwrap();
+
+        session.abort();
+    }
 }

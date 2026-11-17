@@ -1,6 +1,7 @@
-import { Theme, Label } from "theme.slint";
+import { Theme, Label, Middle } from "theme.slint";
 import { SettingsTitle, SettingsHeading } from "settings.slint";
-import { ActionButton } from "controls.slint";
+import { ActionButton, Avatar, StatusText } from "controls.slint";
+import { BuildInfo } from "yapfast/build-info.slint";
 
 export global HarmonyAbout {
     in-out property <string> running-info;
@@ -8,17 +9,56 @@ export global HarmonyAbout {
 }
 export component AboutUpdatesSettings inherits VerticalLayout {
     in property <bool> preview;
+    in property <string> account-name;
+    in property <string> account-initial;
+    in property <color> account-tint;
+    in property <image> account-picture;
+    in property <string> account-status;
+    in property <string> account-status-emoji;
+    callback open-link(string);
+    property <bool> details-open;
     spacing: 16px;
     SettingsTitle { text: "About"; }
-    SettingsHeading { text: "RUNNING HARMONY BUILD"; }
-    Text { text: HarmonyAbout.running-info; color: Theme.text; font-size: 14px; wrap: word-wrap; accessible-label: "Running build information"; }
     HorizontalLayout {
-        alignment: start;
-        ActionButton { text: "Copy diagnostics"; icon: @image-url("icons/copy.svg"); clicked => { HarmonyAbout.copy-diagnostics(); } }
+        spacing: 16px;
+        Middle { Image { source: @image-url("icons/logo.svg"); width: 40px; height: 40px; colorize: Theme.accent; accessible-role: none; } }
+        VerticalLayout {
+            alignment: center; spacing: 4px;
+            Text { text: "Harmony"; color: Theme.text; font-size: 26px; font-weight: 700; }
+            Text { text: BuildInfo.headline; color: Theme.secondary; font-size: 13px; overflow: elide; }
+        }
     }
-    Label { text: "Diagnostics contain only public version/build, commit, platform, architecture, upstream and license information. No credentials, account IDs, messages or local paths."; }
+    if !root.preview && root.account-name != "": Rectangle {
+        background: Theme.sidebar; border-radius: 10px;
+        accessible-role: groupbox; accessible-label: "Your account";
+        HorizontalLayout {
+            padding: 16px; spacing: 12px;
+            Middle { Avatar { size: 44px; initial: root.account-initial; tint: root.account-tint; picture: root.account-picture; } }
+            VerticalLayout {
+                alignment: center; spacing: 4px;
+                Text { text: root.account-name; color: Theme.text; font-size: 16px; font-weight: 600; overflow: elide; }
+                if root.account-status != "" || root.account-status-emoji != "": StatusText { text: root.account-status; emoji-url: root.account-status-emoji; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: start; spacing: 8px;
+        ActionButton { text: "Copy diagnostics"; icon: @image-url("icons/copy.svg"); clicked => { HarmonyAbout.copy-diagnostics(); } }
+        ActionButton { text: root.details-open ? "Hide build details" : "Build details"; icon: @image-url("icons/id-filled.svg"); clicked => { root.details-open = !root.details-open; } }
+    }
+    if root.details-open: VerticalLayout {
+        spacing: 8px;
+        SettingsHeading { text: "RUNNING BUILD"; }
+        Text { text: HarmonyAbout.running-info; color: Theme.text; font-size: 13px; wrap: word-wrap; accessible-label: "Running build information"; }
+        Label { text: "Diagnostics contain public build and license information only. No credentials, account IDs, messages or local paths."; }
+    }
     Rectangle { height: 1px; background: Theme.edge; }
-    SettingsHeading { text: "UPDATE STATUS"; }
-    Text { text: "Updater not included in this build."; color: Theme.text; font-size: 14px; accessible-label: "Update status"; }
-    Label { text: "No update checks, downloads, background update tasks or installation on exit. Updating is manual; this build does not change your installation."; }
+    SettingsHeading { text: "LICENSES & CREDITS"; }
+    Label { text: "GPL-3.0-or-later. Based on Yapfast. Fonts, emoji and icons retain their respective open-source licenses."; }
+    HorizontalLayout {
+        alignment: start; spacing: 8px;
+        ActionButton { text: "Source & license"; icon: @image-url("icons/github.svg"); clicked => { root.open-link("https://github.com/TimeShallHalt/harmony"); } }
+        ActionButton { text: "Upstream credits"; icon: @image-url("icons/external-link.svg"); clicked => { root.open-link("https://github.com/yapfast/yapfast"); } }
+    }
+    Label { text: "Updater not included in this build. Updates are manual; Harmony does not check, download or install them in the background."; accessible-label: "Update status: manual updates only"; }
 }

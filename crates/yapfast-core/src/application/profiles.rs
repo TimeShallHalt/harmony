@@ -1,23 +1,11 @@
 //! Profile cards, the profile beside a DM, and role cards.
 
 use super::*;
+use crate::chat::{ProfileWidget, Wishlist};
 
 impl Application {
     pub(super) fn request_profile(&mut self, room: String, user: String, panel: bool) -> Effect {
-        let request = Arc::new(chat::ProfileRequest {
-            room,
-            user,
-            panel,
-            account: self.state.account.clone(),
-            owner: self.state.discord_user.clone(),
-            #[cfg(feature = "discord")]
-            source: self
-                .discord
-                .as_ref()
-                .and_then(|snapshot| snapshot.presence_observation.clone()),
-            #[cfg(feature = "discord")]
-            publication: Arc::default(),
-        });
+        let request = self.new_profile_request(room, user, panel);
         if panel {
             self.panel_profile_request = Some(request.clone());
         } else {
@@ -26,17 +14,37 @@ impl Application {
         Effect::Backend(Command::Discord(DiscordCommand::ScopedProfile(request)))
     }
 
-    pub(super) fn show_profile_presentation(
-        &mut self,
-        request: Arc<chat::ProfileRequest>,
-        kept: bool,
-        result: Result<Profile, String>,
-    ) {
+    fn new_profile_request(
+        &self,
+        room: String,
+        user: String,
+        panel: bool,
+    ) -> Arc<chat::ProfileRequest> {
+        Arc::new(chat::ProfileRequest {
+            room,
+            user,
+            panel,
+            account: self.state.account.clone(),
+            owner: self.state.discord_user.clone(),
+            effect: self.state.cosmetics.effects,
+            // A DM panel draws no frame.
+            frame: !panel && self.state.cosmetics.frames,
+            #[cfg(feature = "discord")]
+            source: self
+                .discord
+                .as_ref()
+                .and_then(|snapshot| snapshot.presence_observation.clone()),
+            #[cfg(feature = "discord")]
+            publication: Arc::default(),
+        })
+    }
+
+    fn profile_owner_current(&self, request: &chat::ProfileRequest) -> bool {
         if !self.state.discord_online
             || request.account != self.state.account
             || request.owner != self.state.discord_user
         {
-            return;
+            return false;
         }
         #[cfg(feature = "discord")]
         if match (
@@ -49,7 +57,7 @@ impl Application {
             (None, None) => false,
             _ => true,
         } {
-            return;
+            return false;
         }
         #[cfg(feature = "discord")]
         if !request
@@ -57,23 +65,36 @@ impl Application {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_ref()
-            .is_some_and(|publication| publication.accepts(&request))
+            .is_some_and(|publication| publication.accepts(request))
         {
-            return;
+            return false;
+        }
+        true
+    }
+
+    fn profile_open_current(&self, request: &Arc<chat::ProfileRequest>) -> bool {
+        if !self.profile_owner_current(request) {
+            return false;
         }
         let current = if request.panel {
             &self.panel_profile_request
         } else {
             &self.profile_request
         };
-        if !current
+        current
             .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, &request))
-        {
-            return;
-        }
-        if !self.state.rooms.iter().any(|room| room.id == request.room) {
-            return;
+            .is_some_and(|current| Arc::ptr_eq(current, request))
+            && self.state.rooms.iter().any(|room| room.id == request.room)
+    }
+
+    pub(super) fn show_profile_presentation(
+        &mut self,
+        request: Arc<chat::ProfileRequest>,
+        kept: bool,
+        result: Result<Profile, String>,
+    ) -> Vec<Effect> {
+        if !self.profile_open_current(&request) {
+            return vec![];
         }
         let view = if request.panel {
             &mut self.state.panel_profile
@@ -84,28 +105,29 @@ impl Application {
             .as_mut()
             .filter(|view| view.loading && view.profile.id == request.user)
         else {
-            return;
+            return vec![];
         };
         if result
             .as_ref()
             .is_ok_and(|profile| profile.id != request.user)
         {
-            return;
+            return vec![];
         }
         if kept {
-            if let Ok(profile) = result {
-                fill_profile(view, &profile);
+            if let Ok(profile) = &result {
+                fill_profile(view, profile);
                 view.kept = true;
             }
         } else {
             view.loading = false;
-            match result {
-                Ok(profile) => fill_profile(view, &profile),
+            match &result {
+                Ok(profile) => fill_profile(view, profile),
                 Err(_) if view.kept => {}
                 Err(_) => view.note = Some("Discord didn't share the rest of this profile.".into()),
             }
             view.kept = false;
         }
+        self.ask_open_tabs()
     }
 
     /// Shows someone in the open conversation, or else a Discord friend.
@@ -140,6 +162,8 @@ impl Application {
                 member.id.clone()
             },
             avatar: member.avatar.clone(),
+            avatar_decoration: member.decoration.clone(),
+            style: member.style.clone(),
             presence: member.presence,
             activity: member.activity.clone(),
             activities: member.activities.clone(),
@@ -292,10 +316,18 @@ impl Application {
     pub(super) fn open_profile(
         &mut self,
         room: String,
-        profile: Profile,
+        mut profile: Profile,
         large: bool,
     ) -> Vec<Effect> {
-        let fetch = Network::of(&room) == Network::Discord && !self.state.preview;
+        let discord = Network::of(&room) == Network::Discord && !self.state.preview;
+        let fetch = discord && self.state.discord_online;
+        if discord {
+            // Cached member/DM shells have no authority for this new open.
+            profile.retire_appearance();
+        }
+        if !fetch {
+            self.profile_request = None;
+        }
         let user = profile.id.clone();
         let platform_presence = self.profile_platform_presence(&user, profile.presence);
         self.state.profile = Some(ProfileView {
@@ -305,6 +337,7 @@ impl Application {
             loading: fetch,
             kept: false,
             note: None,
+            ..Default::default()
         });
         if fetch {
             vec![self.request_profile(room, user, false)]
@@ -315,8 +348,17 @@ impl Application {
 
     /// Fills in a profile on screen with the rest Discord sent, or says it
     /// didn't, unless it shows the one kept from before.
-    pub(super) fn show_fetched_profile(&mut self, user: String, result: Result<Profile, String>) {
+    pub(super) fn show_fetched_profile(
+        &mut self,
+        user: String,
+        result: Result<Profile, String>,
+    ) -> Vec<Effect> {
+        if result.as_ref().is_ok_and(|profile| profile.id != user) {
+            return vec![];
+        }
+        let mut filled = false;
         for view in self.loading_profiles(&user) {
+            filled = true;
             view.loading = false;
             match &result {
                 Ok(profile) => fill_profile(view, profile),
@@ -327,14 +369,194 @@ impl Application {
             }
             view.kept = false;
         }
+        if filled { self.ask_open_tabs() } else { vec![] }
     }
 
     /// Fills in a profile on screen with the one kept from before, until
     /// Discord's comes.
-    pub(super) fn show_kept_profile(&mut self, user: String, profile: Profile) {
+    pub(super) fn show_kept_profile(&mut self, user: String, profile: Profile) -> Vec<Effect> {
+        if profile.id != user {
+            return vec![];
+        }
+        let mut filled = false;
         for view in self.loading_profiles(&user) {
+            filled = true;
             fill_profile(view, &profile);
             view.kept = true;
+        }
+        if filled { self.ask_open_tabs() } else { vec![] }
+    }
+
+    /// Asks for the account's own profile, which its card draws from: the
+    /// main one, outside any server.
+    pub(super) fn load_own_profile(&mut self) -> Vec<Effect> {
+        let Some(request) = self.request_account_profile() else {
+            return vec![];
+        };
+        vec![Effect::Backend(Command::Discord(
+            DiscordCommand::AccountProfile(request),
+        ))]
+    }
+
+    /// A dedicated generation for the main account card, also carried by the
+    /// editor's same-response card refresh. It never owns a card/panel slot.
+    pub(super) fn request_account_profile(&mut self) -> Option<Arc<chat::ProfileRequest>> {
+        let user = self
+            .state
+            .discord_user
+            .clone()
+            .filter(|_| !self.state.preview && self.state.discord_online)?;
+        let room = crate::discord::room_id(crate::discord::DM_GUILD, "0");
+        let mut request = self.new_profile_request(room, user, false);
+        let flags = Arc::get_mut(&mut request).expect("new request is unique");
+        flags.effect = false;
+        flags.frame = false;
+        self.account_profile_request = Some(request.clone());
+        Some(request)
+    }
+
+    pub(super) fn show_account_profile(
+        &mut self,
+        request: Arc<chat::ProfileRequest>,
+        result: Result<Profile, String>,
+    ) {
+        if !self.profile_owner_current(&request)
+            || !self
+                .account_profile_request
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &request))
+            || request.owner.as_deref() != Some(request.user.as_str())
+            || request.room != crate::discord::room_id(crate::discord::DM_GUILD, "0")
+        {
+            return;
+        }
+        if let Ok(profile) = result
+            && profile.id == request.user
+            && profile.joined.is_none()
+        {
+            self.state.account_profile = Some(Arc::new(profile));
+        }
+    }
+
+    pub(super) fn retire_profile_ownership(&mut self) {
+        self.profile_request = None;
+        self.panel_profile_request = None;
+        self.account_profile_request = None;
+        self.state.account_profile = None;
+        self.state.account_decoration = None;
+        self.state.account_nameplate = None;
+        for view in [&mut self.state.profile, &mut self.state.panel_profile]
+            .into_iter()
+            .flatten()
+        {
+            view.profile.retire_appearance();
+            view.loading = false;
+            view.kept = false;
+        }
+    }
+
+    /// A tab of the full profile opened: it asks Discord once for what it
+    /// shows, and only for the full profile, never for a card.
+    pub(super) fn open_profile_tab(&mut self, tab: ProfileTab) -> Vec<Effect> {
+        let Some(view) = self.state.profile.as_mut().filter(|view| view.large) else {
+            return vec![];
+        };
+        match tab {
+            ProfileTab::Board => view.board_open = true,
+            ProfileTab::Activity => view.activity_open = true,
+            ProfileTab::Wishlist => view.wishlist_open = true,
+        }
+        self.ask_open_tabs()
+    }
+
+    /// What the full profile's open tabs still want from Discord. A wishlist
+    /// that failed is asked for again when the tab or the profile comes back.
+    fn ask_open_tabs(&mut self) -> Vec<Effect> {
+        let preview = self.state.preview;
+        let Some(view) = self.state.profile.as_mut().filter(|view| view.large) else {
+            return vec![];
+        };
+        let mut effects = vec![];
+        let profile = &mut view.profile;
+        // Matrix IDs start with `@`; only Discord has these.
+        if preview || profile.id.starts_with('@') {
+            return effects;
+        }
+        if view.activity_open && !profile.recent_asked && !view.loading {
+            profile.recent_asked = true;
+            effects.push(Effect::Backend(Command::Discord(
+                DiscordCommand::ProfileRecent {
+                    user: profile.id.clone(),
+                },
+            )));
+        }
+        if view.board_open && !profile.board_asked && names_games(&profile.widgets) {
+            profile.board_asked = true;
+            effects.push(Effect::Backend(Command::Discord(
+                DiscordCommand::ProfileBoard {
+                    user: profile.id.clone(),
+                    widgets: profile.widgets.clone(),
+                },
+            )));
+        }
+        if view.wishlist_open && matches!(profile.wishlist, Wishlist::Unasked | Wishlist::Failed) {
+            match &profile.wishlist_place {
+                Some(place) => {
+                    let id = place.id.clone();
+                    profile.wishlist = Wishlist::Loading;
+                    effects.push(Effect::Backend(Command::Discord(
+                        DiscordCommand::Wishlist { id },
+                    )));
+                }
+                // The profile on its way may yet say where it is.
+                None if view.loading => {}
+                None => profile.wishlist = Wishlist::Loaded(Vec::new()),
+            }
+        }
+        effects
+    }
+
+    /// A wishlist came, for the full profile if it's the one it asked for.
+    pub(super) fn profile_wishlist_loaded(&mut self, id: &str, wishlist: &Wishlist) {
+        if let Some(view) = self.state.profile.as_mut()
+            && view
+                .profile
+                .wishlist_place
+                .as_ref()
+                .is_some_and(|place| place.id == id)
+            && view.profile.wishlist == Wishlist::Loading
+        {
+            view.profile.wishlist = wishlist.clone();
+        }
+    }
+
+    pub(super) fn profile_recent_came(&mut self, user: &str, recent: Vec<chat::RecentActivity>) {
+        if let Some(view) = self
+            .state
+            .profile
+            .as_mut()
+            .filter(|view| view.profile.id == user)
+        {
+            view.profile.recent = recent;
+            view.profile.recent_came = true;
+        }
+    }
+
+    pub(super) fn profile_board_named(&mut self, user: &str, widgets: Vec<ProfileWidget>) {
+        let editor = self
+            .state
+            .profile_editor
+            .as_mut()
+            .and_then(|editor| editor.profile.as_mut())
+            .map(|profile| &mut profile.fallback);
+        let view = self.state.profile.as_mut().map(|view| &mut view.profile);
+        for profile in [view, editor]
+            .into_iter()
+            .flatten()
+            .filter(|profile| profile.id == user && profile.board_asked)
+        {
+            profile.widgets.clone_from(&widgets);
+            profile.board_named = true;
         }
     }
 
@@ -347,6 +569,28 @@ impl Application {
             .filter(|view| view.profile.id == user && !view.loading)
         {
             view.profile.badges.clone_from(&badges);
+        }
+    }
+
+    /// Enrich only the exact open that asked, after its base profile arrived.
+    pub(super) fn show_profile_frame(
+        &mut self,
+        request: &Arc<chat::ProfileRequest>,
+        frame: &Arc<[crate::chat::ProfileFrameLayer]>,
+    ) {
+        if !request.frame || !self.profile_open_current(request) {
+            return;
+        }
+        let view = if request.panel {
+            &mut self.state.panel_profile
+        } else {
+            &mut self.state.profile
+        };
+        if let Some(view) = view
+            .as_mut()
+            .filter(|view| view.profile.id == request.user && !view.loading)
+        {
+            view.profile.frame = frame.clone();
         }
     }
 
@@ -372,18 +616,32 @@ impl Application {
 
     /// The profiles on screen of `user` waiting for Discord's.
     fn loading_profiles(&mut self, user: &str) -> impl Iterator<Item = &mut ProfileView> {
-        [&mut self.state.profile, &mut self.state.panel_profile]
-            .into_iter()
-            .filter_map(Option::as_mut)
-            .filter(move |view| view.profile.id == user && view.loading)
+        [
+            (&mut self.state.profile, &self.profile_request),
+            (&mut self.state.panel_profile, &self.panel_profile_request),
+        ]
+        .into_iter()
+        .filter(|(_, request)| request.is_none())
+        .filter_map(|(view, _)| view.as_mut())
+        .filter(move |view| view.profile.id == user && view.loading)
     }
+}
+
+/// Whether a board has games or applications to name.
+pub(super) fn names_games(widgets: &[ProfileWidget]) -> bool {
+    widgets
+        .iter()
+        .any(|widget| !widget.games.is_empty() || widget.application.is_some())
 }
 
 /// Puts `profile` on screen in `view`. Presence and activities come from the
 /// member list; the profile doesn't carry them.
 fn fill_profile(view: &mut ProfileView, profile: &Profile) {
     let note = std::mem::take(&mut view.profile.note);
-    view.profile = Profile {
+    // What a tab already asked for stays, as long as it's the same list.
+    let same_place = view.profile.wishlist_place == profile.wishlist_place;
+    let same_board = same_board(&view.profile, profile);
+    let mut filled = Profile {
         note: if profile.note.is_empty() {
             note
         } else {
@@ -394,6 +652,37 @@ fn fill_profile(view: &mut ProfileView, profile: &Profile) {
         activities: std::mem::take(&mut view.profile.activities),
         ..profile.clone()
     };
+    filled.recent = std::mem::take(&mut view.profile.recent);
+    filled.recent_asked = view.profile.recent_asked;
+    filled.recent_came = view.profile.recent_came;
+    if same_place {
+        filled.wishlist = std::mem::take(&mut view.profile.wishlist);
+    }
+    if same_board {
+        keep_board(&mut filled, &mut view.profile);
+    }
+    view.profile = filled;
+}
+
+/// Whether `new` has the board `old` already asked Discord to name.
+pub(super) fn same_board(old: &Profile, new: &Profile) -> bool {
+    let game_ids = |widgets: &[ProfileWidget]| -> Vec<String> {
+        widgets
+            .iter()
+            .flat_map(|widget| &widget.games)
+            .map(|game| game.id.clone())
+            .collect()
+    };
+    old.board_asked
+        && old.widgets.len() == new.widgets.len()
+        && game_ids(&old.widgets) == game_ids(&new.widgets)
+}
+
+/// Moves the board `old` asked to name, and its names, to `new`.
+pub(super) fn keep_board(new: &mut Profile, old: &mut Profile) {
+    new.widgets = std::mem::take(&mut old.widgets);
+    new.board_asked = old.board_asked;
+    new.board_named = old.board_named;
 }
 
 /// What a one-to-one DM knows of its other person's profile.
@@ -407,6 +696,8 @@ pub(super) fn dm_profile(room: &ChatRoom, person: String) -> Profile {
             person.clone()
         },
         avatar: room.avatar.clone(),
+        avatar_decoration: room.decoration.clone(),
+        style: room.style.clone(),
         presence: room.presence,
         activity: room.activity.clone(),
         activities: room.activities.clone(),

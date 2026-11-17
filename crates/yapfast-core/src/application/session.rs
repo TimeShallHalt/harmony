@@ -112,7 +112,9 @@ impl Application {
                 return;
             }
             // A missing picture leaves an initial; it says nothing new.
-            Command::Discord(DiscordCommand::Pictures(_)) => return,
+            Command::Discord(DiscordCommand::Pictures(_) | DiscordCommand::CancelPictures(_)) => {
+                return;
+            }
             Command::Voice(_) => {
                 self.state.voice.error = Some("Voice is unavailable. Reconnect and retry.".into());
                 return;

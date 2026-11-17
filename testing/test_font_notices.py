@@ -2,13 +2,15 @@
 import importlib.util
 import hashlib
 import json
-from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("release_package", Path(__file__).resolve().parents[1] / "scripts/release_package.py")
+if spec is None or spec.loader is None:
+    raise SystemExit("could not load scripts/release_package.py")
 release_package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release_package)
 
@@ -23,6 +25,10 @@ class FontNoticesTest(unittest.TestCase):
             for name, text in notices.items():
                 (fonts / name).write_text(text)
             (fonts / "DMSans-Regular.ttf").write_bytes(b"font embedded in binary")
+            source = root / "src"
+            source.mkdir()
+            emoji_notice = source / "LICENSE-emojibase.txt"
+            emoji_notice.write_text("original emojibase attribution and license")
             twemoji = root / "vendor/twemoji"
             twemoji.mkdir(parents=True)
             for name in ("LICENSE-GRAPHICS", "LICENSE", "README.md", "README.yapfast.md", "REVISION"):
@@ -49,6 +55,7 @@ class FontNoticesTest(unittest.TestCase):
                 deps = release_package.dependency_notices({"packages": [{"name": "fixture", "version": "1", "manifest_path": str(crate / "Cargo.toml"), "license": "MIT", "source": "fixture", "repository": "https://example.invalid/fixture"}]}, package, package / "licenses", archive, skia, root)
             copied = package / "licenses/fonts"
             self.assertEqual({p.name: p.read_text() for p in copied.iterdir()}, notices)
+            self.assertEqual((package / "licenses/LICENSE-emojibase.txt").read_bytes(), emoji_notice.read_bytes())
             supplied = next(x for x in deps if x["name"] == "fixture")["license_files"]
             self.assertTrue(supplied, "workspace-only upstream license must accompany the crate")
             self.assertEqual((package / supplied[0]).read_bytes(), upstream.read_bytes())

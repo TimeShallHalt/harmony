@@ -6,7 +6,6 @@
 
 #[cfg(feature = "desktop")]
 mod autostart;
-#[cfg(feature = "desktop")]
 mod build_info;
 #[cfg(feature = "desktop")]
 mod copy;
@@ -14,6 +13,8 @@ mod copy;
 mod custom_emoji;
 #[cfg(all(feature = "desktop", target_os = "linux"))]
 mod desktop_entry;
+#[cfg(feature = "desktop")]
+mod discord_emoji_names;
 #[cfg(feature = "desktop")]
 mod drop;
 #[cfg(feature = "desktop")]
@@ -23,8 +24,6 @@ mod emoji_font;
 #[cfg(feature = "desktop")]
 mod emoji_font_tables;
 #[cfg(feature = "desktop")]
-mod emoji_glyphs;
-#[cfg(feature = "desktop")]
 mod emoji_text;
 #[cfg(feature = "desktop")]
 mod graphics;
@@ -33,19 +32,20 @@ mod icon;
 #[cfg(feature = "desktop")]
 mod instance;
 #[cfg(feature = "desktop")]
+mod keybinds;
+#[cfg(feature = "desktop")]
 mod notify;
 #[cfg(feature = "desktop")]
 mod paste;
 #[cfg(feature = "desktop")]
 mod protocol;
 #[cfg(feature = "desktop")]
-mod push_to_talk;
-#[cfg(feature = "desktop")]
 mod tray;
 #[cfg(feature = "desktop")]
 mod twemoji;
 #[cfg(feature = "desktop")]
 mod ui;
+
 #[cfg(feature = "desktop")]
 mod zoom;
 
@@ -115,7 +115,7 @@ fn main() -> Result<()> {
     let open_link = links.pop().and_then(|link| {
         let written = written_link(&link);
         if written.is_none() {
-            tracing::info!("Yapfast has no place for the link it was handed; starting without it");
+            tracing::info!("Harmony has no place for the link it was handed; starting without it");
         }
         written
     });
@@ -152,7 +152,7 @@ fn main() -> Result<()> {
         [argument] if argument == "--smoke-test" => {
             runtime.block_on(runtime.spawn(yapfast_core::check_build()))?;
             println!(
-                "Yapfast {}: Tokio, LiveKit{}{} build check passed.",
+                "Harmony {}: Tokio, LiveKit{}{} build check passed.",
                 env!("CARGO_PKG_VERSION"),
                 if cfg!(feature = "matrix") {
                     ", Matrix SDK, MatrixRTC"
@@ -178,13 +178,17 @@ fn main() -> Result<()> {
         [argument, resume, path] if argument == "--call-experiment" && resume == "--resume" => {
             runtime.block_on(experiment::resume(path.into()))
         }
+        [argument] if argument == "--version" || argument == "-V" => {
+            println!("{}", build_info::current().summary());
+            Ok(())
+        }
         [argument] if argument == "--help" || argument == "-h" => {
             println!(
-                "Usage: yapfast [--preview] [--data-dir PATH] [--renderer gpu|software] [--background] [LINK]\n       yapfast [--smoke-test | --help | --release-discord-links]\n       yapfast --call-experiment [--resume PATH]\n       yapfast [--voice-demo | --audio-devices]\n       yapfast session login --homeserver URL --user USER --password-stdin [--data-dir PATH]\n       yapfast session status [--data-dir PATH]\n       yapfast session recover --key-stdin [--data-dir PATH]\n       yapfast session logout [--data-dir PATH]\n\nWithout arguments, opens native Slint chat and restores a saved session.\n--renderer selects Skia Software or Skia GPU for this start, over the setting.\nIf Skia GPU fails to start, Yapfast restarts with Skia Software.\n--background starts in the system tray with a saved session, as starting at sign-in does.\nLINK opens a Discord server, channel, message, profile or invite link in Yapfast.\n--release-discord-links gives discord:// links back to the app that had them, as uninstalling does.\n--preview opens local sample conversations without connecting to Matrix.\n--smoke-test checks the linked stack without signing in or opening audio devices.\n--call-experiment creates disposable local accounts and checks encrypted synthetic audio. Start scripts/test-stack up first.\n--voice-demo creates two local accounts and a server with encrypted text and voice channels.\n--audio-devices lists native audio devices and cameras without recording.\nSession commands support password sign-in. Secrets are read from stdin."
+                "Usage: Harmony [--preview] [--data-dir PATH] [--renderer gpu|software] [--background] [LINK]\n       Harmony [--smoke-test | --version | --help | --release-discord-links]\n       Harmony --call-experiment [--resume PATH]\n       Harmony [--voice-demo | --audio-devices]\n       Harmony session login --homeserver URL --user USER --password-stdin [--data-dir PATH]\n       Harmony session status [--data-dir PATH]\n       Harmony session recover --key-stdin [--data-dir PATH]\n       Harmony session logout [--data-dir PATH]\n\nWithout arguments, opens native Slint chat and restores a saved session.\n--renderer selects Skia Software or Skia GPU for this start, over the setting.\nIf Skia GPU fails to start, Harmony restarts with Skia Software.\n--background starts in the system tray with a saved session, as starting at sign-in does.\nLINK opens a Discord server, channel, message, profile or invite link in Harmony.\n--release-discord-links gives discord:// links back to the app that had them, as uninstalling does.\n--preview opens local sample conversations without connecting to Matrix.\n--smoke-test checks the linked stack without signing in or opening audio devices.\n--version prints which build this is: its version, whether it is a stable release, a nightly or a development build, and its commit.\n--call-experiment creates disposable local accounts and checks encrypted synthetic audio. Start scripts/test-stack up first.\n--voice-demo creates two local accounts and a server with encrypted text and voice channels.\n--audio-devices lists native audio devices and cameras without recording.\nSession commands support password sign-in. Secrets are read from stdin."
             );
             Ok(())
         }
-        _ => bail!("unknown argument; run yapfast --help"),
+        _ => bail!("unknown argument; run Harmony --help"),
     }
 }
 
@@ -271,9 +275,20 @@ fn launch(
 /// so a restart follows the setting, nor `--background`: the window shows.
 #[cfg(feature = "desktop")]
 fn relaunch(arguments: &[String], gpu_failure: Option<&str>, link: Option<&str>) -> Result<()> {
-    let mut command = std::process::Command::new(
-        std::env::current_exe().context("could not find Yapfast to restart it")?,
-    );
+    let program = std::env::current_exe().context("could not find Harmony to restart it")?;
+    relaunch_program(&program, arguments, gpu_failure, link)
+}
+
+/// [`relaunch`] with another file, such as the AppImage an update replaced the
+/// running one with, whose old path inside its mount is gone.
+#[cfg(feature = "desktop")]
+fn relaunch_program(
+    program: &std::path::Path,
+    arguments: &[String],
+    gpu_failure: Option<&str>,
+    link: Option<&str>,
+) -> Result<()> {
+    let mut command = std::process::Command::new(program);
     command.args(arguments);
     match gpu_failure {
         Some(reason) => command
@@ -288,12 +303,14 @@ fn relaunch(arguments: &[String], gpu_failure: Option<&str>, link: Option<&str>)
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        Err(command.exec()).context("could not restart Yapfast")
+        Err(command.exec()).context("could not restart Harmony")
     }
     #[cfg(not(unix))]
     {
-        let status = command.status().context("could not restart Yapfast")?;
-        std::process::exit(status.code().unwrap_or(1));
+        // Waiting for the replacement would keep this process and its stopped
+        // window alive until the new client closes.
+        command.spawn().context("could not restart Harmony")?;
+        std::process::exit(0);
     }
 }
 
@@ -338,13 +355,15 @@ fn handed_link(arguments: &mut Vec<String>) -> Result<Option<String>, usize> {
 }
 
 /// Links given as arguments, taking them out of `arguments`: anything
-/// under `discord:` or `yapfast:`, whether or not Yapfast has a place for
+/// under `discord:`, `harmony:` or legacy `yapfast:`, whether or not Harmony has a place for
 /// it, and Discord's web links that it has.
 fn link_arguments(arguments: &mut Vec<String>) -> Vec<String> {
     arguments
         .extract_if(.., |argument| {
             argument.split_once(':').is_some_and(|(scheme, _)| {
-                scheme.eq_ignore_ascii_case("discord") || scheme.eq_ignore_ascii_case("yapfast")
+                scheme.eq_ignore_ascii_case("discord")
+                    || scheme.eq_ignore_ascii_case("harmony")
+                    || scheme.eq_ignore_ascii_case("yapfast")
             }) || written_link(argument).is_some()
         })
         .collect()
@@ -353,7 +372,16 @@ fn link_arguments(arguments: &mut Vec<String>) -> Vec<String> {
 /// A link as one word, when it names a place this Yapfast can open.
 fn written_link(link: &str) -> Option<String> {
     #[cfg(all(feature = "desktop", feature = "discord"))]
-    return yapfast_core::discord::discord_link(link);
+    {
+        // Keep the core's stable internal route scheme; desktop registrations
+        // now use Harmony's own public scheme, while old links still work.
+        let legacy = link.split_once(':').and_then(|(scheme, path)| {
+            scheme
+                .eq_ignore_ascii_case("harmony")
+                .then(|| format!("yapfast:{path}"))
+        });
+        return yapfast_core::discord::discord_link(legacy.as_deref().unwrap_or(link));
+    }
     #[cfg(not(all(feature = "desktop", feature = "discord")))]
     {
         let _ = link;
@@ -419,11 +447,16 @@ mod tests {
             "folder",
             "discord://-/library",
             "YAPFAST://channels/@me",
+            "HARMONY://channels/@me",
             "https://example.com/channels/10/11",
         ]);
         assert_eq!(
             link_arguments(&mut arguments),
-            ["discord://-/library", "YAPFAST://channels/@me"]
+            [
+                "discord://-/library",
+                "YAPFAST://channels/@me",
+                "HARMONY://channels/@me"
+            ]
         );
         assert_eq!(
             arguments,
@@ -445,5 +478,11 @@ mod tests {
             Some("https://discord.com/channels/10/11?a%20b")
         );
         assert_eq!(written_link("discord://-/settings/account"), None);
+        for path in ["//channels/@me", "//channels/10/11", "//users/20"] {
+            let legacy = written_link(&format!("yapfast:{path}"));
+            assert!(legacy.is_some(), "legacy route {path} is supported");
+            assert_eq!(written_link(&format!("harmony:{path}")), legacy);
+            assert_eq!(written_link(&format!("HARMONY:{path}")), legacy);
+        }
     }
 }

@@ -1,5 +1,5 @@
 {
-  description = "Yapfast native desktop development environment";
+  description = "Harmony native desktop development environment (based on Yapfast)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
@@ -9,6 +9,24 @@
       pkgs = import nixpkgs { inherit system; };
       native = import ./native.nix { inherit pkgs; };
       inherit (native) webrtc skia skiaPackage libraries runtimeLibraries;
+      # nixos-25.11's cargo-xwin 0.20.2 has xwin 0.6.7, which finds no headers
+      # for the Windows SDK in Visual Studio's 17.14.45 manifest: it names
+      # them `Installers/…` where older ones had `Installers\…`. xwin 0.10.0
+      # takes both. A machine that downloaded the SDK before keeps its copy.
+      cargoXwin = pkgs.cargo-xwin.overrideAttrs (old: rec {
+        version = "0.23.1";
+        src = pkgs.fetchFromGitHub {
+          owner = "rust-cross";
+          repo = "cargo-xwin";
+          tag = "v${version}";
+          hash = "sha256-JQYAYCCN/dWvX1oqFX/MjvtPuCA3k8WbHmmGBxG9ylA=";
+        };
+        cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+          inherit src;
+          name = "cargo-xwin-${version}";
+          hash = "sha256-FRK4bCTPAPWGov8vEFr9XdqCNoeXeyFdyiWV5x+4WYY=";
+        };
+      });
       windowsWebrtcArchive = pkgs.fetchurl {
         url = "https://github.com/livekit/rust-sdks/releases/download/webrtc-51ef663/webrtc-win-x64-release.zip";
         hash = "sha256-ClalyRs7e0IiCCuKCTiNFqgCzeItZylb6yTFVwB1WzA=";
@@ -58,8 +76,8 @@
       # scripts/package-linux.py copies the notices of Skia's third-party
       # code from here; the prebuilt Linux archive carries only Skia's own.
       packages.${system}.skia-source = pkgs.symlinkJoin {
-        name = "yapfast-skia-0.157.0-linux-source";
-        paths = [ windowsSkiaSource ] ++ map (dep: pkgs.runCommand "yapfast-skia-${dep.name}" {} ''
+        name = "harmony-skia-0.157.0-linux-source";
+        paths = [ windowsSkiaSource ] ++ map (dep: pkgs.runCommand "harmony-skia-${dep.name}" {} ''
           mkdir -p "$out/third_party/externals/${dep.name}"
           cp -r ${dep.source}/. "$out/third_party/externals/${dep.name}/"
         '') linuxSkiaDependencies;
@@ -77,7 +95,9 @@
             nasm
           ];
           buildInputs = libraries;
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibraries;
+          # rustc links with its own rust-lld, which skips the Nix ld wrapper
+          # that would put libstdc++'s directory in the binary's runpath.
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (runtimeLibraries ++ [ pkgs.stdenv.cc.cc.lib ]);
           CC = "clang";
           CXX = "clang++";
           LIBCLANG_PATH = "${pkgs.llvmPackages_21.libclang.lib}/lib";
@@ -88,12 +108,12 @@
           shellHook = ''
             export LD_LIBRARY_PATH="/run/opengl-driver/lib:$LD_LIBRARY_PATH"
             # Only people see the greeting; commands run through the shell don't.
-            [ -t 1 ] && echo "Yapfast dev shell. Run scripts/check --fast or cargo run --profile fast."
+            [ -t 1 ] && echo "Harmony dev shell. Run scripts/check --fast or cargo run --profile fast."
           '';
         };
         windows = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
-            rustup cargo-xwin cmake ninja gn protobuf python3 curl jq zip wineWowPackages.stable
+            rustup cargoXwin cmake ninja gn protobuf python3 curl jq zip wineWowPackages.stable
             # Inno Setup's own installer opens windows even when silent.
             xvfb-run
             llvmPackages_21.clang llvmPackages_21.lld llvmPackages_21.llvm

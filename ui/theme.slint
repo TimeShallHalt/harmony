@@ -1,71 +1,68 @@
-// Layered graphite: the rail is darkest, the conversation lightest. Marigold marks
-// selection, primary actions and messages that mention you, red mention counts and
-// destructive actions, green live voice;
-// a microphone's level goes from green through orange to red as it nears clipping.
-// These are the Yap theme's colours; the application sets others from Rust
-// (src/ui/theme.rs), so the defaults here only paint the first frame.
+// Harmony: quiet indigo surfaces, lavender actions and mint live presence.
+// Components consume semantic tokens so saved themes and imported packs keep
+// complete control. Rust selects the persisted palette after this first frame.
 export global Theme {
-    in-out property <color> rail: #111215;
-    in-out property <color> sidebar: #17181c;
-    in-out property <color> panel: #121316;
-    in-out property <color> chat: #1e1f24;
-    in-out property <color> stage: #1e1f24;
-    in-out property <color> raised: #26272e;
-    in-out property <color> field: #2a2b32;
-    in-out property <color> sunken: #0e0f12;
-    in-out property <color> hover: #222329;
-    in-out property <color> active: #2c2d35;
-    in-out property <color> row-hover: #1a1b20;
-    in-out property <color> line: #2c2d34;
-    in-out property <color> edge: #0c0d0f;
+    in-out property <color> rail: #15192d;
+    in-out property <color> sidebar: #1a1f35;
+    in-out property <color> panel: #171c30;
+    in-out property <color> chat: #20263e;
+    in-out property <color> stage: #20263e;
+    in-out property <color> raised: #282f4b;
+    in-out property <color> field: #2b3350;
+    in-out property <color> sunken: #111528;
+    in-out property <color> hover: #303956;
+    in-out property <color> active: #3c4265;
+    in-out property <color> row-hover: #272e49;
+    in-out property <color> line: #38415e;
+    in-out property <color> edge: #101426;
     /// The faint outline of the sidebar and the top of the window, and under the server name.
-    in-out property <color> outline: #2c2d34;
+    in-out property <color> outline: #38415e;
     /// The lines on the conversation's side: under the channel name, and left of the member list.
-    in-out property <color> outline-chat: #2c2d34;
+    in-out property <color> outline-chat: #38415e;
     /// The outline of the message box.
-    in-out property <color> outline-field: #2c2d34;
+    in-out property <color> outline-field: #38415e;
     /// The ground of a context menu: on a dark theme Discord's panel, a step
     /// above the raised surfaces (40, 40, 45 on its own dark theme).
     out property <color> menu: self.dark ? self.raised.mix(#ffffff, 0.98) : self.raised;
     /// A context menu's outline (53, 53, 59 on Discord's dark theme).
     out property <color> menu-line: self.dark ? self.line.mix(#000000, 0.95) : self.line;
-    in-out property <color> text: #eef0f4;
-    in-out property <color> secondary: #b5b8c1;
-    in-out property <color> muted: #8d919c;
-    in-out property <color> faint: #5c606a;
-    in-out property <color> accent: #ffbf47;
-    in-out property <color> accent-hover: #ffcd70;
-    in-out property <color> on-accent: #1d1607;
-    in-out property <color> accent-soft: #ffbf4726;
-    // A message that mentions you: Discord's hsl(39.4 100% 48.6%) at 12%, 16% under the pointer.
-    in-out property <color> mentioned: #f8a5001f;
-    in-out property <color> mentioned-hover: #f8a50029;
-    in-out property <color> danger: #f0545e;
-    in-out property <color> danger-hover: #f46f77;
+    in-out property <color> text: #f1f2fb;
+    in-out property <color> secondary: #c2c7de;
+    in-out property <color> muted: #9ba5c3;
+    in-out property <color> faint: #7782a3;
+    in-out property <color> accent: #a79bff;
+    in-out property <color> accent-hover: #bcb3ff;
+    in-out property <color> on-accent: #15192d;
+    in-out property <color> accent-soft: #a79bff26;
+    // Mentions echo the accent softly, without competing with message content.
+    in-out property <color> mentioned: #a79bff1f;
+    in-out property <color> mentioned-hover: #a79bff29;
+    in-out property <color> danger: #f47789;
+    in-out property <color> danger-hover: #ff91a0;
     /// A destructive menu row's text and icon, Discord's lighter red on a dark theme.
     /// Discord's composer: a hair lighter than a plain field, with a dimmer placeholder.
     out property <color> composer: self.dark ? self.field.mix(#ffffff, 0.99) : self.field;
     out property <color> placeholder: self.dark ? self.muted.mix(self.field, 0.66) : self.muted;
     out property <color> danger-text: self.dark ? #fa777c : self.danger;
     /// Text and icons on a danger fill: badges, the LIVE pill, leaving a call.
-    in-out property <color> on-danger: #ffffff;
-    in-out property <color> live: #3ecf7e;
-    in-out property <color> loud: #ff8c42;
-    in-out property <color> link: #7cc4ff;
+    in-out property <color> on-danger: #15192d;
+    in-out property <color> live: #79e5ce;
+    in-out property <color> loud: #f4bc7c;
+    in-out property <color> link: #a9c8ff;
     /// The neutral ActionButton face.
-    in-out property <color> button-default: #33343c;
-    in-out property <color> button-default-hover: #3c3d46;
+    in-out property <color> button-default: #353e5d;
+    in-out property <color> button-default-hover: #424d70;
     /// Laid over any surface at a low alpha to lift it on hover, and behind an
     /// emoji still loading: white on a dark theme, black on a light one.
     in-out property <color> overlay: #ffffff;
     /// The light that sweeps across a skeleton while it loads.
     in-out property <color> shimmer: #ffffff10;
     /// The line from a reply's avatar to the message it answers.
-    in-out property <color> reply-spine: #4a4c56;
+    in-out property <color> reply-spine: #647096;
     /// The ground of the window's tooltip and the zoom level's note.
-    in-out property <color> tooltip: #0b0c0e;
+    in-out property <color> tooltip: #111528;
     /// An avatar's ground before Yapfast knows the person's own tint.
-    in-out property <color> avatar: #6b7280;
+    in-out property <color> avatar: #7c86aa;
     /// Whether the theme is dark, for the std-widgets that follow the system's scheme.
     in-out property <bool> dark: true;
     // Data-only pack motion affects shared hover transitions and popup motion.
@@ -122,8 +119,28 @@ export component Label inherits Text {
     vertical-stretch: 0;
 }
 
+// Twemoji, as Discord's client draws emoji: `text` gives back a text with each
+// emoji in it as the glyph of Twemoji's font that draws its picture, so a
+// reaction, a poll's answer or an emoji shown by itself draws Twemoji's picture
+// whole, a flag or a skin tone included, and never the system's emoji.
+export global Twemoji {
+    pure callback text(string) -> string;
+}
+
 // Whether Discord's things carry its badge. A build without Matrix shows
 // nothing else, so it leaves them off.
+// The profile switches in Settings → Appearance. The Rust side keeps them in
+// layout.json and leaves out what's off before anything is fetched; see
+// Cosmetics in the core.
+export global Looks {
+    in-out property <bool> profile-effects: true;
+    in-out property <bool> decorations: true;
+    in-out property <bool> moving: true;
+    in-out property <bool> name-styles: true;
+    in-out property <bool> server-tags: true;
+    in-out property <bool> profile-frames: true;
+}
+
 export global Badges {
     in property <bool> discord: true;
 }

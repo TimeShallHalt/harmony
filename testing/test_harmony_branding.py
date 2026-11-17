@@ -25,13 +25,13 @@ class HarmonyBrandingTest(unittest.TestCase):
         self.assertIn('"Harmony",', source("src/notify.rs"))
 
     def test_linux_desktop_name_changes_without_renaming_integration(self):
-        entry = source("packaging/linux/io.github.yapfast.Yapfast.desktop")
+        entry = source("packaging/linux/io.github.TimeShallHalt.Harmony.desktop")
         self.assertIn("Name=Harmony\n", entry)
-        for identity in ["Exec=yapfast --open-link %u", "Icon=io.github.yapfast.Yapfast", "MimeType=x-scheme-handler/yapfast;", "StartupWMClass=io.github.yapfast.Yapfast"]:
+        for identity in ["Exec=harmony --open-link %u", "Icon=io.github.TimeShallHalt.Harmony", "MimeType=x-scheme-handler/harmony;", "StartupWMClass=io.github.TimeShallHalt.Harmony"]:
             self.assertIn(identity, entry)
 
     def test_ui_notices_use_harmony(self):
-        for relative in ["src/ui.rs", "src/ui/callbacks.rs", "src/ui/refresh.rs", "src/ui/messages.rs", "src/ui/server_settings.rs", "src/push_to_talk.rs", "src/graphics.rs"]:
+        for relative in ["src/ui.rs", "src/ui/callbacks.rs", "src/ui/refresh.rs", "src/ui/messages.rs", "src/ui/server_settings.rs", "src/keybinds.rs", "src/graphics.rs"]:
             text = source(relative)
             self.assertIsNone(re.search(r'"[^"\n]*Yapfast[^"\n]*"', text), relative)
 
@@ -63,7 +63,7 @@ class HarmonyBrandingTest(unittest.TestCase):
                 if line.lstrip().startswith("//") or "https://" in line:
                     continue
                 for literal in re.findall(r'"([^"\n]*)"', line):
-                    if "Yapfast" in literal:
+                    if "Yapfast" in literal and not (path.name == "about_updates.slint" and "Based on Yapfast" in literal):
                         self.fail(f"Old display name in {path.relative_to(ROOT)}: {literal}")
 
 

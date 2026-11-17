@@ -7,6 +7,9 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::{Result, anyhow, bail};
 use keyring::Entry;
 
+// Stable credential namespace, deliberately not Harmony's desktop app ID.
+// Renaming it would hide saved logins and encrypted-cache keys. Branding and
+// data-directory selection never migrate or copy these entries.
 const SERVICE: &str = "io.github.yapfast.Yapfast";
 /// The linked Discord account, set by linking by QR code or by the developer
 /// probe's store-token command.

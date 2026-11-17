@@ -153,7 +153,7 @@ impl Task {
                 .await
                 .ok()
                 .flatten()
-                .ok_or("Yapfast can't show this image. Save it to open it elsewhere.")
+                .ok_or("Harmony can't show this image. Save it to open it elsewhere.")
             };
             tokio::select! {
                 biased;

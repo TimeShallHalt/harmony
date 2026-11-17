@@ -1,6 +1,10 @@
 # Harmony
 
-Private development customization of [Yapfast](https://github.com/yapfast/yapfast), a native Rust/Slint Discord client.
+Harmony is a private development fork of [Yapfast](https://github.com/yapfast/yapfast) by wiredtenshi and contributors, a native Rust/Slint Discord client. This source integrates upstream 0.4.1 with Harmony customization; it is not an official Yapfast release.
+
+<p align="center"><img src="packaging/icon.svg" width="96" height="96" alt="Harmony logo"></p>
+
+Windows builds are **`Harmony.exe`**. Linux packages install **`harmony`** (Cargo itself produces `Harmony`). The internal Cargo package/crate names remain `yapfast` for compatibility; they are not the product name. The Linux desktop ID is `io.github.TimeShallHalt.Harmony`.
 
 - [Customization overview](HARMONY.md)
 - [Native theme packs and authoring](docs/theme-packs.md)
@@ -9,43 +13,15 @@ Private development customization of [Yapfast](https://github.com/yapfast/yapfas
 
 This repository contains the source and development notes, not Discord credentials, account data, local toolchains or compiled application binaries. Upstream licenses and attribution are retained; see [LICENSE](LICENSE).
 
-**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. Physical Windows drag/resize verification remains pending, and the recorded emoji-edge rendering test still fails. See the build notes for the exact test results and platform-verification limits. GitHub Actions are disabled for this private copy to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain intact.
+**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. See the build notes for actual test results and platform-verification limits; an upstream feature description or performance number is not Harmony validation. GitHub Actions are disabled for this private copy to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain for reference.
 
-The original upstream README follows. Its downloads and performance measurements describe Yapfast, not a separately verified Harmony release.
+**Updates are manual.** Harmony does not include the upstream updater, check GitHub for releases, download updates, or publish packages. Packaging is local and includes matching GPL source and original dependency notices. The fork's primary Windows path is [`scripts/package-harmony.py`](scripts/package-harmony.py) plus the optional offline [MSI builder](packaging/windows-msi.md). Close Harmony yourself before replacing program files. Existing data and credentials retain their legacy storage identity; packaging does not migrate accounts or modify installed shortcuts.
 
 ---
 
-## Upstream Yapfast README
+## Inherited upstream features and background
 
-<p align="center">
-  <img src="packaging/icon.svg" width="96" height="96" alt="">
-</p>
-
-<h1 align="center">Yapfast</h1>
-
-<p align="center">
-  <a href="https://github.com/yapfast/yapfast/releases/latest"><img src="https://img.shields.io/github/v/release/yapfast/yapfast?label=beta&color=f0b232" alt="The latest release, a beta"></a>
-  <a href="#get-started"><img src="https://img.shields.io/badge/Windows%20%7C%20Linux-0078D4" alt="Windows and Linux"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/yapfast/yapfast?color=blue" alt="License: GPL 3.0"></a>
-  <a href="https://yapfast.com/discord-invite"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Join the Yapfast Discord server"></a>
-</p>
-
-<p align="center">
-  <b>A Discord client without the web browser.</b><br>
-  About 30 MB of RAM idle, where Discord's app takes 720 MB (<a href="#measured-against-discord">measured as Vesktop</a>).
-</p>
-
-<p align="center">
-  Native app written in Rust · Voice, video and screen sharing
-</p>
-
-<p align="center">
-  <a href="#windows-10-and-11"><b>Download for Windows</b></a>
-  &nbsp;·&nbsp;
-  <a href="#linux"><b>Download for Linux</b></a>
-  &nbsp;·&nbsp;
-  <a href="https://yapfast.com">yapfast.com</a>
-</p>
+The feature descriptions, screenshots, measurements and first-person background below are retained from upstream Yapfast 0.4.1, with credit to its authors. They describe inherited behavior, not independently verified Harmony performance or a promise that all upstream release services apply to this fork. Harmony's own installation and update instructions appear under [Get started](#get-started).
 
 <p align="center">
   <img src="docs/images/yapfast.png" alt="Yapfast showing a group DM, with the server list on the left, the conversation in the middle and its members on the right"><br>
@@ -121,7 +97,9 @@ Voice channels and DM calls, with mute, deafen, a volume for each person,
 noise suppression, echo removal, and a voice gate you can tune, or
 push-to-talk on any key you like, held in any app. Go Live, watch other
 people's streams, turn on your camera and play the soundboard. The call
-stays up while you read other channels.
+stays up while you read other channels, busy voice channels say how long
+their call has gone on, and pointing at a Discord voice channel shows who is
+in it, who is live and whose camera is on.
 
 The noise suppression could be better, though. Know an open source one that
 does a better job? PLEASE tell me.
@@ -159,6 +137,10 @@ does, and names games Yapfast doesn't know. See
 [game detection](docs/discord/people.md#game-detection) and
 [Rich Presence](docs/discord/people.md#linux-rich-presence).
 
+What your linked Spotify account plays shows as "Listening to Spotify" with only
+Yapfast open, from any player, as Discord's own "Display Spotify as your status"
+setting says. See [Spotify](docs/discord/people.md#listening-to-spotify).
+
 <p align="center">
   <img src="docs/images/features/playing.webp" width="260" alt="A profile card saying Playing Deadlock, with the game's icon.">
 </p>
@@ -168,11 +150,11 @@ does, and names games Yapfast doesn't know. See
 Server Settings with roles, emoji, stickers, bans, the audit log and the rest of
 the pages your roles let you use, and channel settings with their permissions.
 Make and edit channels and categories, invite people, hand out roles, change
-nicknames, time out, kick and ban. In voice, server mute, deafen and move
-people to another channel. Edit your server profile, and leave. Join a server
-by invite, from the + under your servers or a link in chat, and open a
-scheduled event from its link to mark yourself interested. Folders show up as
-they do in Discord.
+nicknames, time out, kick and ban. In voice, server mute, deafen and move people
+to another channel, from their menu or by dragging them there. Edit your server
+profile, and leave. Join a server by invite, from the + under your servers or a
+link in chat, and open a scheduled event from its link to mark yourself
+interested. Folders show up as they do in Discord.
 
 <p align="center">
   <img src="docs/images/features/server-settings.webp" width="640" alt="Server Settings on a role's Display page: its name, a gold color picked, and its icon.">
@@ -183,24 +165,33 @@ they do in Discord.
 - **Servers, channels, DMs and group DMs**, all live, with member lists. Pin,
   mute or close a DM from its menu, leave a group DM, and accept or ignore
   message requests.
-- **Messages** you can send, reply to, edit, react to, pin, forward and attach
-  files to, with Markdown, embeds, custom emoji, stickers and spoilers.
-  Discord's own links to servers, channels, messages and profiles open in
+- **Messages** you can send, reply to, edit, react to, pin, forward, mark
+  unread, copy a link to and attach files to, with Markdown, embeds, custom
+  emoji, stickers and spoilers. Voice messages play, with their speed and
+  volume. Bots' buttons, dropdown menus and forms work too, radio buttons,
+  checkboxes and file uploads included, and so do apps' slash commands: type
+  `/`, pick one and fill in its options, files and autocomplete included; an
+  app's answer says who used which command. Apps' message and user commands
+  are under Apps in a message's or a person's menu. Discord's own links to servers, channels, messages and profiles open in
   Yapfast, including one handed to it by the desktop.
 - **Threads**: start one from a message, browse a channel's threads, join or
   leave one, and read it beside its channel.
 - **Search** a whole server with Discord's filters, and browse a channel's pins.
+- **Profiles** as Discord draws them: badges, server tags, avatar decorations,
+  nameplates, name styles, profile effects and frames, and the full profile's
+  Board, Wishlist and recent activity. Edit Profile changes your own theme,
+  name style and server tag.
 - **Friends**: requests, adding by username, nicknames, notes, profile cards,
   your status and custom status (custom emoji included). Block and ignore
-  people from their menu, hide what blocked people write, and unblock them from
-  a list in Settings.
+  people from their menu, block and unblock them from their profile, hide what
+  blocked people write, and unblock them from a list in Settings. Active Now
+  sits beside the friends list.
 - **Notifications** that follow your Discord settings, muting for channels,
   categories and servers, and unread markers.
 - **Soft sounds** for joining, leaving, muting and messages, in six sets.
 
 ### Not there yet
 
-- Media channels.
 - Activities.
 - Making and changing server folders.
 - A server's form for new members, such as its rules, when you join. Yapfast
@@ -250,7 +241,8 @@ servers just to snoop on your DMs, and no thanks :D).
   Yapfast never sees your password.
 - The login token stays in your system's credential store, and only ever goes
   to Discord. Unlinking signs that session out and deletes it.
-- It sends no analytics or crash reports, and doesn't check for updates.
+- It sends no analytics or crash reports. Harmony's upstream update checks,
+  release downloads and automatic installation are disabled.
 - Pictures and GIFs load from wherever they're hosted, such as Discord or
   Tenor.
 
@@ -260,53 +252,57 @@ Don't want to take my word for it? Fair, the code's all right here.
 
 ### Windows 10 and 11
 
-1. Download `Yapfast-…-windows-x64-setup.exe` from the
-   [latest release](https://github.com/yapfast/yapfast/releases/latest).
-2. Run it. It installs just for you, with no administrator prompt. The
-   installer isn't signed yet, so SmartScreen may get nervous: choose **More
-   info**, then **Run anyway**.
-3. Yapfast shows a QR code. On your phone, open Discord, go to **Settings →
-   Scan QR Code**, and point the camera at it.
+Use a locally verified Harmony build or package, not an upstream Yapfast download.
+Extract the entire `Harmony-…-windows-x64.zip` and run `Harmony.exe`. The optional
+offline per-user MSI defaults to `%LOCALAPPDATA%\Programs\Harmony`; see
+[the MSI instructions](packaging/windows-msi.md). The MSI does not launch the app,
+change shortcuts, enable startup or close running processes. Quit using the tray
+menu before a manual update. Unsigned artifacts may show **Unknown Publisher**;
+do not disable security controls.
 
-Rather skip the installer? The release has a portable ZIP too: extract it and
-double-click `yapfast.exe`.
-
-Yapfast starts with Windows and waits in the tray, so messages and calls still
-reach you. Untick that in the installer, or turn it off later in **Settings →
-Advanced**.
+Preserve custom `--data-dir` arguments when manually retargeting a legacy
+`yapfast.exe` shortcut to `Harmony.exe`. Link Discord with the QR code shown by
+Harmony, using Discord's phone app under **Settings → Scan QR Code**. Third-party
+personal-account clients are not authorized by Discord and carry account risk.
 
 ### Linux
 
-It runs great on both X11 and Wayland, screen sharing too (Hyprland here).
-Every release has two packages, on the
-[latest release](https://github.com/yapfast/yapfast/releases/latest):
+Linux packages use `harmony`, the Harmony icon, and desktop ID
+`io.github.TimeShallHalt.Harmony` on X11 and Wayland. Local AppImage output is
+`Harmony-…-x86_64.AppImage`; Arch output is `harmony-…-x86_64.pkg.tar.zst`.
+The AppImage uses the pinned upstream glibc baseline (2.39); this is not a
+claim of fresh Harmony platform verification. There is no zsync feed or updater.
 
-- **AppImage**, `Yapfast-…-x86_64.AppImage`, for any distro with glibc 2.39 or
-  newer, like Ubuntu 24.04, Fedora 40 or Debian 13. Make it executable
-  (`chmod +x`, or "Allow executing" in its properties) and run it. It adds
-  itself to your app menu, and uses your own graphics driver, Mesa or NVIDIA.
-- **Arch package**, `yapfast-…-x86_64.pkg.tar.zst`. Install it with
-  `sudo pacman -U` and the file or its link. Rather build it yourself? The
-  [PKGBUILD](packaging/arch/PKGBUILD) builds the release's tag from source.
-
-Then link your account with the QR code, as on Windows.
+The [Arch source PKGBUILD](packaging/arch/PKGBUILD) consumes a verified local
+corresponding-source ZIP, not an upstream release tag. Set `HARMONY_SOURCE_ARCHIVE`,
+`HARMONY_SOURCE_ROOT` (the ZIP's top-level folder) and `HARMONY_SOURCE_SHA256` from
+the package producer. `scripts/package-arch` instead packages a local Harmony
+AppImage and retains its source/notices. To register a development executable
+explicitly, `scripts/install-desktop-entry target/release/Harmony` installs only
+the current user's launcher and icon; it does not launch the app.
 
 <details>
 <summary><b>With Nix</b></summary>
 
 <br>
 
-It's one command (pretty sure, anyway :D), and you get the same Discord-only
-app the releases ship, in your launcher:
+Build this local fork's Discord-only package instead of installing upstream:
 
 ```sh
-nix profile add github:yapfast/yapfast#yapfast
+nix build .#default
 ```
 
 It compiles from source, so give it a few minutes. An older glibc and no Nix?
 Then [build it yourself](#build-it-yourself).
 
 </details>
+
+### Updates
+
+Updater not included in this build. No **Check for updates** or **Update and
+restart** action is provided. Obtain a verified local Harmony build and its
+matching source, quit the app yourself, and update manually. Upstream Yapfast
+release URLs and signing keys are not a Harmony update channel.
 
 ### macOS
 
@@ -318,17 +314,8 @@ test it on.
 
 <br>
 
-Want what's on `main` right now, without waiting for a release or building it
-yourself? Every now and then I put out a nightly build of the Discord-only app.
-They're on the [releases page](https://github.com/yapfast/yapfast/releases),
-marked **Pre-release**, newest first, each with a list of what changed:
-
-- **Windows:** the portable ZIP. Extract it and double-click `yapfast.exe`.
-- **Linux:** the AppImage. `chmod +x` it and run it.
-- **Arch Linux:** the `.pkg.tar.zst`. Install it with `sudo pacman -U` and the
-  file or its link.
-
-They're untested between releases, so expect the odd rough edge.
+This private fork does not publish nightly builds. Retained upstream workflow
+files are reference material and do not authorize downloads, uploads or releases.
 
 </details>
 
@@ -410,7 +397,7 @@ UX to my muscle memory, so switching over hurts as little as it can.
 
 ## Build it yourself
 
-Yapfast builds inside a pinned [Nix](https://nixos.org) environment, which
+Harmony builds inside a pinned [Nix](https://nixos.org) environment, which
 brings the right Rust, Clang and native libraries. From the project folder:
 
 ```sh
@@ -454,7 +441,7 @@ tables are the same.
 
 ## License
 
-Yapfast is free software under the [GNU General Public License](LICENSE),
+Harmony and its upstream Yapfast code are free software under the [GNU General Public License](LICENSE),
 version 3 or later. Builds with Matrix also include MatrixRTC libraries under
 the AGPL. Every release carries its dependencies' own licenses. Take it, I
 don't even care, baka.

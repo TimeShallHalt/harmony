@@ -161,7 +161,7 @@ impl Application {
             room.presence = unknown_platform(room.presence);
         }
         if let Some(Ok(members)) = &mut self.state.members {
-            for member in members {
+            for member in Arc::make_mut(members) {
                 member.presence = unknown_platform(member.presence);
             }
         }

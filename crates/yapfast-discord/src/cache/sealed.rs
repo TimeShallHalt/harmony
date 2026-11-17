@@ -55,7 +55,7 @@ pub fn read_key(hex: &str) -> Option<Key> {
     Some(key)
 }
 
-/// Whether `file` starts as one sealed here does. One from before Yapfast
+/// Whether `file` starts as one sealed here does. One from before Harmony
 /// encrypted them doesn't.
 pub fn is_sealed(file: &Path) -> bool {
     let mut start = [0; MAGIC.len()];
@@ -130,7 +130,7 @@ pub fn open(file: &Path, key: &Key) -> std::io::Result<(String, Opening<std::fs:
     let (login, prefix) = rest.split_at(LOGIN);
     let invalid = |why| std::io::Error::new(std::io::ErrorKind::InvalidData, why);
     if magic != MAGIC {
-        return Err(invalid("not a file Yapfast encrypted"));
+        return Err(invalid("not a file Harmony encrypted"));
     }
     let size = input.metadata()?.len();
     let (length, chunks) = chunks(size).ok_or_else(|| invalid("cut short"))?;
