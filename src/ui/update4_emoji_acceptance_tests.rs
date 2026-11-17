@@ -358,8 +358,20 @@ fn actual_timeline_and_picker_share_generated_decoder_frames() {
         owner.borrow().animations.picker.is_empty(),
         "known offscreen picker retires consumer"
     );
+    assert_eq!(w.get_emoji_tiles().row_count(), 0);
+    assert_eq!(w.get_emoji_headings().row_count(), 0);
+    assert!(
+        owner.borrow().animations.cache.pinned.contains(key)
+            && i_slint_core::yapfast_emoji::frame_of_key(key).is_some(),
+        "retiring the offscreen picker must preserve the actual timeline consumer"
+    );
     w.invoke_emoji_search("combined".into());
     assert!(owner.borrow().animations.picker.contains(key));
+    assert!(
+        w.get_emoji_tiles()
+            .iter()
+            .any(|tile| tile.cell.key == key && tile.animated)
+    );
     let mut changed = fixture.snapshot();
     Arc::make_mut(&mut Arc::make_mut(&mut changed.servers[0].server).emojis)[0].id = "221".into();
     {

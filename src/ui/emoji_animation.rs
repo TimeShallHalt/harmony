@@ -1578,13 +1578,21 @@ mod tests {
             url,
             Arc::new(yapfast_core::chat::decode_picture(&data, 2, 2).unwrap()),
         );
+        // This quiet-path fixture represents an open, motion-enabled picker;
+        // it never shows the window, so no lifecycle event sets playback for it.
+        window.global::<Motion>().set_playing(true);
         adapter.models.emoji_rows.set_vec(vec![EmojiRow {
             cells: ModelRc::new(VecModel::from(vec![emoji::cell("restart:123")])),
+            top: 0.0,
+            height: emoji::ROW_HEIGHT,
             ..Default::default()
         }]);
+        adapter.emoji_rows_in_sight();
         assert!(!adapter.animations.timer.running());
         // No full refresh: the same helper handles scroll and picture arrivals.
         super::super::callbacks::want_shown_animations(&mut adapter, &window);
+        adapter.publish_emoji_grid();
+        assert!(adapter.models.emoji_tiles.row_data(0).unwrap().animated);
         assert!(adapter.animations.timer.running());
         assert!(!adapter.animations.decoding.is_empty());
         adapter.animations.hide_picker();

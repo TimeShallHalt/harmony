@@ -327,11 +327,26 @@ fn acceptance_tall_account_popover_normal_minimum_scroll_review_cancel_escape() 
         let (b, mut sink) = Backend::anonymous_fixture(a.borrow().runtime.clone());
         a.borrow_mut().backend = Some(b);
         deliver(&a, &w, &mut f);
+        let status_text = "long owned received status ".repeat(100);
+        {
+            let mut a = a.borrow_mut();
+            // Opening the merged account card asks for its own profile and refreshes
+            // the window. Seed the source state, not window properties that refresh
+            // would overwrite. StatusText elides: the game card and expanded status
+            // choices provide real vertical content, not the status text's length.
+            a.app.state.custom_status = Some(yapfast_core::chat::CustomStatus {
+                text: status_text.clone(),
+                ..Default::default()
+            });
+            a.app.state.discord_show_game = true;
+            a.app.state.discord_playing = Some(yapfast_core::chat::Playing {
+                name: "owned fixture game".into(),
+                started_ms: None,
+            });
+            a.refresh(&w);
+        }
         w.show().unwrap();
         w.window().set_size(slint::LogicalSize::new(width, height));
-        w.set_has_custom_status(true);
-        w.set_account_status("long owned received status ".repeat(100).into());
-        w.set_game_activity_name("owned fixture game".into());
         settle(&w);
         click(&w, "Set your status");
         click(&w, "Change status");
@@ -339,6 +354,13 @@ fn acceptance_tall_account_popover_normal_minimum_scroll_review_cancel_escape() 
         assert!(
             find(&w, "Account").is_some(),
             "actual production AccountPopover"
+        );
+        assert!(w.get_has_custom_status(), "custom status survives opening");
+        assert_eq!(w.get_account_status().as_str(), status_text.as_str());
+        assert_eq!(
+            w.get_game_activity_name().as_str(),
+            "owned fixture game",
+            "tall game card survives the profile-open refresh"
         );
         let pop_scroll = || {
             let inner = i_slint_core::window::WindowInner::from_pub(w.window());

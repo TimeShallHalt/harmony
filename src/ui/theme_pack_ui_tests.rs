@@ -16,15 +16,15 @@ fn fixture() -> (tempfile::TempDir, YapfastWindow, Rc<RefCell<Adapter>>) {
 }
 
 #[test]
-fn pack_cancel_restores_bonfire_when_no_theme_was_explicitly_selected() {
+fn pack_cancel_restores_harmony_when_no_theme_was_explicitly_selected() {
     let (_dir, window, _adapter) = fixture();
     let before = theme::Theme::shown(&window);
-    assert_eq!(window.get_theme_id(), "bonfire");
+    assert_eq!(window.get_theme_id(), "harmony");
     window.invoke_new_theme();
     window.invoke_theme_colour_edited(0, "#123456".into());
     window.invoke_cancel_theme();
     assert_eq!(theme::Theme::shown(&window), before);
-    assert_eq!(window.get_theme_id(), "bonfire");
+    assert_eq!(window.get_theme_id(), "harmony");
 }
 
 #[test]
@@ -46,7 +46,10 @@ fn pack_import_restore_edit_export_reset_is_one_native_vertical_slice() {
     window.invoke_new_theme();
     assert_eq!(
         window.get_theme_start(),
-        4,
+        theme::BUILT_IN
+            .iter()
+            .position(|built_in| built_in.id == "nord")
+            .unwrap() as i32,
         "a copied pack names its Nord base"
     );
     assert_eq!(window.get_theme_name(), "Orchid copy");

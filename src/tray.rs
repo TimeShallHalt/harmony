@@ -568,21 +568,21 @@ mod none {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_logo_is_marigold_and_unread_adds_a_red_dot() {
+    fn the_logo_has_harmony_ink_and_unread_adds_a_coral_dot() {
         let plain = super::logo(32, false).unwrap();
         let unread = super::logo(32, true).unwrap();
         assert_eq!((plain.width(), plain.height()), (32, 32));
-        let marigold = |pixel: &slint::Rgba8Pixel| {
-            pixel.a == 255 && (pixel.r, pixel.g, pixel.b) == (0xff, 0xbf, 0x47)
+        let harmony_ink = |pixel: &slint::Rgba8Pixel| {
+            pixel.a == 255 && (110..180).contains(&pixel.r) && pixel.g > 140 && pixel.b > 190
         };
-        let red = |pixel: &slint::Rgba8Pixel| {
-            pixel.a == 255 && (pixel.r, pixel.g, pixel.b) == (0xf0, 0x54, 0x5e)
+        let coral = |pixel: &slint::Rgba8Pixel| {
+            pixel.a == 255 && (pixel.r, pixel.g, pixel.b) == (0xf5, 0x6d, 0x83)
         };
-        assert!(plain.as_slice().iter().any(marigold));
-        assert!(!plain.as_slice().iter().any(red));
-        assert!(unread.as_slice().iter().any(marigold));
+        assert!(plain.as_slice().iter().any(harmony_ink));
+        assert!(!plain.as_slice().iter().any(coral));
+        assert!(unread.as_slice().iter().any(harmony_ink));
         // The dot is in the bottom-right corner.
         let corner = (24 * 32 + 24) as usize;
-        assert!(red(&unread.as_slice()[corner]));
+        assert!(coral(&unread.as_slice()[corner]));
     }
 }

@@ -1,34 +1,26 @@
 use super::*;
 use yapfast_core::chat::DiscordCommand;
 
-fn repair1_profile_command(effects: Vec<Effect>) -> Command {
+pub(super) fn repair1_profile_command(effects: Vec<Effect>) -> Command {
     effects
         .into_iter()
         .find_map(|effect| {
-            if let Effect::Backend(command) = effect {
+            if let Effect::Backend(command @ Command::Discord(DiscordCommand::ScopedProfile(_))) =
+                effect
+            {
                 Some(command)
             } else {
                 None
             }
         })
-        .unwrap()
+        .expect("real scoped profile request; reset any already-open panel before requesting again")
 }
-fn repair1_profile_response(
+pub(super) fn repair1_profile_response(
     command: Command,
     kept: bool,
     result: Result<yapfast_core::chat::Profile, String>,
 ) -> Event {
     match command {
-        Command::Discord(DiscordCommand::Profile { user, .. }) => {
-            if kept {
-                Event::KeptProfile {
-                    user,
-                    profile: result.unwrap(),
-                }
-            } else {
-                Event::Profile { user, result }
-            }
-        }
         Command::Discord(DiscordCommand::ScopedProfile(request)) => {
             if request.publication.lock().unwrap().is_none() {
                 let snapshot = yapfast_discord::service::Snapshot {
@@ -47,7 +39,7 @@ fn repair1_profile_response(
                 result,
             }
         }
-        _ => panic!("expected a real profile request"),
+        _ => panic!("expected a real scoped profile request"),
     }
 }
 
@@ -366,22 +358,51 @@ fn received_style_projects_into_real_profile_card_full_and_panel() {
     a.app.state.trusted = true;
     a.app.state.navigation = yapfast_core::application::Navigation::DirectMessages;
     a.app.state.selected = Some("discord:@me:10".into());
-    a.app.state.profile_panel = true;
+    a.app.state.dm_screen = None;
+    // Applying the snapshot may already have opened the default DM panel.
+    // Reopening it creates a fresh request rather than relying on a no-op.
+    a.app.dispatch(Action::ShowProfilePanel(false));
     let panel = repair1_profile_command(a.app.dispatch(Action::ShowProfilePanel(true)));
-    let card = repair1_profile_command(
-        a.app
-            .dispatch(Action::ShowDmProfile("discord:@me:10".into())),
-    );
+    let card = repair1_profile_command(a.app.dispatch(Action::ShowProfile {
+        user: "200".into(),
+        large: false,
+    }));
+    if let (
+        Command::Discord(DiscordCommand::ScopedProfile(panel)),
+        Command::Discord(DiscordCommand::ScopedProfile(card)),
+    ) = (&panel, &card)
+    {
+        assert!(panel.panel);
+        assert!(!card.panel);
+        assert_eq!(panel.room, "discord:@me:10");
+        assert_eq!(card.room, "discord:@me:10");
+        assert!(!Arc::ptr_eq(panel, card));
+    } else {
+        panic!("both profile surfaces must issue scoped requests");
+    }
+    a.apply(Event::Profile {
+        user: "200".into(),
+        result: Ok(view.profile.clone()),
+    });
+    assert!(a.app.state.panel_profile.as_ref().unwrap().loading);
+    assert!(a.app.state.profile.as_ref().unwrap().loading);
     a.apply(repair1_profile_response(
         panel,
         false,
         Ok(view.profile.clone()),
     ));
+    assert!(!a.app.state.panel_profile.as_ref().unwrap().loading);
+    assert!(
+        a.app.state.profile.as_ref().unwrap().loading,
+        "the panel response must not complete the simultaneous card"
+    );
     a.apply(repair1_profile_response(
         card,
         false,
         Ok(view.profile.clone()),
     ));
+    assert!(!a.app.state.profile.as_ref().unwrap().loading);
+    assert!(!a.app.state.profile.as_ref().unwrap().large);
     let mut pictures = HashMap::new();
     assert!(a.app.state.profile.is_some());
 

@@ -1,4 +1,5 @@
 //! Safe in-memory actual-main appearance acceptance; no live provider or IO.
+use super::update4_appearance_tests::{repair1_profile_command, repair1_profile_response};
 use super::*;
 use i_slint_core::{accessibility::AccessibleStringProperty, item_tree::ItemRc};
 use std::ops::ControlFlow;
@@ -10,26 +11,32 @@ fn settle(window: &YapfastWindow) {
     i_slint_core::properties::ChangeTracker::run_change_handlers();
 }
 fn install(owner: &Rc<RefCell<Adapter>>, window: &YapfastWindow, name: &str) {
+    // Refresh derives workspace/trust from Application, not window overrides.
+    // Keep a real in-memory DM context and publish to its exact open request.
+    received(owner);
     let mut a = owner.borrow_mut();
     a.layout.sound_volume = Some(0);
-    a.app.state.profile = Some(ProfileView {
-        profile: yapfast_core::chat::Profile {
+    a.app.dispatch(Action::ShowProfilePanel(false));
+    let command = repair1_profile_command(a.app.dispatch(Action::ShowProfile {
+        user: "200".into(),
+        large: false,
+    }));
+    a.apply(repair1_profile_response(
+        command,
+        false,
+        Ok(yapfast_core::chat::Profile {
             id: "200".into(),
             name: name.into(),
             ..Default::default()
-        },
-        large: false,
-        loading: false,
-        kept: false,
-        note: None,
-        platform_presence: None,
-        board_open: false,
-        activity_open: false,
-        wishlist_open: false,
-    });
-    window.set_workspace(true);
-    window.set_trusted(true);
+        }),
+    ));
+    let view = a.app.state.profile.as_ref().unwrap();
+    assert!(!view.loading);
+    assert_eq!(view.profile.name, name);
     a.refresh(window);
+    assert!(window.get_workspace());
+    assert!(window.get_trusted());
+    assert!(window.get_profile_open());
 }
 fn texts(window: &YapfastWindow, name: &str) -> Vec<(String, slint::Brush)> {
     let inner = i_slint_core::window::WindowInner::from_pub(window.window());
@@ -109,7 +116,11 @@ fn all_received_families_brushes_unicode_and_single_accessible_name() {
     install(&owner, &window, name);
     window.show().unwrap();
     settle(&window);
-    let app_family = texts(&window, name)[0].0.clone();
+    let app_family = texts(&window, name)
+        .first()
+        .expect("received ordinary profile name is materialized before applying styles")
+        .0
+        .clone();
     for (id, family) in [
         (1, "Bangers"),
         (2, "BioRhyme"),
@@ -267,7 +278,6 @@ fn full_and_dm_panel_decoration_replacement_expiry_failure_and_release() {
         )
         .unwrap();
         bind_callbacks(&w, &a);
-        received(&a);
         install(&a, &w, "overlay acceptance");
         let parsed=yapfast_discord::profile::parse(&serde_json::json!({"user":{"id":"200","username":"fixture","avatar_decoration_data":{"sku_id":"123","asset":"safe"}}}),None).unwrap();
         let art: yapfast_core::appearance::Decoration = parsed.decoration.unwrap().into();
@@ -519,6 +529,17 @@ fn actual_backend_name_motion_reset_close_and_drop_quiesce() {
     w.show().unwrap();
     show_motion(&w);
     settle(&w);
+    assert!(
+        !scales(&w, "motion Unicode 日本語").is_empty(),
+        "actual profile glyph transform exists before motion checks"
+    );
+    // The first refresh starts an unrelated one-shot roster coalescing timer,
+    // even with no members. Let it finish naturally before measuring name work;
+    // do not stop timers or accept a nonempty baseline.
+    assert!(owner.borrow().roster_due.running());
+    i_slint_backend_testing::mock_elapsed_time(refresh::ROSTER_PAUSE);
+    settle(&w);
+    assert!(!owner.borrow().roster_due.running());
     let baseline = slint::platform::duration_until_next_timer_update();
     assert_eq!(
         baseline, None,

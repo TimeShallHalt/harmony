@@ -29,11 +29,16 @@ pub(super) const FETCH_ROWS: usize = 3 * GRID_ROWS;
 /// `EmojiPicker` in ui/messages.slint draws it.
 const PADDING: f32 = 8.0;
 
+/// No row intersects a known viewport. Saturating ready/fetch margins must
+/// leave this outside the model, not turn an empty range back into edge rows.
+const NO_ROWS: (usize, usize) = (usize::MAX, usize::MAX);
+
 #[derive(Default)]
 pub(super) struct EmojiGrid {
     /// How far the grid is scrolled and how tall it shows, as it last said.
     pub(super) viewport: (f32, f32),
-    /// The rows in sight, first and last, as `viewport` puts them.
+    /// The rows in sight, first and last, as `viewport` puts them, or
+    /// [`NO_ROWS`] when no row intersects it.
     pub(super) shown: (usize, usize),
     /// The emoji each button of the grid shows, by its row and column.
     slots: Vec<(usize, usize)>,
@@ -47,6 +52,28 @@ pub(super) struct EmojiGrid {
 }
 
 impl EmojiGrid {
+    /// Reuses the upstream row lookup with the measured viewport (or the
+    /// normal picker height before its first layout).
+    fn rows_in_sight(&mut self, rows: &VecModel<EmojiRow>) -> (usize, usize) {
+        let (top, height) = self.viewport;
+        let height = if height > 0.0 { height } else { 340.0 };
+        let shown = emoji::visible_rows(rows, top, height);
+        // Upstream deliberately clamps an out-of-bounds viewport to an edge
+        // row. That is useful for scroll positioning, but must not make a
+        // known empty viewport a live animation/picture consumer. Check only
+        // the located row; keep the upstream binary search and edge semantics.
+        let shown = if rows
+            .row_data(shown.0)
+            .is_some_and(|row| row.top <= top + height && row.top + row.height >= top)
+        {
+            shown
+        } else {
+            NO_ROWS
+        };
+        self.shown = shown;
+        shown
+    }
+
     /// The custom emoji of [`Self::wanted`] whose pictures came, which are no
     /// longer wanted.
     pub(super) fn take_arrived(
@@ -69,13 +96,7 @@ impl Adapter {
     /// Works out the rows in sight again, from where the grid last said it
     /// was scrolled to: after a scroll, or with the rows built anew.
     pub(super) fn emoji_rows_in_sight(&mut self) -> (usize, usize) {
-        let (top, height) = self.emoji_grid.viewport;
-        // Until the grid says how tall it is, the 340px it is in a picker of
-        // the usual height.
-        let height = if height > 0.0 { height } else { 340.0 };
-        let shown = emoji::visible_rows(&self.models.emoji_rows, top, height);
-        self.emoji_grid.shown = shown;
-        shown
+        self.emoji_grid.rows_in_sight(&self.models.emoji_rows)
     }
 
     /// Gives the grid the emoji and headings of the rows in sight and
@@ -152,5 +173,76 @@ impl Adapter {
         self.models.emoji_tiles.set_vec(Vec::new());
         self.models.emoji_headings.set_vec(Vec::new());
         self.emoji_grid = EmojiGrid::default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows() -> VecModel<EmojiRow> {
+        VecModel::from(vec![
+            EmojiRow {
+                heading: "Section".into(),
+                top: 0.0,
+                height: emoji::HEADING_HEIGHT,
+                ..Default::default()
+            },
+            EmojiRow {
+                top: emoji::HEADING_HEIGHT,
+                height: emoji::ROW_HEIGHT,
+                ..Default::default()
+            },
+            EmojiRow {
+                top: emoji::HEADING_HEIGHT + emoji::ROW_HEIGHT,
+                height: emoji::ROW_HEIGHT,
+                ..Default::default()
+            },
+        ])
+    }
+
+    #[test]
+    fn known_offscreen_and_empty_viewports_have_no_ready_rows() {
+        let rows = rows();
+        let mut grid = EmojiGrid::default();
+        for viewport in [(100000.0, 50.0), (-500.0, 50.0)] {
+            grid.viewport = viewport;
+            assert_eq!(grid.rows_in_sight(&rows), NO_ROWS);
+            assert_eq!(grid.shown, NO_ROWS);
+            for margin in [MARGIN, GRID_ROWS, FETCH_ROWS] {
+                assert!(grid.shown.0.saturating_sub(margin) >= rows.row_count());
+            }
+        }
+        grid.viewport = (0.0, 50.0);
+        assert_eq!(grid.rows_in_sight(&VecModel::default()), NO_ROWS);
+    }
+
+    #[test]
+    fn visible_rows_preserve_upstream_heading_and_edge_geometry() {
+        let rows = rows();
+        let mut grid = EmojiGrid::default();
+        for (viewport, shown) in [
+            ((0.0, 50.0), (0, 1)),
+            ((emoji::HEADING_HEIGHT, 1.0), (0, 1)),
+            ((emoji::HEADING_HEIGHT + 1.0, 1.0), (1, 1)),
+            (
+                (emoji::HEADING_HEIGHT + 2.0 * emoji::ROW_HEIGHT, 50.0),
+                (2, 2),
+            ),
+        ] {
+            grid.viewport = viewport;
+            assert_eq!(grid.rows_in_sight(&rows), shown);
+        }
+    }
+
+    #[test]
+    fn unmeasured_picker_uses_normal_height_and_recovers_from_empty_range() {
+        let rows = rows();
+        let mut grid = EmojiGrid::default();
+        assert_eq!(grid.rows_in_sight(&rows), (0, 2));
+        grid.viewport = (100000.0, 50.0);
+        assert_eq!(grid.rows_in_sight(&rows), NO_ROWS);
+        grid.viewport = (0.0, 50.0);
+        assert_eq!(grid.rows_in_sight(&rows), (0, 1));
     }
 }

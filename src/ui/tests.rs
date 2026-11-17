@@ -203,6 +203,29 @@ fn equal_lists_stay_so_rows_count_as_unchanged() {
     let changed = changed_profile(&shown, profile_data(&mut pictures, &state, &renamed))
         .expect("a new name shows");
     assert!(changed.servers == shown.servers, "its lists stay");
+
+    // The retained name palette is also a model: equal colours keep its
+    // identity, while changing or removing the palette still reaches the UI.
+    let mut styled = view.clone();
+    styled.profile.name_style = Some(yapfast_core::appearance::NameStyle {
+        font_id: 1,
+        effect_id: 0,
+        colors: vec![0x123456, 0x789abc],
+    });
+    let shown = profile_data(&mut pictures, &state, &styled);
+    let again = profile_data(&mut pictures, &state, &styled);
+    assert!(changed_profile(&shown, again).is_none());
+    styled.profile.name_style.as_mut().unwrap().colors[0] = 0xabcdef;
+    let recolored = changed_profile(&shown, profile_data(&mut pictures, &state, &styled))
+        .expect("a new name colour shows");
+    assert!(recolored.name_colors != shown.name_colors);
+    assert!(recolored.servers == shown.servers);
+    styled.profile.name_style = None;
+    let cleared = changed_profile(&recolored, profile_data(&mut pictures, &state, &styled))
+        .expect("removing a name palette shows");
+    assert_eq!(cleared.name_colors.row_count(), 0);
+    assert_eq!(cleared.name_font, 0);
+    assert_eq!(cleared.name_effect, 0);
 }
 
 #[test]
@@ -9095,10 +9118,16 @@ fn a_custom_theme_is_made_edited_and_deleted_in_appearance() {
     window.invoke_choose_theme("nord".into());
 
     // A new theme starts as a copy of the one shown, and shows each change.
+    let theme_index = |id: &str| {
+        theme::BUILT_IN
+            .iter()
+            .position(|built_in| built_in.id == id)
+            .unwrap() as i32
+    };
     window.invoke_new_theme();
     assert!(window.get_theme_editor());
     assert_eq!(window.get_theme_name(), "Nord copy");
-    assert_eq!(window.get_theme_start(), 4);
+    assert_eq!(window.get_theme_start(), theme_index("nord"));
     assert_eq!(window.get_theme_starts().row_count(), theme::BUILT_IN.len());
     let colours = window.get_theme_colours();
     assert_eq!(colours.row_count(), theme::Theme::NAMES.len());
@@ -9182,7 +9211,7 @@ fn a_custom_theme_is_made_edited_and_deleted_in_appearance() {
     // A new theme from another start takes its colours and name.
     window.invoke_new_theme();
     assert_eq!(window.get_theme_name(), "Midnight copy");
-    window.invoke_theme_start_chosen(9);
+    window.invoke_theme_start_chosen(theme_index("sakura"));
     assert_eq!(window.get_theme_name(), "Sakura copy");
     assert_eq!(
         theme::Theme::shown(&window),
@@ -9194,7 +9223,7 @@ fn a_custom_theme_is_made_edited_and_deleted_in_appearance() {
     window.invoke_cancel_theme();
     assert_eq!(theme::Theme::shown(&window), midnight);
 
-    // Renamed, then deleted while chosen: Yap shows.
+    // Renamed, then deleted while chosen: the Harmony default shows.
     window.invoke_edit_theme("custom:1".into());
     window.set_theme_name("Dusk".into());
     window.invoke_save_theme();
@@ -9245,8 +9274,11 @@ fn a_window_made_again_while_editing_drops_the_edit() {
         "rows lose the edited mention colour"
     );
     assert!(!again.get_theme_editor());
-    assert_eq!(theme::Theme::shown(&again), theme::YAP);
-    assert_eq!(theme::mention_color(), 0x64adf6);
+    assert_eq!(theme::Theme::shown(&again), theme::HARMONY);
+    assert_eq!(
+        format!("#{:06x}", theme::mention_color()),
+        theme::hex(theme::HARMONY.link)
+    );
     assert!(Layout::read(directory.path()).custom_themes.is_empty());
 }
 
