@@ -86,7 +86,7 @@ the Slint interface unoptimized. Use `release` only when the question is the
 shipped build's absolute number.
 
 ```sh
-nix develop path:./nix --command cargo build --locked --profile measure --no-default-features --features desktop,discord --bin yapfast
+nix develop path:./nix --command cargo build --locked --profile measure --no-default-features --features desktop,discord --bin Harmony
 ```
 
 `scripts/ui-session start --discord --profile measure` builds the same and
