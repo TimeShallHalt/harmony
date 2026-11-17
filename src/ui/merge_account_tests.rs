@@ -23,22 +23,22 @@ fn account_card_never_projects_a_profile_from_another_or_unlinked_account() {
     let mut adapter = adapter.borrow_mut();
     adapter.app.state.discord_user = Some("current".into());
     adapter.app.state.account_profile = Some(profile("previous"));
-    adapter.show_account(&window);
+    adapter.refresh(&window);
     assert!(window.get_account_profile().id.is_empty());
     assert!(!window.get_account_profile().has_theme);
 
     adapter.app.state.account_profile = Some(profile("current"));
-    adapter.show_account(&window);
+    adapter.refresh(&window);
     assert_eq!(window.get_account_profile().id, "current");
     assert!(window.get_account_profile().has_theme);
 
     // Even an unchanged Arc cached by the adapter must retire on owner change.
     adapter.app.state.discord_user = Some("replacement".into());
-    adapter.show_account(&window);
+    adapter.refresh(&window);
     assert!(window.get_account_profile().id.is_empty());
     assert!(!window.get_account_profile().has_theme);
     adapter.app.state.discord_user = None;
-    adapter.show_account(&window);
+    adapter.refresh(&window);
     assert!(window.get_account_profile().id.is_empty());
     assert!(!window.get_account_profile().has_theme);
 }

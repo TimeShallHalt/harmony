@@ -341,6 +341,9 @@ fn received_style_projects_into_real_profile_card_full_and_panel() {
         kept: false,
         note: None,
         platform_presence: None,
+        board_open: false,
+        activity_open: false,
+        wishlist_open: false,
     };
     let (backend, _commands) = Backend::anonymous_fixture(adapter.borrow().runtime.clone());
     let mut a = adapter.borrow_mut();
@@ -364,13 +367,21 @@ fn received_style_projects_into_real_profile_card_full_and_panel() {
     a.app.state.navigation = yapfast_core::application::Navigation::DirectMessages;
     a.app.state.selected = Some("discord:@me:10".into());
     a.app.state.profile_panel = true;
-    a.app.dispatch(Action::ShowProfilePanel(true));
-    a.app
-        .dispatch(Action::ShowDmProfile("discord:@me:10".into()));
-    a.apply(Event::Profile {
-        user: "200".into(),
-        result: Ok(view.profile.clone()),
-    });
+    let panel = repair1_profile_command(a.app.dispatch(Action::ShowProfilePanel(true)));
+    let card = repair1_profile_command(
+        a.app
+            .dispatch(Action::ShowDmProfile("discord:@me:10".into())),
+    );
+    a.apply(repair1_profile_response(
+        panel,
+        false,
+        Ok(view.profile.clone()),
+    ));
+    a.apply(repair1_profile_response(
+        card,
+        false,
+        Ok(view.profile.clone()),
+    ));
     let mut pictures = HashMap::new();
     assert!(a.app.state.profile.is_some());
 

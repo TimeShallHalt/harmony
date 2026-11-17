@@ -37,6 +37,9 @@ fn decoration_overlay_is_received_static_and_expiry_safe() {
         kept: false,
         note: None,
         platform_presence: None,
+        board_open: false,
+        activity_open: false,
+        wishlist_open: false,
     });
     window.set_workspace(true);
     window.set_trusted(true);

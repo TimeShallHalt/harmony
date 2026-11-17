@@ -27,6 +27,9 @@ fn local_timezone_adapter_persists_scopes_rejects_stale_edits_and_rolls_back_sto
             kept: false,
             note: None,
             platform_presence: None,
+            board_open: false,
+            activity_open: false,
+            wishlist_open: false,
         });
         window.set_profile(ProfileData {
             id: "200".into(),

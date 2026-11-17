@@ -242,10 +242,14 @@ fn open_profile_platforms_follow_exact_current_friend_and_member_presence() {
             room: "discord:10:11".into(),
             members: Ok(vec![yapfast_core::chat::ChatMember {
                 id: "200".into(),
+                bot: false,
                 name: "Member fixture".into(),
                 username: None,
                 role: Role::Member,
                 avatar: None,
+                decoration: None,
+                nameplate: None,
+                style: None,
                 group: None,
                 presence,
                 color: None,
@@ -256,6 +260,7 @@ fn open_profile_platforms_follow_exact_current_friend_and_member_presence() {
                 group_icon: None,
                 role_icon: None,
                 tag: None,
+                boosting_since: None,
             }]),
         });
         a.show(&window, reach);
@@ -392,10 +397,14 @@ fn nonfriend_dm_open_profiles_follow_received_conversation_platforms() {
 fn platform_member(presence: Option<Presence>) -> yapfast_core::chat::ChatMember {
     yapfast_core::chat::ChatMember {
         id: "200".into(),
+        bot: false,
         name: "Member fixture".into(),
         username: None,
         role: Role::Member,
         avatar: None,
+        decoration: None,
+        nameplate: None,
+        style: None,
         group: None,
         presence,
         color: None,
@@ -406,6 +415,7 @@ fn platform_member(presence: Option<Presence>) -> yapfast_core::chat::ChatMember
         group_icon: None,
         role_icon: None,
         tag: None,
+        boosting_since: None,
     }
 }
 

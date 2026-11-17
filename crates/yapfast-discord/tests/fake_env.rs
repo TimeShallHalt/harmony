@@ -11,7 +11,7 @@ use tokio::time::timeout;
 use yapfast_discord::{
     api::Span,
     client,
-    member_list::Presence,
+    member_list::{ClientPlatforms, ClientPresence, ClientStatus, Presence},
     rtp::Codec,
     service::{Discord, Live, Snapshot, Status},
     stream,
@@ -256,13 +256,25 @@ async fn shows_the_example_environment() {
             ("Maya", "Gardeners — 1", Presence::Online),
             ("Robin", "Helpers — 2", Presence::Online),
             ("Theo 🌱", "Helpers — 2", Presence::Idle),
-            ("Jonas", "Online — 3", Presence::Mobile),
+            (
+                "Jonas",
+                "Online — 3",
+                Presence::Clients(ClientPresence {
+                    status: ClientStatus::Online,
+                    platforms: ClientPlatforms {
+                        desktop: None,
+                        web: None,
+                        mobile: Some(ClientStatus::Online),
+                    },
+                }),
+            ),
             ("Priya", "Online — 3", Presence::DoNotDisturb),
             ("Sprout", "Online — 3", Presence::Online),
             ("Lena", "Offline — 1", Presence::Offline),
         ]
     );
     assert_eq!(members[0].color, Some(0xe91e63), "Gardeners' pink");
+    assert_eq!(members[3].presence.base(), Presence::Mobile);
     assert_eq!(
         members[0].activity.as_deref(),
         Some("Playing Pixel Painter")

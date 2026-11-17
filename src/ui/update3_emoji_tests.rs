@@ -3,27 +3,112 @@ use i_slint_core::{accessibility::AccessibleStringProperty, item_tree::ItemRc};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::{cell::RefCell, ops::ControlFlow, rc::Rc};
 slint::slint! {
-    import { EmojiPicker, EmojiRow, EmojiCell, EmojiSection } from "../../ui/messages.slint";
-    export { EmojiRow, EmojiCell, EmojiSection } from "../../ui/messages.slint";
+    // Match production's uneditioned layout semantics. Edition 1.19 changes
+    // conditional/repeated sizing and state defaults; that is a separate migration.
+    #[edition = "1.18"]
+    import { EmojiPicker, EmojiRow, EmojiCell, EmojiSection, EmojiTile, RailSection, SectionGlyph } from "../../ui/messages.slint";
+    export { EmojiRow, EmojiCell, EmojiSection, EmojiTile, RailSection, SectionGlyph } from "../../ui/messages.slint";
     export component PickerHarness inherits Window {
         preferred-width: 500px; preferred-height: 400px;
         in-out property <[EmojiRow]> rows;
         in-out property <[EmojiSection]> sections;
+        in-out property <[EmojiTile]> tiles;
+        in-out property <[EmojiRow]> headings;
+        in-out property <[RailSection]> rail;
+        in-out property <length> grid-height;
+        in-out property <length> viewport-top;
+        in-out property <length> viewport-height;
         in-out property <bool> opened: true;
         in-out property <string> query;
         in-out property <EmojiCell> hover;
         callback picked(EmojiCell);
         if root.opened: EmojiPicker {
             emoji-rows: root.rows; emoji-sections: root.sections; emoji-query <=> root.query;
+            emoji-tiles: root.tiles; emoji-headings: root.headings; grid-height: root.grid-height;
+            rail-sections: root.rail;
             emoji-hover <=> root.hover; columns: 6; react-item: "yapfast:composer";
+            scrolled-to(top, height) => { root.viewport-top = top; root.viewport-height = height; }
             pick(cell) => { root.picked(cell); }
         }
     }
 }
+
+fn sync_model<T: Clone + PartialEq + 'static>(model: ModelRc<T>, rows: Vec<T>) -> ModelRc<T> {
+    if let Some(current) = model.as_any().downcast_ref::<VecModel<T>>() {
+        // Keep native controls alive when a settle did not change their data.
+        super::update_model(current, rows);
+        model
+    } else {
+        ModelRc::new(VecModel::from(rows))
+    }
+}
+
+fn publish_picker(w: &PickerHarness) {
+    // The harness has no Adapter. Supply its presentation inputs using the
+    // production geometry/range contract (emoji::visible_rows and emoji_grid):
+    // visible rows plus two on either side, 8px padding, and 56px cells.
+    let rows: Vec<_> = w.get_rows().iter().collect();
+    let mut tiles = Vec::new();
+    let mut headings = Vec::new();
+    if w.get_opened() && !rows.is_empty() {
+        let top = w.get_viewport_top();
+        let height = if w.get_viewport_height() > 0.0 {
+            w.get_viewport_height()
+        } else {
+            340.0
+        };
+        let first = rows
+            .iter()
+            .position(|row| row.top + row.height >= top)
+            .unwrap_or(rows.len() - 1);
+        let last = rows
+            .iter()
+            .rposition(|row| row.top <= top + height)
+            .unwrap_or(first)
+            .max(first);
+        for row in &rows[first.saturating_sub(2)..=(last + 2).min(rows.len() - 1)] {
+            for (column, cell) in row.cells.iter().enumerate() {
+                tiles.push(EmojiTile {
+                    cell,
+                    x: 8.0 + column as f32 * crate::emoji::CELL,
+                    y: row.top,
+                    animated: false, // These still-image fixtures never request a decode.
+                });
+            }
+            if !row.heading.is_empty() {
+                headings.push(row.clone());
+            }
+        }
+    }
+    let rail = if w.get_opened() {
+        w.get_sections()
+            .iter()
+            .map(|section| RailSection {
+                name: section.icon.name.clone(),
+                icon: section.icon,
+                glyph: SectionGlyph::None, // The fixture is a picture-backed server.
+                top: section.top,
+                end: section.end,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    w.set_grid_height(rows.last().map_or(0.0, |row| row.top + row.height));
+    w.set_tiles(sync_model(w.get_tiles(), tiles));
+    w.set_headings(sync_model(w.get_headings(), headings));
+    w.set_rail(sync_model(w.get_rail(), rail));
+}
+
 fn settle(w: &PickerHarness) {
-    i_slint_core::window::WindowInner::from_pub(w.window()).ensure_tree_instantiated();
+    publish_picker(w);
+    let inner = i_slint_core::window::WindowInner::from_pub(w.window());
+    inner.ensure_tree_instantiated();
     i_slint_backend_testing::mock_elapsed_time(std::time::Duration::ZERO);
     slint::platform::update_timers_and_animations();
+    // Instantiating/resizing the real picker reports its measured viewport.
+    publish_picker(w);
+    inner.ensure_tree_instantiated();
 }
 #[test]
 fn picker_native_hover_is_metadata_only_and_empty_search_clears_selection() {
@@ -41,6 +126,10 @@ fn picker_native_hover_is_metadata_only_and_empty_search_clears_selection() {
     w.set_rows(ModelRc::new(VecModel::from(vec![EmojiRow {
         heading: "".into(),
         cells: ModelRc::from(cells.clone()),
+        icon: slint::Image::default(),
+        glyph: SectionGlyph::None,
+        top: 0.0,
+        height: crate::emoji::ROW_HEIGHT,
     }])));
     drop(cells);
     w.show().unwrap();
@@ -175,6 +264,10 @@ fn custom_and_server_hover_resolve_current_art_without_retaining_removed_resourc
     let rows = Rc::new(VecModel::from(vec![EmojiRow {
         heading: "".into(),
         cells: cells.clone().into(),
+        icon: slint::Image::default(),
+        glyph: SectionGlyph::None,
+        top: 0.0,
+        height: crate::emoji::ROW_HEIGHT,
     }]));
     w.set_rows(rows.clone().into());
     drop(cells);
@@ -215,6 +308,10 @@ fn custom_and_server_hover_resolve_current_art_without_retaining_removed_resourc
                 picture: slint::Image::from_rgba8(replacement.clone()),
                 usable: true,
             }])),
+            icon: slint::Image::default(),
+            glyph: SectionGlyph::None,
+            top: 0.0,
+            height: crate::emoji::ROW_HEIGHT,
         },
     );
     settle(&w);
@@ -248,10 +345,18 @@ fn custom_and_server_hover_resolve_current_art_without_retaining_removed_resourc
     let mut scrolling = vec![EmojiRow {
         heading: "".into(),
         cells: offscreen.clone().into(),
+        icon: slint::Image::default(),
+        glyph: SectionGlyph::None,
+        top: 0.0,
+        height: crate::emoji::ROW_HEIGHT,
     }];
-    scrolling.extend((0..30).map(|_| EmojiRow {
+    scrolling.extend((0..30).map(|index| EmojiRow {
         heading: "Spacer".into(),
         cells: ModelRc::default(),
+        icon: slint::Image::default(),
+        glyph: SectionGlyph::None,
+        top: crate::emoji::ROW_HEIGHT + index as f32 * crate::emoji::HEADING_HEIGHT,
+        height: crate::emoji::HEADING_HEIGHT,
     }));
     w.set_query("".into());
     rows.set_vec(scrolling);
@@ -266,6 +371,16 @@ fn custom_and_server_hover_resolve_current_art_without_retaining_removed_resourc
         });
     settle(&w);
     assert!(
+        w.get_viewport_top() > crate::emoji::ROW_HEIGHT + 2.0 * crate::emoji::HEADING_HEIGHT,
+        "native scrolling must move beyond the hovered row and its overscan"
+    );
+    assert!(
+        w.get_tiles()
+            .iter()
+            .all(|tile| tile.cell.key != "repair_art:90003"),
+        "virtualized presentation must release the offscreen tile"
+    );
+    assert!(
         w.get_hover().key.is_empty(),
         "scrolling offscreen releases the footer identity"
     );
@@ -275,6 +390,10 @@ fn custom_and_server_hover_resolve_current_art_without_retaining_removed_resourc
         EmojiRow {
             heading: "Gone".into(),
             cells: ModelRc::default(),
+            icon: slint::Image::default(),
+            glyph: SectionGlyph::None,
+            top: 0.0,
+            height: crate::emoji::HEADING_HEIGHT,
         },
     );
     settle(&w);
@@ -287,9 +406,20 @@ fn custom_and_server_hover_resolve_current_art_without_retaining_removed_resourc
         .make_mut_slice()
         .fill(slint::Rgba8Pixel::new(31, 61, 211, 255));
     w.set_query("".into());
+    // This rail-only fixture still names a real heading row and a pixel range.
+    w.set_rows(ModelRc::new(VecModel::from(vec![EmojiRow {
+        heading: "REPAIR SERVER".into(),
+        cells: ModelRc::default(),
+        icon: slint::Image::from_rgba8(server.clone()),
+        glyph: SectionGlyph::None,
+        top: 0.0,
+        height: crate::emoji::HEADING_HEIGHT,
+    }])));
     w.set_sections(ModelRc::new(VecModel::from(vec![EmojiSection {
-        row: 0,
-        end: 1,
+        heading: 0,
+        icon_url: "".into(), // Pixels are supplied locally; no server request.
+        top: 0.0,
+        end: crate::emoji::HEADING_HEIGHT,
         icon: EmojiCell {
             key: "server:90002".into(),
             glyph: "Repair server".into(),
@@ -298,7 +428,7 @@ fn custom_and_server_hover_resolve_current_art_without_retaining_removed_resourc
             usable: true,
         },
     }])));
-    drop(hover_control(&w, "Jump to Repair server"));
+    drop(hover_control(&w, "Repair server"));
     assert_eq!(
         footer_picture(&w)
             .to_rgba8()

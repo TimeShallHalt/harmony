@@ -23,6 +23,9 @@ fn install(owner: &Rc<RefCell<Adapter>>, window: &YapfastWindow, name: &str) {
         kept: false,
         note: None,
         platform_presence: None,
+        board_open: false,
+        activity_open: false,
+        wishlist_open: false,
     });
     window.set_workspace(true);
     window.set_trusted(true);
