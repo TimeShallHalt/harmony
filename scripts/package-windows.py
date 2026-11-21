@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Package Harmony's Windows executable, build inputs and dependency notices, as a
-portable ZIP and an Inno Setup installer.
+"""Package Harmony's Windows executable, build inputs and dependency notices as a
+portable ZIP. The GUI installer uses build-harmony-installer.py instead.
 
 The Discord flavour is the release; the full one, with Matrix, goes out as a
 separate preview. Both install as the same app, so one replaces the other."""
@@ -17,8 +17,7 @@ import urllib.parse
 from release_package import ROOT, dependency_notices, digest, names_home, source_snapshot, zip_directory
 
 TARGET = "x86_64-pc-windows-msvc"
-# Inno Setup's compiler, run under Wine; tooling must already exist locally.
-INNO_SETUP_VERSION = "7.1.0"
+
 
 # Cargo features, the suffix of file names and release tag, and the name the
 # installer shows, for each flavour scripts/build-windows builds.
@@ -28,44 +27,10 @@ FLAVOURS = {
 }
 
 
-def wine_environment(prefix):
-    environment = dict(os.environ, WINEPREFIX=str(prefix), WINEDEBUG="-all")
-    # The compiler is a console program; Wine opens no window for it.
-    environment.pop("DISPLAY", None)
-    environment.pop("WAYLAND_DISPLAY", None)
-    return environment
-
-
-def inno_setup():
-    """Use offline tooling only; never download or install a compiler implicitly."""
-    prefix = Path(os.environ.get("HARMONY_INNO_PREFIX", ROOT / ".local/windows/inno-setup" / INNO_SETUP_VERSION))
-    if (prefix / "drive_c/InnoSetup/ISCC.exe").is_file():
-        return prefix
-    raise SystemExit("Offline Inno Setup compiler is missing; set HARMONY_INNO_PREFIX or use --no-installer")
-
-
 def compile_installer(package, version, flavour, output):
-    """Compiles packaging/windows/harmony.iss over the ZIP's files."""
-    prefix = inno_setup()
-    environment = wine_environment(prefix)
-
-    def windows_path(path):
-        return subprocess.check_output(["winepath", "-w", str(path)], env=environment, text=True,
-                                       timeout=60).strip()
-
-    # The file's version resource takes only numbers, without a nightly's suffix.
-    definitions = [f"/DAppVersion={version}", f"/DVersionNumber={version.split('-')[0]}",
-                   f"/DSourceDir={windows_path(package)}"]
-    if FLAVOURS[flavour]["edition"]:
-        definitions += [f"/DEdition={FLAVOURS[flavour]['edition']}", f"/DFileSuffix={FLAVOURS[flavour]['suffix']}"]
-    license_path = ROOT / "LICENSE"
-    if license_path.is_file():
-        definitions.append(f"/DLicenseFile={windows_path(license_path)}")
-    subprocess.run(["wine", "C:\\InnoSetup\\ISCC.exe", "/Q", *definitions,
-                    f"/O{windows_path(output)}", windows_path(ROOT / "packaging/windows/harmony.iss")],
-                   env=environment, check=True, timeout=1800)
-    subprocess.run(["wineserver", "-w"], env=environment, check=True, timeout=120)
-    return output / f"Harmony-{version}{FLAVOURS[flavour]['suffix']}-windows-x64-setup.exe"
+    """Retired Wine producer; the standalone Inno GUI has its own build script."""
+    raise SystemExit("The standalone Wine installer route is retired. Use --no-installer for the portable ZIP; "
+                     "the Inno GUI installer is built with scripts/build-harmony-installer.py.")
 
 
 def main():
@@ -76,6 +41,9 @@ def main():
     parser.add_argument("--output", type=Path, help="default: target/dist/FLAVOUR")
     parser.add_argument("--no-installer", action="store_true", help="make only the portable ZIP")
     args = parser.parse_args()
+    if not args.no_installer:
+        parser.error("Use --no-installer for this portable-only producer. The standalone Wine installer "
+                     "is retired; scripts/build-harmony-installer.py builds the Inno GUI installer.")
     flavour = FLAVOURS[args.flavour]
     output = args.output or ROOT / "target/dist" / args.flavour
     executable = args.exe.resolve()
