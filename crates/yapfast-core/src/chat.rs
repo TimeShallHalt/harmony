@@ -936,11 +936,8 @@ pub struct Profile {
     /// Their board's games and applications were asked after, and came.
     pub board_asked: bool,
     pub board_named: bool,
-    /// What they did lately, once asked for.
-    pub recent: Vec<RecentActivity>,
-    pub recent_asked: bool,
-    /// Discord's answer to it came, even an empty or failed one.
-    pub recent_came: bool,
+    /// The activity Discord made available to this viewer for this profile.
+    pub recent: ActivityHistory,
 }
 
 impl Profile {
@@ -992,6 +989,26 @@ impl From<&yapfast_discord::profile::FrameLayer> for ProfileFrameLayer {
     }
 }
 
+/// A request belongs to a single opened profile. A late reply cannot populate a
+/// different open of the same person's profile or an account that has signed out.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ActivityHistory {
+    #[default]
+    Unasked,
+    Loading(Arc<()>),
+    Loaded(Vec<RecentActivity>),
+    Unavailable,
+}
+
+impl ActivityHistory {
+    pub fn entries(&self) -> &[RecentActivity] {
+        match self {
+            Self::Loaded(entries) => entries,
+            _ => &[],
+        }
+    }
+}
+
 /// A past thing on someone's Activity tab.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecentActivity {
@@ -999,8 +1016,10 @@ pub struct RecentActivity {
     pub subtitle: String,
     pub picture: Option<String>,
     pub music: bool,
-    /// When it ended, in Unix milliseconds.
+    /// When it was last active, in Unix milliseconds.
     pub at: Option<u64>,
+    /// Only present if Discord supplied both session boundaries.
+    pub duration_ms: Option<u64>,
 }
 
 /// A widget on a Discord board.
@@ -3359,9 +3378,10 @@ pub enum DiscordCommand {
         user: String,
         widgets: Vec<ProfileWidget>,
     },
-    /// What someone did lately, read-only; [`Event::ProfileRecent`] follows.
+    /// Ask for the activity visible to this viewer on this open of a profile.
     ProfileRecent {
         user: String,
+        request: Arc<()>,
     },
     /// This account's profile for its editor: in a Discord server, by its
     /// server id, or its main profile; [`Event::OwnProfile`] follows.
@@ -4323,10 +4343,10 @@ pub enum Event {
         user: String,
         widgets: Vec<ProfileWidget>,
     },
-    /// What [`DiscordCommand::ProfileRecent`] found; nothing if Discord didn't say.
+    /// A successful empty history is distinct from Discord being unavailable.
     ProfileRecent {
-        user: String,
-        recent: Vec<RecentActivity>,
+        request: Arc<()>,
+        recent: Result<Vec<RecentActivity>, ()>,
     },
     /// The profile Harmony kept of someone [`DiscordCommand::Profile`] asked
     /// for, to show until [`Event::Profile`] comes.

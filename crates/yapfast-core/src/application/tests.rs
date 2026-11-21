@@ -13219,23 +13219,50 @@ fn a_profile_coming_after_a_tab_opened_keeps_what_it_asked_and_asks_what_it_didn
 fn recent_activity_is_asked_for_once_when_the_activity_tab_opens() {
     let mut app = full_profile_with_tabs(true);
     let asked = app.dispatch(Action::OpenProfileTab(ProfileTab::Activity));
-    assert!(matches!(
-        asked.as_slice(),
-        [Effect::Backend(Command::Discord(DiscordCommand::ProfileRecent { user }))] if user == "2"
-    ));
+    let [Effect::Backend(Command::Discord(DiscordCommand::ProfileRecent { user, request }))] =
+        asked.as_slice()
+    else {
+        panic!("expected one profile history request")
+    };
+    assert_eq!(user, "2");
     assert!(
         app.dispatch(Action::OpenProfileTab(ProfileTab::Activity))
             .is_empty()
     );
     app.apply(Event::ProfileRecent {
-        user: "2".into(),
-        recent: vec![chat::RecentActivity {
+        request: request.clone(),
+        recent: Err(()),
+    });
+    assert!(matches!(
+        app.state.profile.as_ref().unwrap().profile.recent,
+        chat::ActivityHistory::Unavailable
+    ));
+    let retry = app.dispatch(Action::OpenProfileTab(ProfileTab::Activity));
+    let [
+        Effect::Backend(Command::Discord(DiscordCommand::ProfileRecent {
+            request: current, ..
+        })),
+    ] = retry.as_slice()
+    else {
+        panic!("expected retry")
+    };
+    app.apply(Event::ProfileRecent {
+        request: request.clone(),
+        recent: Ok(Vec::new()),
+    });
+    assert!(matches!(
+        app.state.profile.as_ref().unwrap().profile.recent,
+        chat::ActivityHistory::Loading(_)
+    ));
+    app.apply(Event::ProfileRecent {
+        request: current.clone(),
+        recent: Ok(vec![chat::RecentActivity {
             title: "A song".into(),
             ..Default::default()
-        }],
+        }]),
     });
     let view = app.state.profile.as_ref().unwrap();
-    assert_eq!(view.profile.recent[0].title, "A song");
+    assert_eq!(view.profile.recent.entries()[0].title, "A song");
     // A card asks for none of it.
     let mut card = full_profile_with_tabs(false);
     assert!(

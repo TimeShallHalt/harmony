@@ -4463,7 +4463,7 @@ impl Application {
             Event::KeptProfile { user, profile } => return self.show_kept_profile(user, profile),
             Event::Wishlist { id, wishlist } => self.wishlist_loaded(&id, wishlist),
             Event::ProfileBoard { user, widgets } => self.profile_board_named(&user, widgets),
-            Event::ProfileRecent { user, recent } => self.profile_recent_came(&user, recent),
+            Event::ProfileRecent { request, recent } => self.profile_recent_came(&request, recent),
             Event::BadgeLevels { user, badges } => self.show_badge_levels(&user, badges),
             Event::ProfileFrame { request, frame } => self.show_profile_frame(&request, &frame),
             Event::ProfileEffect(effect) => {

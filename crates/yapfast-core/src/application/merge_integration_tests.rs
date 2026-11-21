@@ -108,7 +108,10 @@ fn scoped_profile_completion_continues_an_open_upstream_activity_tab() {
     });
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Backend(Command::Discord(DiscordCommand::ProfileRecent { user })) if user == "200"
+        Effect::Backend(Command::Discord(DiscordCommand::ProfileRecent { user, .. })) if user == "200"
     )));
-    assert!(app.state.profile.as_ref().unwrap().profile.recent_asked);
+    assert!(matches!(
+        app.state.profile.as_ref().unwrap().profile.recent,
+        crate::chat::ActivityHistory::Loading(_)
+    ));
 }

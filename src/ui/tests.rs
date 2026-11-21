@@ -316,7 +316,7 @@ fn the_full_profiles_tabs_and_dates_are_discords() {
             joined: Some("Nov 5, 2026".into()),
             server_name: "Server".into(),
             // Discord said what they did lately: nothing.
-            recent_came: true,
+            recent: yapfast_core::chat::ActivityHistory::Loaded(Vec::new()),
             ..Default::default()
         },
         ..Default::default()

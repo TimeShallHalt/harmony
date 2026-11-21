@@ -11688,6 +11688,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "webrtc-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -526,7 +526,7 @@ have any friends in common" or "servers in common". Activity lists their activit
 activity", from `GET /content-inventory/users/{id}/outbox` when the tab first
 opens, what they listened to (`extra.entries[0].media`: its `title`, first
 artist and `image_url`), watched (`extra.media_title`) and played
-(`extra.game_name`), each with how long ago, from `ended_at`, else
+(`extra.game_name`), each with a date, local time, and session length when both times are available. The date comes from `ended_at`, else
 `started_at`, else the snowflake of a listening session's `id`.
 
 Board and Wishlist come only for the full profile, and only when their tab
@@ -978,14 +978,16 @@ this account saves its own.
 `scripts/ui-session do 'pick avatar PATH'` chooses a picture in the editor,
 as its file chooser would.
 
-## Linux Rich Presence
+## Rich Presence
 
-Games and tools on Linux tell Discord what they're doing through its local
-RPC socket, which the discord-rpc library and Discord's game SDK use. While
-the account shares its game ([game detection](#game-detection)), Yapfast
-serves that socket itself, so no bridge such as arRPC needs to run. Windows'
-named pipes and the macOS socket aren't served yet.
+Harmony receives the game activity that desktop integrations send over local IPC.
+[Discord RPC protocol](https://docs.discord.com/developers/topics/rpc)
+On Windows it uses the first available local named pipe from
+`\\.\pipe\discord-ipc-0` through `discord-ipc-9`. Only processes belonging
+to the current Windows user can connect. The game-sharing preference and Invisible
+status control when Harmony listens and publishes.
 
+On Linux, Harmony serves the local socket used by games and tools directly.
 The socket is the first free `discord-ipc-0` to `discord-ipc-9` in
 `XDG_RUNTIME_DIR`, or else in `TMPDIR`, `TMP`, `TEMP` or `/tmp`. A socket
 another program serves, such as Discord's own app, stays that program's, and
@@ -997,7 +999,7 @@ sandboxed game that can't see the runtime directory; Yapfast doesn't change
 sandbox permissions or set up Wine's bridge.
 
 Yapfast answers the handshake with READY, PING with PONG, and CLOSE and
-SET_ACTIVITY, where `activity: null` clears the activity; other commands get
+SET_ACTIVITY. Sending a null activity or omitting it clears the activity. Other commands get
 an error. As Discord's desktop client does when a game connects, it asks
 `GET /oauth2/applications/{id}/rpc` for the application's name, and the
 first time the game names an image, `GET /oauth2/applications/{id}/assets`
@@ -1011,8 +1013,7 @@ game can't replace the custom status or claim another application.
 
 The game that set its activity last shows. When it clears it or
 disconnects, the one before shows again, and once none is left, the game
-detection found. The activity lasts through reconnecting to the gateway and
-is never saved. Presence updates keep to Discord's limit, as every other
+detection found. Going offline clears active RPC sessions. Games can reconnect when Harmony comes online. Presence updates keep to Discord's limit, as every other
 presence change does.
 
 ## Listening to Spotify

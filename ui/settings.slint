@@ -1554,7 +1554,7 @@ export component GameActivitySettings inherits VerticalLayout {
     SettingsTitle { text: "Game activity"; }
     SettingsSwitch {
         text: "Share the game you play";
-        description: "Harmony looks for games among the programs running, and on Linux takes the Rich Presence games send. Your Discord account keeps this setting, so it's the same in Discord's apps.";
+        description: "Share detected games and the Rich Presence games send on Windows and Linux. Your Discord account remembers this setting. Activity is hidden while you are Invisible.";
         checked: root.shown;
         controlled: true;
         enabled: root.linked;

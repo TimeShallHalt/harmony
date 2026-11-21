@@ -411,7 +411,7 @@ fn ignored_legacy_completion_cannot_trigger_tabs_on_a_scoped_open() {
     let view = app.state.profile.as_ref().unwrap();
     assert_eq!(view.profile.bio, "accepted");
     assert!(
-        !view.profile.recent_asked,
+        matches!(view.profile.recent, crate::chat::ActivityHistory::Unasked),
         "an ignored user-only completion has no follow-up authority"
     );
 }

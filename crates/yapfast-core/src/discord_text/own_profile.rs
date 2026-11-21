@@ -125,31 +125,36 @@ pub(super) fn command(
                 let _ = events.send(Event::ProfileBoard { user, widgets });
             });
         }
-        DiscordCommand::ProfileRecent { user } => {
+        DiscordCommand::ProfileRecent { user, request } => {
             let Ok(discord) = discord else {
-                let recent = Vec::new();
-                let _ = events.send(Event::ProfileRecent { user, recent });
+                let _ = events.send(Event::ProfileRecent {
+                    request,
+                    recent: Err(()),
+                });
                 return None;
             };
             let discord = discord.clone();
             tokio::spawn(async move {
-                let recent = match discord.recent_activity(&user).await {
-                    Ok(entries) => entries
-                        .into_iter()
-                        .map(|entry| crate::chat::RecentActivity {
-                            title: entry.title,
-                            subtitle: entry.subtitle,
-                            picture: entry.picture,
-                            music: entry.music,
-                            at: entry.at,
-                        })
-                        .collect(),
-                    Err(error) => {
-                        tracing::debug!(%error, "could not get someone's recent activity");
-                        Vec::new()
-                    }
-                };
-                let _ = events.send(Event::ProfileRecent { user, recent });
+                let recent = discord
+                    .recent_activity(&user)
+                    .await
+                    .map(|entries| {
+                        entries
+                            .into_iter()
+                            .map(|entry| crate::chat::RecentActivity {
+                                title: entry.title,
+                                subtitle: entry.subtitle,
+                                picture: entry.picture,
+                                music: entry.music,
+                                at: entry.at,
+                                duration_ms: entry.duration_ms,
+                            })
+                            .collect()
+                    })
+                    .map_err(|error| {
+                        tracing::debug!(%error, "could not get recent activity");
+                    });
+                let _ = events.send(Event::ProfileRecent { request, recent });
             });
         }
         DiscordCommand::ProfilePicture { kind, path } => {

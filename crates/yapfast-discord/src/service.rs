@@ -2884,7 +2884,8 @@ impl Discord {
 
     /// What someone did lately, for their full profile's Activity tab.
     pub async fn recent_activity(&self, user: &str) -> Result<Vec<profile::RecentEntry>> {
-        Ok(profile::recent_entries(&self.api.outbox(user).await?))
+        profile::recent_entries(&self.api.outbox(user).await?)
+            .ok_or_else(|| anyhow!("Discord did not return an activity list"))
     }
 
     /// Names a board's games and applications. What Discord doesn't say

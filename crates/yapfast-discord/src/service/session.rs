@@ -102,7 +102,7 @@ pub(super) async fn run(
             if !crate::client::has_build_number() {
                 shared.api.learn_build_number().await;
             }
-            let playing = *shared.show_game.borrow();
+            let playing = *shared.show_game.borrow() && shared.presence["status"] != "invisible";
             let music = shared.music.borrow().clone();
             let music = music.filter(|_| shared.presence["status"] != "invisible");
             crate::own_activity::merge(
@@ -788,7 +788,8 @@ impl Session<'_> {
             .reset(Instant::now() + until(next));
         let mut presence = self.tracker.own_presence(away);
         let activity = self.shared.activity.borrow_and_update().clone();
-        let activity = activity.filter(|_| self.tracker.show_game);
+        let activity =
+            activity.filter(|_| self.tracker.show_game && self.tracker.status != "invisible");
         self.show_playing(activity.as_deref());
         // An invisible account shares no music, as in Discord's client.
         let music = self.shared.music.borrow_and_update().clone();
@@ -810,7 +811,7 @@ impl Session<'_> {
     /// Runs or stops what finds the game as the settings say, and shows the
     /// game played.
     fn show_playing(&mut self, activity: Option<&Value>) {
-        let shown = self.tracker.show_game;
+        let shown = self.tracker.show_game && self.tracker.status != "invisible";
         self.shared.show_game.send_if_modified(|old| {
             let changed = *old != shown;
             *old = shown;
