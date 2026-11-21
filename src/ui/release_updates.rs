@@ -208,8 +208,9 @@ fn download(adapter: &Rc<RefCell<Adapter>>) {
     let Some(release) = a.updates.offered.clone().filter(|r| r.has_installer) else {
         return;
     };
+    let profile = a.root.clone();
     let task = a.runtime.spawn(async move {
-        let cache = yapfast_core::default_directory()?.join("update-cache");
+        let cache = std::path::absolute(profile.join("update-cache"))?;
         harmony_updates::download(&release, &cache).await
     });
     let worker = task.abort_handle();
