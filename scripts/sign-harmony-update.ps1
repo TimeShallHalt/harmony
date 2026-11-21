@@ -39,7 +39,9 @@ try {
     if ($file.Name -cne $name -or $file.Length -lt 64 -or $file.Length -gt 536870912) { throw 'Installer identity or length does not match the release.' }
     $metadata = $file.VersionInfo
     $embeddedVersion = '{0}.{1}.{2}.{3}' -f $metadata.FileMajorPart, $metadata.FileMinorPart, $metadata.FileBuildPart, $metadata.FilePrivatePart
-    if ($embeddedVersion -cne $expectedVersion -or $metadata.ProductName.Trim() -cne 'Harmony' -or $metadata.FileDescription.Trim() -cne 'Harmony Installer') {
+    $installerDescriptions = @('Harmony Installer', 'Harmony Installer with Repair')
+    if ($embeddedVersion -cne $expectedVersion -or $metadata.ProductName.Trim() -cne 'Harmony' -or
+        $metadata.FileDescription.Trim() -cnotin $installerDescriptions) {
         throw 'Setup was not built for this Harmony release tag. Check the embedded product version and build number.'
     }
     $digest = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
