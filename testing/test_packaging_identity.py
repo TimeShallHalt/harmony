@@ -99,6 +99,7 @@ class PackagingIdentityTests(unittest.TestCase):
                 (output / f'Harmony-{VERSION}-Setup.exe').write_bytes(b'fixture installer')
                 return subprocess.CompletedProcess(command, 0)
             with patch.object(module, 'ROOT', root), patch.object(module, 'stage', side_effect=stage), \
+                 patch.object(module, 'build_repair', return_value=root / 'HarmonyRepair.exe'), \
                  patch.object(module.subprocess, 'run', side_effect=compile_fixture) as run:
                 with self.assertRaises(FileNotFoundError):
                     module.build(root / 'release.json', output)

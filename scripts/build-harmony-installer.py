@@ -54,20 +54,41 @@ def stage(manifest, payload):
         require(digest(corresponding) == source['sha256'], 'Conflicting corresponding source')
     else:
         shutil.copyfile(source['path'], corresponding)
-    for name in ('packaging/windows/harmony-simple.iss', 'scripts/build-harmony-installer.py'):
-        target = payload / 'installer-source' / Path(name).name
+    repair_sources = sorted((ROOT / 'packaging/windows/repair').glob('*'))
+    for name in [ROOT / 'packaging/windows/harmony-simple.iss', ROOT / 'scripts/build-harmony-installer.py', *repair_sources]:
+        target = payload / 'installer-source' / ('repair' if name in repair_sources else '') / name.name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / name, target)
+        shutil.copyfile(name, target)
     (payload / 'INSTALLER.txt').write_text(
         'Harmony installer\n\nChoose current-user or all-users installation, then a program folder.\n'
-        'Existing supported installations are detected. Profiles, credentials, settings and custom data folders are not copied or deleted.\n'
-        'Quit Harmony before updating. Setup never launches the application or enables startup/protocol integrations.\n'
+        'Repair keeps the newest installed version and build. Setup checks registered installs and versioned personal deployments.\n'
+        'Existing pins and links keep their arguments. Profiles, settings and custom data folders stay in place.\n'
+        'Quit affected Harmony copies before updating. A keeper can stay open during Repair. Run Setup /CURRENTUSER /REPAIR for repair only.\n'
         'Moving a shared install to current-user removes shared app availability, not other users\' data.\n'
         'Uninstall removes installer-owned program files only. Unknown older installers require removal through Windows Apps.\n'
         'External previous-program removal is not atomic with the new install. A failed new install may require rerunning Setup.\n'
         'Application GPL-3.0-or-later; original attribution, notices and corresponding source are included.\n', encoding='utf-8')
     files = {path.relative_to(payload).as_posix(): digest(path) for path in sorted(payload.rglob('*')) if path.is_file()}
     return info, files
+
+def build_repair(work, info, files, identity, fixture):
+    sources = ROOT / 'packaging/windows/repair'
+    compiler = Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+    config = work / 'Config.cs'
+    settings = {'Id': identity, 'Fixture': str(fixture or ''), 'Rank': f"{info['version']}.{info['build_id']}",
+                'Hash': files['Harmony.exe'], 'MsiUpgrade': '{B85CFFDA-896F-5BBC-8863-BC5F4DD0E810}'}
+    constants = [f'        internal const string {key} = @"{value.replace(chr(34), chr(34)*2)}";' for key, value in settings.items()]
+    config.write_text('namespace Harmony.Setup {\n    internal static class Config {\n' + '\n'.join(constants) + '\n    }\n}\n', encoding='utf-8-sig')
+    catalog = work / f"{info['version']}-b{info['build_id']}.sha256"
+    catalog.write_text(''.join(f'{checksum}  {name}\n' for name, checksum in sorted(files.items())), encoding='utf-8')
+    catalogs = {p.name: p for p in sources.glob('*.sha256')}
+    catalogs[catalog.name] = catalog
+    exe = work / 'HarmonyRepair.exe'
+    command = [str(compiler), '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/r:System.Web.Extensions.dll',
+               '/out:' + str(exe), *[f'/resource:{p},{name}' for name, p in catalogs.items()],
+               str(config), *map(str, sorted(sources.glob('*.cs')))]
+    subprocess.run(command, check=True)
+    return exe
 
 def build(manifest, output_dir, fixture_root=None, fixture_id=None, tooling_receipt=None):
     output_dir = output_dir.resolve()
@@ -87,7 +108,7 @@ def build(manifest, output_dir, fixture_root=None, fixture_id=None, tooling_rece
     for name, checksum in files.items():
         member = PurePosixPath(name)
         destination = '{app}' + ('\\' + str(member.parent).replace('/', '\\') if str(member.parent) != '.' else '')
-        rows.append(f'Source: "{payload.joinpath(*member.parts)}"; DestDir: "{destination}"; DestName: "{member.name}"; Flags: ignoreversion; Hash: "{checksum}"')
+        rows.append(f'Source: "{payload.joinpath(*member.parts)}"; DestDir: "{destination}"; DestName: "{member.name}"; Flags: ignoreversion; Hash: "{checksum}"; Check: InstallPayload')
     include.write_text('\n'.join(rows) + '\n', encoding='utf-8')
     defines = {'PayloadDir': str(payload), 'PayloadFiles': str(include), 'AppVersion': info['version'], 'AppBuild': str(info['build_id'])}
     if fixture_root is not None:
@@ -96,6 +117,7 @@ def build(manifest, output_dir, fixture_root=None, fixture_id=None, tooling_rece
         identity = uuid.UUID(fixture_id) if fixture_id else uuid.uuid4()
         require(identity.version == 4 and str(identity).upper() != PUBLIC_ID, 'Private UUID4 required')
         defines.update(FixtureRoot=str(fixture_root), HarmonyId=str(identity).upper())
+    defines['RepairTool'] = str(build_repair(work, info, files, defines.get('HarmonyId', PUBLIC_ID), fixture_root))
     output = output_dir / ('Harmony-' + info['version'] + '-Setup.exe')
     require(not output.exists(), 'Choose a fresh output location')
     command = [str(compiler), '--quiet-progress', '--no-ide-signtools', '--output-dir=' + str(output_dir)]

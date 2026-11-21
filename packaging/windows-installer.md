@@ -1,7 +1,7 @@
 # Harmony Windows GUI installer
 
-One standard Inno Setup script: `packaging/windows/harmony-simple.iss`.
-The custom coordinator, IPC, bridges and receipt framework were removed.
+Inno Setup builds the installer from `packaging/windows/harmony-simple.iss`.
+The Windows maintenance helper in `packaging/windows/repair` inventories programs and repairs launchers for the initiating account.
 
 ## Build
 
@@ -29,39 +29,23 @@ The private signing key is non-exportable. Moving signing to another Windows acc
 
 - **Install / update for all users** (default folder `%ProgramFiles%\Harmony`).
 - **Install / move to me only** (default `%LOCALAPPDATA%\Programs\Harmony`).
-- A previous-install information page and an editable destination folder.
+- **Repair installed copies and keep the newest version** lists the discovered programs and the folder it will keep. Run `Harmony-1.2.0-Setup.exe /CURRENTUSER /REPAIR` to select this mode directly.
 
-Same-scope updates default to the prior location. The known legacy MSI 1.0.3001
-is identified using native context/assignment, not its registry hive. This simple
-Inno recipe is also detected. Unknown recipes/multiple registrations stop with an
-explanation rather than running arbitrary commands.
+Setup compares numeric major, minor, patch and build numbers. A registered installation wins a tie with a portable deployment, then the shared installation wins. Repair can keep a newer version than the one bundled in Setup. The surviving program can stay open. Close any older copy that Repair needs to remove.
 
-Scope/location changes invoke the supported previous program's normal uninstaller
-before installing. Shared-to-personal removal requests UAC for that removal only;
-the personal install continues under the initiating user. Start Setup normally,
-not through another person's already-elevated shell. Shared relocation installs
-an ordinary, uninstall-owned executable copy at the former path for old shortcuts.
+Install and update also clean up superseded copies after verifying the replacement executable. Same-scope updates default to the existing folder. Start Setup from your Windows account. Removing a shared installation can prompt for administrator access and ends shared access for other users. A relocation that reuses the same Windows installer registration must retire the previous registered program before installing. Rerun Setup if copying is interrupted.
 
-Profiles, credentials, settings and custom data directories are not read, copied,
-reset or deleted. Program scope is separate from each Windows user's saved data.
-Moving to personal removes shared app availability, not other users' data.
-Setup asks you to quit affected Harmony processes; it never kills, restarts or
-launches the app. Existing shortcuts are not overwritten; absent startup/protocol
-integrations are not enabled. Uninstall removes logged program files only.
+Setup recognizes Harmony's registered Inno identity, its Windows Installer product family, and the personal programs folder and versioned releases beneath it. It verifies the executable against its build record. The pre-rebrand MSI migration checks the original cached package. Registered programs use their own uninstallers. Versioned portable releases use a file ownership catalog. Changed and unrecognized files stay in place. For a release without a catalog, Repair removes the verified executable and its build record.
 
-Previous-program removal and new installation are not atomic. If new copying fails
-after removal, rerun Setup; there is no claimed custom rollback framework.
+Repair removes redundant Start entries and the old Harmony Preview shortcut. It retargets existing account shortcuts, pins, protocol handlers and startup commands that point to a discovered executable. Custom arguments, including `--data-dir`, stay attached to those launchers. Profile directories, sign-ins and rollback archives stay in place.
 
 ## Native smoke test
 
 ```sh
 python3 testing/test_simple_installer_native.py --allow-private-install --manifest PATH/TO/release-artifacts.json
+python3 testing/test_installer_repair_native.py --allow-private-install
 ```
 
 For a separate release worktree, pass `--tooling-receipt PATH/TO/tooling-provenance.json` to either command to use the prepared compiler.
 
-The private-identity test covers current-user installation, a custom Unicode directory, the full-quit update handoff, relocation, uninstall, reinstall and cleanup. Every payload hash and
-registration is read back; synthetic data and a foreign file must survive. Harmony
-is never run. Real machine-scope/UAC migration and real account restoration require
-separate interactive validation. Evidence and Defender results live under
-`.local/evidence/simple-installer`.
+The first test installs the full package under a private identity and exercises the updater handoff, Unicode paths, relocation, uninstall and reinstall. The second uses synthetic executables to exercise a running keeper, a running older copy, duplicate and foreign shortcuts, Unicode profile arguments, numeric version ordering, downgrade refusal, normal-update cleanup and repeated Repair.
