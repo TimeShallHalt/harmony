@@ -9,6 +9,7 @@ struct Draft {
     original: String,
 }
 struct Review {
+    input: String,
     body: String,
     time: String,
     zone: String,
@@ -84,6 +85,7 @@ impl Adapter {
             let ui = w.global::<Scheduling>();
             ui.set_confirmation("".into());
             ui.set_body("".into());
+            ui.set_review_body("".into());
             ui.set_attachments("".into());
             ui.set_destination("".into());
             ui.set_time("".into());
@@ -276,6 +278,7 @@ impl Adapter {
                 ui.set_composing(false);
                 ui.set_reviewed(false);
                 ui.set_body("".into());
+                ui.set_review_body("".into());
                 ui.set_attachments("".into());
                 ui.set_destination("".into());
                 ui.set_utc("".into());
@@ -375,6 +378,13 @@ impl Adapter {
         window.set_notice(self.app.state.notice.as_deref().unwrap_or_default().into());
         let ui = window.global::<Scheduling>();
         let account = self.scheduled_account();
+        ui.set_review_body(
+            self.scheduled
+                .review
+                .as_ref()
+                .map_or("", |r| r.body.as_str())
+                .into(),
+        );
         ui.set_available(!account.is_empty());
         ui.set_storage_ready(
             self.scheduled
@@ -498,13 +508,7 @@ impl Adapter {
             self.scheduled.open_on_demand()?;
             let s = &self.app.state;
             let room = s.selected.clone().unwrap();
-            let (text, silent) = queue::sending_text(s.draft());
-            let wired = self.app.outgoing_body(&room, text);
-            ui.set_body(if silent {
-                format!("@silent {wired}").into()
-            } else {
-                wired.into()
-            });
+            ui.set_body(s.draft().into());
             ui.set_time(
                 queue::local_input(self.scheduled.clock.now_ms().saturating_add(3_600_000)).into(),
             );
@@ -556,10 +560,28 @@ impl Adapter {
         } else {
             d.sources.len()
         };
+        let input = ui.get_body();
+        let (text, silent) = queue::sending_text(input.as_str());
+        // Only resolve names against the intended recipient. Unedited entries
+        // already carry the exact mentions that were originally reviewed.
+        let already_wired = d.id.is_some() && input.as_str() == d.original;
+        let content =
+            if !already_wired && self.app.state.selected.as_deref() == Some(d.room.as_str()) {
+                self.app.outgoing_body(&d.room, text)
+            } else if self.app.state.strip_tracking {
+                yapfast_core::links::without_tracking(text).into_owned()
+            } else {
+                text.to_owned()
+            };
+        let body = if silent {
+            format!("@silent {content}")
+        } else {
+            content
+        };
         queue::validate(
             &d.account,
             &d.room,
-            ui.get_body().as_str(),
+            &body,
             due,
             count,
             &*self.scheduled.clock,
@@ -569,7 +591,8 @@ impl Adapter {
             ui.set_attachments(attachment_summary(&files).into());
         }
         self.scheduled.review = Some(Review {
-            body: ui.get_body().to_string(),
+            input: input.to_string(),
+            body,
             time: ui.get_time().to_string(),
             zone: ui.get_zone().to_string(),
             due,
@@ -586,7 +609,7 @@ impl Adapter {
             .review
             .as_ref()
             .filter(|r| {
-                r.body == ui.get_body().as_str()
+                r.input == ui.get_body().as_str()
                     && r.time == ui.get_time().as_str()
                     && r.zone == ui.get_zone().as_str()
             })

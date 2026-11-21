@@ -554,6 +554,37 @@ fn native_schedule_preserves_silent_control_and_normal_composer_tracking_policy(
     );
 }
 #[test]
+fn native_review_normalizes_message_edits_before_save_even_from_another_conversation() {
+    let root = tempfile::tempdir().unwrap();
+    let (w, a, _t, _commands) = fixture(root.path());
+    a.borrow_mut()
+        .app
+        .dispatch(yapfast_core::application::Action::StripTracking(true));
+    let ui = w.global::<Scheduling>();
+    ui.invoke_compose();
+    ui.set_time("2026-11-07 13:00".into());
+    ui.set_zone("UTC".into());
+    let edited = "@silent see https://a.example/p?utm_source=x&id=2";
+    ui.set_body(edited.into());
+    ui.invoke_review();
+    assert_eq!(ui.get_body(), edited);
+    assert_eq!(ui.get_review_body(), "@silent see https://a.example/p?id=2");
+    ui.invoke_save();
+    let saved = a.borrow().scheduled.queue.as_ref().unwrap().items()[0].clone();
+    assert_eq!(saved.body, "@silent see https://a.example/p?id=2");
+
+    a.borrow_mut().app.state.selected = Some("discord:20:21".into());
+    ui.invoke_edit(saved.id.into());
+    ui.set_body("new https://a.example/p?utm_medium=x&id=3".into());
+    ui.invoke_review();
+    assert_eq!(ui.get_review_body(), "new https://a.example/p?id=3");
+    ui.invoke_save();
+    let a = a.borrow();
+    let saved = &a.scheduled.queue.as_ref().unwrap().items()[0];
+    assert_eq!(saved.body, "new https://a.example/p?id=3");
+    assert_eq!(saved.room, "discord:10:11");
+}
+#[test]
 fn native_backend_stop_has_a_visible_uncertain_record_and_never_requeues_it() {
     let root = tempfile::tempdir().unwrap();
     let (w, a, t, commands) = fixture(root.path());

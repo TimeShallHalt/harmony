@@ -7,6 +7,7 @@ export global Scheduling {
     in-out property <bool> composing;
     in-out property <bool> reviewed;
     in-out property <string> body;
+    in property <string> review-body;
     in-out property <string> time;
     in-out property <string> zone: "Local";
     in-out property <[string]> zones;
@@ -87,7 +88,7 @@ export component ScheduledDialog inherits Rectangle {
                                 background: Theme.sunken; border-radius: 6px;
                                 VerticalLayout { padding: 10px; spacing: 6px;
                                     Text { text: Scheduling.utc; color: Theme.text; font-weight: 700; font-size: 14px; wrap: word-wrap; }
-                                    Text { text: Scheduling.body; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
+                                    Text { text: Scheduling.review-body; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
                                 }
                             }
                             HorizontalLayout {
