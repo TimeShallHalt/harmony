@@ -452,6 +452,29 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires HARMONY_SIGNED_UPDATE_DIR with the matching local release artifacts"]
+    fn packaged_setup_matches_the_embedded_publisher_key_and_build() {
+        let folder = PathBuf::from(std::env::var_os("HARMONY_SIGNED_UPDATE_DIR").unwrap());
+        let build = crate::build_info::BuildInfo::current();
+        let release = Release {
+            tag: format!("harmony-v{}-b{}", build.version, build.build_id),
+            notes: String::new(),
+            has_installer: true,
+        };
+        let manifest = authenticate(
+            &fs::read(folder.join("harmony-update.json")).unwrap(),
+            &fs::read(folder.join("harmony-update.json.sig")).unwrap(),
+            &hex::decode(PUBLIC_KEY.trim()).unwrap(),
+            &release,
+        )
+        .unwrap();
+        let path = folder.join(&manifest.installer);
+        #[cfg(windows)]
+        let _parents = hold_update_directories(&path).unwrap();
+        verified_file(&path, &manifest).unwrap();
+    }
+
+    #[test]
     fn signatures_bind_the_publisher_release_platform_and_installer_bytes() {
         let rng = SystemRandom::new();
         let alg = &signature::ECDSA_P256_SHA256_FIXED_SIGNING;
