@@ -68,6 +68,7 @@ import { BotSelectDropdown, BotModalDialog, SelectChoice, ModalField } from "int
 import { CommandChoice, CommandOptionPill, CommandList } from "app_commands.slint";
 import { PostTag, PostRow, PostTagChoice, ForumPanel } from "forum.slint";
 import { BrowseRow, BrowseScreen } from "browse.slint";
+import { Scheduling, ScheduledDialog } from "scheduled.slint";
 
 // Rust sees these, besides YapfastWindow.
 export { LocalTimezones } from "personal-controls.slint";
@@ -92,6 +93,7 @@ export { RequestRow, FriendRow } from "friends.slint";
 export { ContactRow, PlaceRow, ReactionPill, ReactorRow, PollAnswerDraft } from "dialogs.slint";
 export { FoundRow, PickRow } from "header.slint";
 export { GifTile, GifFavorites } from "gifs.slint";
+export { Scheduling, ScheduledRow } from "scheduled.slint";
 export { SelectChoice, ModalField } from "interactions.slint";
 export { CommandChoice, CommandOptionPill } from "app_commands.slint";
 
@@ -1706,7 +1708,7 @@ export component YapfastWindow inherits Window {
         || root.switcher-open || root.mfa-open || root.add-friend-open || root.invite-open
         || root.join-open || root.event-open || root.gift-open || root.oauth-open
         || root.channel-open || root.move-sync-open || root.leave-open || root.person-open
-        || root.status-open || root.poll-open || root.new-dm-open || root.reactions-open
+        || root.status-open || root.poll-open || Scheduling.open || root.new-dm-open || root.reactions-open
         || root.forward-open || root.leaving-link != "" || root.switch-prompt != ""
         || root.confirm-delete != "" || root.incoming-open;
     // The channel has no composer here: a call, a forum, a message request, the
@@ -2235,6 +2237,14 @@ export component YapfastWindow inherits Window {
                     text: "Create Thread"; icon: @image-url("icons/thread.svg");
                     clicked => { root.new-thread("", "plus"); plus-menu.close(); }
                 }
+                if Scheduling.available: MenuItem {
+                    text: "Schedule Message…"; icon: @image-url("icons/clock.svg"); disabled: !Scheduling.can-schedule;
+                    clicked => { Scheduling.compose(); plus-menu.close(); }
+                }
+                if Scheduling.available: MenuItem {
+                    text: "Local scheduled messages"; icon: @image-url("icons/clock.svg");
+                    clicked => { Scheduling.list(); plus-menu.close(); }
+                }
                 if root.can-create-polls: MenuItem {
                     text: "Create Poll"; icon: @image-url("icons/chart-bar.svg");
                     clicked => { root.open-poll(); plus-menu.close(); }
@@ -2292,6 +2302,10 @@ export component YapfastWindow inherits Window {
                 asked => { root.ask-read-all(); }
                 confirmed => { root.confirm-read-all(); }
                 cancelled => { root.cancel-read-all(); }
+            }
+            if Scheduling.available: MenuItem {
+                text: "Local scheduled messages"; icon: @image-url("icons/clock.svg");
+                clicked => { Scheduling.list(); status-menu.close(); }
             }
             if ClientStyle.enabled: AccountPopover {
                 available-height: max(120px, root.menu-y - 12px - read-control.preferred-height);
@@ -3946,11 +3960,11 @@ export component YapfastWindow inherits Window {
                                             IconButton {
                                                 // Discord's is a plain 18px plus, not a circled one.
                                                 icon: ClientStyle.enabled ? @image-url("icons/plus.svg") : @image-url("icons/circle-plus.svg");
-                                                label: root.can-start-threads || root.can-create-polls ? "More options" : "Attach files";
+                                                label: root.can-start-threads || root.can-create-polls || Scheduling.available ? "More options" : "Attach files";
                                                 glyph: ClientStyle.enabled ? 27px : 22px;
-                                                enabled: root.can-attach || root.can-start-threads || root.can-create-polls;
+                                                enabled: root.can-attach || root.can-start-threads || root.can-create-polls || Scheduling.available;
                                                 clicked => {
-                                                    if root.can-start-threads || root.can-create-polls {
+                                                    if root.can-start-threads || root.can-create-polls || Scheduling.available {
                                                         root.menu-x = self.absolute-position.x;
                                                         root.menu-y = self.absolute-position.y;
                                                         plus-menu.show();
@@ -5060,6 +5074,7 @@ export component YapfastWindow inherits Window {
         clear-status => { root.clear-status(); }
         close-status => { root.close-status(); }
     }
+    if Scheduling.open: ScheduledDialog { }
     // Making a poll; see PollDialog.
     poll-motion := PopupMotion { open: root.poll-open; }
     if poll-motion.shown: PollDialog {

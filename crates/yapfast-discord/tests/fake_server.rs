@@ -7631,6 +7631,7 @@ async fn starts_threads_as_discords_client_does() {
 fn sending<'a>(nonce: &'a str, reply: Option<&'a str>) -> yapfast_discord::api::Sending<'a> {
     yapfast_discord::api::Sending {
         nonce,
+        enforce_nonce: false,
         reply,
         ping_reply: true,
         silent: false,

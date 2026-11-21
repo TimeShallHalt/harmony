@@ -55,6 +55,10 @@ pub fn command(
         aside(room, discord, channels, done, events);
         return;
     }
+    if let Command::ScheduledSend(send) = command {
+        super::scheduled::send(send, discord, channels, events);
+        return;
+    }
     if let Command::SendPoll { room, poll } = command {
         send_poll(discord, room, poll, events);
         return;

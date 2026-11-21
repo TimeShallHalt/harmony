@@ -4874,6 +4874,8 @@ impl Application {
                     return self.history_loaded(direction, history);
                 }
             }
+            // The desktop local queue owns its correlated completion record.
+            Event::ScheduledResult { .. } => {}
             Event::SendResult { room, body, result } => {
                 if self.state.sending.as_ref() == Some(&room) {
                     self.state.sending = None;

@@ -128,6 +128,11 @@ name = "record_host"
 path = "testing/record_host.rs"
 required-features = ["desktop"]
 
+[[test]]
+name = "scheduled_composer"
+path = "src/ui/scheduled_tests.rs"
+required-features = ["desktop", "discord"]
+
 [dev-dependencies]
 i-slint-backend-testing = "=1.19.0"
 yapfast-core = { path = "crates/yapfast-core", default-features = false, features = ["test-fixtures"] }

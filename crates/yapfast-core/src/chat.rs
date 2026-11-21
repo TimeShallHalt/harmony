@@ -2255,6 +2255,9 @@ pub enum Command {
         options: SendOptions,
         files: Vec<OutgoingFile>,
     },
+    /// A durable local queue claim, through the existing authorized Discord
+    /// send service. Never interpreted as a server-side schedule.
+    ScheduledSend(crate::scheduled::Dispatch),
     Edit {
         room: String,
         item: String,
@@ -4149,6 +4152,7 @@ impl Command {
             Network::Matrix => Route::Matrix,
         };
         match self {
+            Command::ScheduledSend(_) => Route::Discord,
             Command::Voice(_) => Route::Voice,
             // Only Discord's videos and voice messages play for now.
             Command::Discord(_)
@@ -4829,6 +4833,12 @@ pub enum Event {
         members: Vec<ChatMember>,
         observations: HashMap<String, yapfast_discord::service::PresenceObservation>,
         observation: Option<yapfast_discord::service::PresenceObservation>,
+    },
+    /// Outcome of the owning account's persisted local send claim.
+    ScheduledResult {
+        id: String,
+        account: String,
+        result: Result<(), String>,
     },
     /// The send queue accepted or refused a message; delivery shows on its timeline item.
     SendResult {

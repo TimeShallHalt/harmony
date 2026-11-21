@@ -68,6 +68,7 @@ mod profile_media;
 #[cfg(test)]
 mod profile_media_tests;
 mod refresh;
+mod scheduled;
 mod server_settings;
 mod shell;
 mod stickers;
@@ -2120,6 +2121,7 @@ struct Adapter {
     window: slint::Weak<YapfastWindow>,
     away: away::Away,
     call_timer: call_timer::CallTimer,
+    scheduled: scheduled::Controller,
     /// Ticks ActivityClock while a profile on screen times an activity, or
     /// the channel list a busy voice channel's call.
     activity_clock: slint::Timer,
@@ -2533,6 +2535,7 @@ impl Adapter {
                 events: None,
                 backend: None,
                 runtime,
+                scheduled: scheduled::Controller::new(&root),
                 root,
                 layout,
 
@@ -2902,6 +2905,7 @@ impl Adapter {
             events.abort();
         }
         self.backend = None;
+        self.scheduled_context_changed();
     }
 
     fn execute(&mut self, effects: Vec<Effect>) {
@@ -2959,6 +2963,7 @@ impl Adapter {
                             adapter.app.stopped();
                             adapter.call_timer.observe(None);
                             adapter.backend = None;
+                            adapter.scheduled_context_changed();
                             if let Some(window) = window {
                                 adapter.refresh(&window);
                             }
@@ -3055,6 +3060,9 @@ impl Adapter {
                 Effect::Backend(Command::Typing { .. })
                     if !self.layout.share_typing.unwrap_or(true) => {}
                 Effect::Backend(command) => {
+                    if self.scheduled_before_command(&command).is_err() {
+                        continue;
+                    }
                     let result = match &self.backend {
                         Some(backend) => backend.send(command),
                         None => Err(command),
@@ -3236,6 +3244,7 @@ impl Adapter {
         );
         let effects = self.app.dispatch(action);
         self.execute(effects);
+        self.scheduled_context_changed();
         if quiet {
             return;
         }
@@ -3259,6 +3268,16 @@ impl Adapter {
 
     /// Applies a backend event; the caller shows what it can have changed after.
     fn apply(&mut self, event: Event) -> Reach {
+        if let Event::ScheduledResult {
+            ref account,
+            ref id,
+            ref result,
+        } = event
+        {
+            self.scheduled_result(account, id, result.clone());
+            return Reach::EVERYTHING;
+        }
+        self.scheduled_before_event(&event);
         if let Event::HistoryLoaded {
             room,
             direction,
@@ -3327,6 +3346,7 @@ impl Adapter {
             Reach::EVERYTHING
         };
         self.execute(effects);
+        self.scheduled_context_changed();
         reach
     }
 }

@@ -23,6 +23,8 @@ const UNAUTHORIZED: &str = "Discord rejected the login. Link Discord again.";
 pub struct Sending<'a> {
     /// Matches the message to its echo from the gateway.
     pub nonce: &'a str,
+    /// Ask Discord to return an earlier send with the same author and nonce.
+    pub enforce_nonce: bool,
     /// The message it replies to, in the same channel.
     pub reply: Option<&'a str>,
     /// Whether a reply notifies the author of what it replies to.
@@ -593,6 +595,9 @@ impl Api {
         uploads: &[Upload],
     ) -> Result<Value> {
         let mut body = message_body(content, options.nonce);
+        if options.enforce_nonce {
+            body["enforce_nonce"] = true.into();
+        }
         if options.silent {
             body["flags"] = SUPPRESS_NOTIFICATIONS.into();
         }

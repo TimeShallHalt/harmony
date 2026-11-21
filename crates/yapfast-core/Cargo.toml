@@ -14,7 +14,7 @@ doctest = false
 [features]
 default = ["discord"]
 # Matrix: sign-in, encrypted rooms and MatrixRTC voice.
-matrix = ["dep:keyring", "dep:matrix-sdk", "dep:matrix-sdk-ui", "dep:matrix-sdk-crypto", "dep:matrix-rtc-livekit", "dep:matrix-rtc-core", "dep:matrix-rtc-media", "dep:mime", "dep:url"]
+matrix = ["dep:matrix-sdk", "dep:matrix-sdk-ui", "dep:matrix-sdk-crypto", "dep:matrix-rtc-livekit", "dep:matrix-rtc-core", "dep:matrix-rtc-media", "dep:mime", "dep:url"]
 # Discord through the account linked on this device; see docs/discord/README.md.
 discord = ["dep:yapfast-discord", "dep:rand", "dep:base64", "dep:nnnoiseless", "dep:deep_filter", "dep:ndarray", "dep:x264-src", "dep:ffmpeg-src", "dep:thorvg-sys"]
 # Sample states other crates' tests start from, such as a Discord server
@@ -42,7 +42,10 @@ resvg = { version = "0.49", default-features = false }
 # An animated GIF's frame timings, read without decoding its pictures; the
 # version the image crate decodes with.
 gif = "0.14"
-keyring = { workspace = true, optional = true }
+keyring.workspace = true
+# Scheduler authenticated at-rest storage; already in lockfile through Discord.
+chacha20poly1305 = "=0.10.1"
+zeroize = "=1.9.0"
 livekit.workspace = true
 # libDF's frames, at the version it uses.
 ndarray = { version = "0.15", optional = true }

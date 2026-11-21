@@ -563,6 +563,7 @@ impl Adapter {
         self.show_emoji_animations(window);
         self.show_stickers(window);
         self.show_composer(window);
+        self.show_scheduled(window);
         self.show_messages(window, &changes);
         self.show_aside(window);
         self.show_voice(window);

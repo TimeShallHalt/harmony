@@ -44,6 +44,8 @@ impl PreviewCache {
 /// loads again when one opens, for what they missed.
 #[derive(Default)]
 pub struct Channels {
+    /// Bounded, fail-closed extra guard against duplicate accepted queue claims.
+    pub(super) scheduled_attempts: std::collections::HashSet<(String, String)>,
     pub(super) open: Option<OpenChannel>,
     /// A thread shown beside the open channel, kept as live as it.
     pub(super) aside: Option<OpenChannel>,

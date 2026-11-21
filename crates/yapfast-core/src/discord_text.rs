@@ -74,6 +74,7 @@ mod people;
 mod profile_media_tests;
 mod render;
 mod roles;
+mod scheduled;
 mod server_settings;
 mod stickers;
 
