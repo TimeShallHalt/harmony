@@ -142,7 +142,7 @@ def main():
             "Harmony switches to software rendering if the GPU cannot start.\n"
             "To choose it yourself, run run-harmony.cmd --renderer software.\n"
             "To retry the GPU after a fallback, run run-harmony.cmd --renderer gpu.\n\n"
-            "Updater not included. Close Harmony yourself before a manual update.\n"
+            "Check Settings > About for verified Harmony updates.\n"
             "Harmony is free software under the GNU General Public License, version 3\n"
             "or later, in LICENSE.txt. Dependency notices and original licenses are\n"
             "included; SOURCE.txt locates the matching source archive included here.\n",
@@ -168,7 +168,7 @@ def main():
                                           Path(os.environ["LK_CUSTOM_WEBRTC"]))
         (package / "THIRD-PARTY.json").write_text(json.dumps(dependencies, indent=2) + "\n", encoding="utf-8")
         build = {
-            "application": "Harmony", "upstream": "Yapfast 0.4.1", "updater_included": False,
+            "application": "Harmony", "upstream": "Yapfast 0.4.1", "updater_included": True,
             "version": version, "flavour": args.flavour, "target": TARGET,
             "cargo_features": " ".join(flavour["features"]) or "default",
             "rustc": subprocess.check_output(["rustc", "--version"], text=True, timeout=10).strip(),

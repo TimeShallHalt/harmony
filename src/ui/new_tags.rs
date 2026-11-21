@@ -29,11 +29,11 @@ struct Tag {
     since: &'static str,
 }
 
-// The upstream tags only advertised its updater, which Harmony does not ship.
+// Upstream-only settings have their own release numbering.
 // Keep this infrastructure available for future native Harmony settings.
 const NEW: [Tag; 0] = [];
 
-/// Release ordering for settings tags only: no updater module or network code.
+/// Release ordering for settings tags.
 fn version(text: &str) -> Option<(u64, u64, u64)> {
     let release = text
         .strip_prefix('v')

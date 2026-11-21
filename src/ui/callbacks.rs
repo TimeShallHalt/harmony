@@ -641,6 +641,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     super::channel_settings::bind(window, adapter);
     super::title_bar::bind(window, adapter);
     super::about::bind(window);
+    super::release_updates::bind(window, adapter);
     // A server tag opens its server's card beside it, showing what's known
     // at once, and asks Discord for the rest.
     window.global::<ServerTags>().on_open({

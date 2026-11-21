@@ -6,12 +6,24 @@ The custom coordinator, IPC, bridges and receipt framework were removed.
 ## Build
 
 ```sh
-python3 scripts/build-harmony-installer.py --output-dir dist/harmony-simple
+python3 scripts/build-harmony-installer.py --manifest PATH/TO/release-artifacts.json --output-dir dist/harmony-simple
 ```
 
-The builder verifies the existing Harmony 1.1.0 build 1 portable/source archives
+The builder verifies the portable and source archives from the supplied release manifest
 and pinned Inno 7.1.1 compiler, then produces an unsigned EXE. The application
 is not rebuilt. Application source, legal notices and installer source are included.
+
+## Sign an update
+
+On the publisher's Windows machine, run this from the release checkout after building and checking the installer. The key name is `Harmony release updates v1` in the current user's Windows CNG store. `packaging/keys/harmony-update.pub` contains its public P-256 key.
+
+```powershell
+./scripts/sign-harmony-update.ps1 -Tag harmony-v1.2.0-b1 -Installer ./dist/harmony-simple/Harmony-1.2.0-Setup.exe -OutputDirectory ./dist/update-metadata
+```
+
+Attach both `harmony-update.json` and `harmony-update.json.sig` alongside that installer on the matching stable GitHub release. Harmony verifies the signature, tag, platform, size and SHA-256 before offering to run Setup on full quit. Registered Inno installs keep their scope and folder. Other Windows copies open the installation wizard. On Linux the release page is available for manual installation.
+
+The private signing key is non-exportable. Moving signing to another Windows account or PC requires shipping a trusted public-key change while the current signer is available, or distributing a new installer manually.
 
 ## Options
 

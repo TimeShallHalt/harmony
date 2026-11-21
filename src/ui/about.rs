@@ -34,7 +34,7 @@ mod tests {
         bind_callbacks(&window, &adapter);
         let expected = crate::build_info::BuildInfo::current().diagnostics();
         assert_eq!(window.global::<HarmonyAbout>().get_running_info(), expected);
-        assert!(expected.contains("Updater not included in this build."));
+        assert!(expected.contains("Updates: Harmony public releases with publisher-signed Windows installers."));
         assert!(!expected.contains(&dir.path().display().to_string()));
         window.global::<HarmonyAbout>().invoke_copy_diagnostics();
         let copied = i_slint_core::window::WindowInner::from_pub(window.window())

@@ -37,6 +37,7 @@ use crate::drop::Drag;
 use crate::{autostart, custom_emoji, emoji, emoji_text, graphics, zoom};
 
 mod about;
+mod release_updates;
 mod active_now;
 mod app_commands;
 mod appearance;
@@ -232,6 +233,7 @@ pub fn run(
     let adapter = Adapter::new(Arc::new(runtime), root, &window)?;
     bind_callbacks(&window, &adapter);
 
+    if !preview { release_updates::start(&adapter); }
     new_tags::start(&adapter);
     watch_window(&window, &adapter);
     adapter.borrow_mut().watch_away();
@@ -302,7 +304,11 @@ pub fn run(
             "the window did not appear".into(),
             "Harmony's window did not appear",
         ),
-        Ok(()) => Ok(if restart { Exit::Restart } else { Exit::Closed }),
+        Ok(()) if restart => Ok(Exit::Restart),
+        Ok(()) => {
+            adapter.updates.finish()?;
+            Ok(Exit::Closed)
+        }
     }
 }
 
@@ -1229,6 +1235,9 @@ struct KeptStickerUse {
 #[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct Layout {
+    harmony_release_checks: bool,
+    harmony_release_downloads: bool,
+    harmony_check_hours: Option<u64>,
     sidebar_width: Option<f32>,
     /// The width of a Discord thread shown beside its channel.
     aside_width: Option<f32>,
@@ -2091,6 +2100,7 @@ struct Icons {
 }
 
 struct Adapter {
+    updates: release_updates::Updates,
     // Cancel the UI event receiver before releasing the actor and runtime.
     events: Option<slint::JoinHandle<()>>,
     backend: Option<Backend>,
@@ -2519,6 +2529,7 @@ impl Adapter {
         let notifier = crate::notify::Notifier::start(open_from_notification, &root);
         Ok(Rc::new_cyclic(|weak| {
             RefCell::new(Self {
+                updates: Default::default(),
                 events: None,
                 backend: None,
                 runtime,

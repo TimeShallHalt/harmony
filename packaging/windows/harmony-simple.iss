@@ -6,7 +6,7 @@
   #error Missing explicit payload file list
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #error Missing Harmony application version
 #endif
 #ifndef HarmonyId
   #define HarmonyId "46969CAC-C472-58C4-89BD-069E35950175"
@@ -22,7 +22,7 @@ AppId={{{#HarmonyId}}
 AppName=Harmony
 AppVersion={#AppVersion}
 AppPublisher=Harmony contributors
-VersionInfoVersion=1.1.0.1
+VersionInfoVersion={#AppVersion}.{#AppBuild}
 VersionInfoDescription=Harmony Installer
 DefaultDirName={code:DefaultDestination}
 PrivilegesRequired=lowest
@@ -164,11 +164,38 @@ begin
   end;
 #endif
 end;
+function OpenParent(Access: LongWord; Inherit: Integer; Pid: LongWord): NativeUInt;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForParent(Handle: NativeUInt; Milliseconds: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseParent(Handle: NativeUInt): Integer;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+procedure WaitForHarmony;
+var Id: Integer; Handle: NativeUInt; Param: String;
+begin
+  Param := ExpandConstant('{param:HARMONYWAITPID|}');
+  if Param = '' then Exit;
+  Id := StrToIntDef(Param, 0);
+  if Id <= 0 then RaiseException('Invalid Harmony process ID.');
+  Handle := OpenParent($00100000, 0, Id);
+  if Handle = 0 then Exit; { The application can exit before Setup starts. }
+  try
+    if WaitForParent(Handle, 60000) <> 0 then RaiseException('Harmony is still running. Quit it and try again.');
+  finally CloseParent(Handle); end;
+end;
+
 function InitializeSetup: Boolean;
+var Expected: String;
 begin
   Result := False;
   try
+    WaitForHarmony;
     FindInno(HKLM64, True); FindInno(HKCU, False); FindLegacyMsi;
+    Expected := ExpandConstant('{param:HARMONYINSTALLED|}');
+    if (Expected <> '') and ((DetectionError <> '') or (OldKind <> 'inno') or
+        (OldMachine <> IsAdminInstallMode) or not SamePath(Expected, OldDirectory)) then
+      RaiseException('The Harmony installation changed. Open Setup to choose the installation to update.');
     Log('Harmony previous install: ' + OldKind + ' ' + OldVersion + ' at ' + OldDirectory);
     Result := True;
   except MsgBox(GetExceptionMessage, mbError, MB_OK); end;

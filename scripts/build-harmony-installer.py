@@ -69,14 +69,16 @@ def stage(manifest, payload):
     files = {path.relative_to(payload).as_posix(): digest(path) for path in sorted(payload.rglob('*')) if path.is_file()}
     return info, files
 
-def build(manifest, output_dir, fixture_root=None, fixture_id=None):
+def build(manifest, output_dir, fixture_root=None, fixture_id=None, tooling_receipt=None):
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     work = output_dir / ('build-' + uuid.uuid4().hex[:12])
     work.mkdir()
     info, files = stage(manifest.resolve(), work / 'payload')
     payload = work / 'payload'
-    provenance = json.loads((ROOT / '.local/tools/inno-7.1.1-x64/tooling-provenance.json').read_text())
+    if tooling_receipt is None:
+        tooling_receipt = ROOT / '.local/tools/inno-7.1.1-x64/tooling-provenance.json'
+    provenance = json.loads(tooling_receipt.read_text())
     compiler = Path(provenance['compiler'])
     for name, checksum in provenance['compiler_scan']['file_sha256'].items():
         require(digest(compiler.parent / name) == checksum, 'Pinned compiler file changed: ' + name)
@@ -87,7 +89,7 @@ def build(manifest, output_dir, fixture_root=None, fixture_id=None):
         destination = '{app}' + ('\\' + str(member.parent).replace('/', '\\') if str(member.parent) != '.' else '')
         rows.append(f'Source: "{payload.joinpath(*member.parts)}"; DestDir: "{destination}"; DestName: "{member.name}"; Flags: ignoreversion; Hash: "{checksum}"')
     include.write_text('\n'.join(rows) + '\n', encoding='utf-8')
-    defines = {'PayloadDir': str(payload), 'PayloadFiles': str(include), 'AppVersion': info['version']}
+    defines = {'PayloadDir': str(payload), 'PayloadFiles': str(include), 'AppVersion': info['version'], 'AppBuild': str(info['build_id'])}
     if fixture_root is not None:
         fixture_root = fixture_root.resolve()
         require(fixture_root.is_relative_to(SCRATCH.resolve()) and fixture_root != SCRATCH.resolve(), 'Fixture must be beneath approved scratch')
@@ -118,8 +120,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, default=ROOT / '.local/evidence/upstream-041-branding/release/release-artifacts.json')
     parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--tooling-receipt', type=Path, help='Verified Inno compiler receipt from prepare-windows-inno.py')
     parser.add_argument('--fixture-root', type=Path)
     parser.add_argument('--fixture-id')
     args = parser.parse_args()
-    result = build(args.manifest, args.output_dir, args.fixture_root, args.fixture_id)
+    result = build(args.manifest, args.output_dir, args.fixture_root, args.fixture_id, args.tooling_receipt)
     print(json.dumps({key: value for key, value in result.items() if key not in ('payload_files', 'command')}, indent=2))

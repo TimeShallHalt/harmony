@@ -1,6 +1,6 @@
 # Harmony
 
-Harmony is a private development fork of [Yapfast](https://github.com/yapfast/yapfast) by wiredtenshi and contributors, a native Rust/Slint Discord client. This source integrates upstream 0.4.1 with Harmony customization; it is not an official Yapfast release.
+Harmony is a community fork of [Yapfast](https://github.com/yapfast/yapfast) by wiredtenshi and contributors, a native Rust/Slint Discord client. This source integrates upstream 0.4.1 with Harmony customization; it is not an official Yapfast release.
 
 <p align="center"><img src="packaging/icon.svg" width="96" height="96" alt="Harmony logo"></p>
 
@@ -13,9 +13,9 @@ Windows builds are **`Harmony.exe`**. Linux packages install **`harmony`** (Carg
 
 This repository contains the source and development notes, not Discord credentials, account data, local toolchains or compiled application binaries. Upstream licenses and attribution are retained; see [LICENSE](LICENSE).
 
-**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. See the build notes for actual test results and platform-verification limits; an upstream feature description or performance number is not Harmony validation. GitHub Actions are disabled for this private copy to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain for reference.
+**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. See the build notes for actual test results and platform-verification limits; an upstream feature description or performance number is not Harmony validation. The upstream GitHub Actions workflow is disabled in this fork to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain for reference.
 
-**Updates are manual.** Harmony does not include the upstream updater, check GitHub for releases, download updates, or publish packages. Packaging is local and includes matching GPL source and original dependency notices. The fork's primary Windows path is [`scripts/package-harmony.py`](scripts/package-harmony.py) plus the optional offline [MSI builder](packaging/windows-msi.md). Close Harmony yourself before replacing program files. Existing data and credentials retain their legacy storage identity; packaging does not migrate accounts or modify installed shortcuts.
+**Settings → About** checks Harmony’s public GitHub releases. Windows x64 can download a publisher-signed installer and run it on the next full quit. Automatic checks and background downloads are optional. The release includes the portable Windows build, installer and corresponding source.
 
 ---
 

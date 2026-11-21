@@ -5,7 +5,7 @@ Harmony is Ren's personal Yapfast-based Discord client. Name chosen by Ren as th
 ## Identity
 
 Harmony 1.1.0 integrates Yapfast 0.4.1 while retaining the fork's Update 1–4 features.
-The source folder is `Harmony`; Windows builds produce `Harmony.exe`. Linux
+Windows builds produce `Harmony.exe`. Linux
 packages install `harmony`. Internal crate names and legacy credential-store keys
 remain stable compatibility identifiers, not product branding.
 

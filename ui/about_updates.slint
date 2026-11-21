@@ -1,11 +1,27 @@
 import { Theme, Label, Middle } from "theme.slint";
-import { SettingsTitle, SettingsHeading } from "settings.slint";
+import { SettingsTitle, SettingsHeading, SettingsSwitch, Choices } from "settings.slint";
 import { ActionButton, Avatar, StatusText } from "controls.slint";
 import { BuildInfo } from "yapfast/build-info.slint";
 
 export global HarmonyAbout {
     in-out property <string> running-info;
     callback copy-diagnostics;
+    in-out property <bool> check-automatically;
+    in-out property <bool> download-automatically;
+    in-out property <bool> windows-installer;
+    in-out property <int> interval-index;
+    in-out property <bool> busy;
+    in-out property <bool> can-download;
+    in-out property <bool> ready;
+    in-out property <bool> install-on-quit;
+    in-out property <string> update-status;
+    in-out property <string> release-page;
+    in-out property <string> release-notes;
+    callback check-release;
+    callback download-release;
+    callback cancel-update;
+    callback arm-install(bool);
+    callback save-update-options(bool, bool, int);
 }
 export component AboutUpdatesSettings inherits VerticalLayout {
     in property <bool> preview;
@@ -53,6 +69,43 @@ export component AboutUpdatesSettings inherits VerticalLayout {
         Label { text: "Diagnostics contain public build and license information only. No credentials, account IDs, messages or local paths."; }
     }
     Rectangle { height: 1px; background: Theme.edge; }
+    if !root.preview: VerticalLayout {
+        spacing: 8px;
+        SettingsHeading { text: "UPDATES"; }
+        SettingsSwitch {
+            text: "Check for updates automatically"; description: "Check GitHub on startup and while Harmony is open.";
+            checked: HarmonyAbout.check-automatically; controlled: true;
+            toggled(on) => { HarmonyAbout.save-update-options(on, HarmonyAbout.download-automatically, HarmonyAbout.interval-index); }
+        }
+        if HarmonyAbout.check-automatically: Choices {
+            label: "Check interval"; options: ["Hourly", "Every 6 hours", "Daily"];
+            current: HarmonyAbout.interval-index; controlled: true;
+            chosen(index) => { HarmonyAbout.save-update-options(true, HarmonyAbout.download-automatically, index); }
+        }
+        if HarmonyAbout.windows-installer: SettingsSwitch {
+            text: "Download signed updates automatically"; description: "Keep the verified Windows installer ready for your next full quit.";
+            checked: HarmonyAbout.download-automatically; controlled: true;
+            toggled(on) => { HarmonyAbout.save-update-options(HarmonyAbout.check-automatically, on, HarmonyAbout.interval-index); }
+        }
+        if HarmonyAbout.update-status != "": Text {
+            text: HarmonyAbout.update-status; color: Theme.text; font-size: 14px; wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: start; spacing: 8px;
+            if !HarmonyAbout.busy && !HarmonyAbout.ready: ActionButton { text: "Check now"; clicked => { HarmonyAbout.check-release(); } }
+            if HarmonyAbout.busy: ActionButton { text: "Cancel"; clicked => { HarmonyAbout.cancel-update(); } }
+            if HarmonyAbout.can-download: ActionButton { primary: true; text: "Download update"; clicked => { HarmonyAbout.download-release(); } }
+            if HarmonyAbout.release-page != "": ActionButton { text: "View release"; clicked => { root.open-link(HarmonyAbout.release-page); } }
+        }
+        if HarmonyAbout.ready: SettingsSwitch {
+            text: "Run Setup when I quit Harmony"; description: "Quit from the tray to finish. Setup uses your existing installation or lets you choose a folder.";
+            checked: HarmonyAbout.install-on-quit; controlled: true;
+            toggled(on) => { HarmonyAbout.arm-install(on); }
+        }
+        if HarmonyAbout.release-notes != "": Text {
+            text: HarmonyAbout.release-notes; color: Theme.secondary; font-size: 13px; wrap: word-wrap;
+        }
+    }
     SettingsHeading { text: "LICENSES & CREDITS"; }
     Label { text: "GPL-3.0-or-later. Based on Yapfast. Fonts, emoji and icons retain their respective open-source licenses."; }
     HorizontalLayout {
@@ -60,5 +113,5 @@ export component AboutUpdatesSettings inherits VerticalLayout {
         ActionButton { text: "Source & license"; icon: @image-url("icons/github.svg"); clicked => { root.open-link("https://github.com/TimeShallHalt/harmony"); } }
         ActionButton { text: "Upstream credits"; icon: @image-url("icons/external-link.svg"); clicked => { root.open-link("https://github.com/yapfast/yapfast"); } }
     }
-    Label { text: "Updater not included in this build. Updates are manual; Harmony does not check, download or install them in the background."; accessible-label: "Update status: manual updates only"; }
+    if root.preview: Label { text: "Update checks are available in the desktop app."; }
 }
