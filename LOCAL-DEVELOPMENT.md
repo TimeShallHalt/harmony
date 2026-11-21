@@ -1,6 +1,10 @@
 # Ren's Harmony workspace
 
-## Current checkout
+## Harmony 1.2.0
+
+The `codex/harmony-next` branch integrates the Harmony updater, Discord Rich Presence, profile activity history, local scheduling and voice messages. The Windows package targets `desktop,discord`. Set `HARMONY_BUILD_ID` and `YAPFAST_RELEASE=1` when building a clean release commit. The Windows installer and update-signing commands are documented in [Windows installer](packaging/windows-installer.md).
+
+## Harmony 1.1.0 integration
 
 - Editable source: `C:\Users\ren\Documents\Apps\Harmony` (renamed from `yapfast`).
 - Integration branch: `harmony/upstream-0.4.1-branding`.
