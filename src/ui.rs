@@ -110,6 +110,9 @@ mod update4_read_all_tests;
 #[cfg(test)]
 mod update4_tests;
 mod viewer_picture;
+mod voice_notes;
+#[cfg(test)]
+mod voice_notes_tests;
 mod yapfast;
 
 use callbacks::bind_callbacks;
