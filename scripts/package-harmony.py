@@ -34,8 +34,8 @@ def main():
     commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip():
         p.error('Commit the exact clean candidate before packaging')
-    version=tomllib.loads((ROOT/'Cargo.toml').read_text())['package']['version']
-    stamp=json.loads(args.stamp.read_text())
+    version=tomllib.loads((ROOT/'Cargo.toml').read_text(encoding='utf-8'))['package']['version']
+    stamp=json.loads(args.stamp.read_bytes())
     validate_stamp(stamp,commit,version)
     with args.exe.open('rb') as f:
         h=f.read(64)
@@ -44,7 +44,7 @@ def main():
         if not 64<=offset<=1024*1024: raise ValueError('Invalid PE header offset')
         f.seek(offset)
         if f.read(6)!=b'PE\0\0\x64\x86': raise ValueError('Expected AMD64 PE executable')
-    metadata=json.loads(args.metadata.read_text())
+    metadata=json.loads(args.metadata.read_bytes())
     app=next(x for x in metadata['packages'] if x['name']=='yapfast')
     if Path(app['manifest_path']).resolve()!=ROOT/'Cargo.toml' or app['version']!=version:
         raise ValueError('Metadata does not belong to this candidate')
