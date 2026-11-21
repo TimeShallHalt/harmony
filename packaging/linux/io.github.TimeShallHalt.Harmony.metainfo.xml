@@ -6,7 +6,7 @@
   <summary>A native Discord client based on Yapfast</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <developer id="io.github.TimeShallHalt">
+  <developer id="io.github.timeshallhalt">
     <name>Harmony contributors</name>
   </developer>
   <description>
@@ -21,11 +21,13 @@
       not authorized by Discord; using them carries account risk.
     </p>
     <p>
-      Updates are manual. This fork does not include an automatic updater.
+      Check for Harmony releases in Settings → About. On Linux, install the
+      new version with your package manager or replace the AppImage.
       Original licenses, attribution and corresponding source accompany packages.
     </p>
   </description>
   <launchable type="desktop-id">io.github.TimeShallHalt.Harmony.desktop</launchable>
+  <url type="homepage">https://github.com/TimeShallHalt/harmony</url>
   <url type="vcs-browser">https://github.com/TimeShallHalt/harmony</url>
   <categories>
     <category>Network</category>
@@ -36,4 +38,7 @@
     <content_attribute id="social-audio">intense</content_attribute>
     <content_attribute id="social-contacts">intense</content_attribute>
   </content_rating>
+  <releases>
+    <release version="1.2.0" date="2026-11-21"/>
+  </releases>
 </component>

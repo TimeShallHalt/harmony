@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Package Harmony for Linux as an AppImage: nix/appimage.nix's AppDir, with
 the dependencies' licenses and notices added, packed behind the AppImage
-runtime. Matching source is included and also supplied beside it. The fork
-has no automatic updater and does not publish AppImageUpdate/zsync metadata.
+runtime. Matching source is included and also supplied beside it. Harmony
+checks for releases in-app. Linux updates are installed manually.
 
 scripts/build-appimage runs it inside the development shell."""
 import argparse
@@ -95,7 +95,8 @@ def main():
             "executable_sha256": digest(executable),
             "source_archive_sha256": digest(source_path),
             **build,
-            "application": "Harmony", "upstream": "Yapfast 0.4.1", "updater_included": False,
+            "application": "Harmony", "upstream": "Yapfast 0.4.1",
+            "release_checks": True, "update_installation": "manual", "updater_included": False,
         }
         (doc / "BUILD.json").write_text(json.dumps(build, indent=2) + "\n", encoding="utf-8")
 

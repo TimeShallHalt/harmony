@@ -5,33 +5,36 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import time
 import uuid
 import winreg
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRATCH = Path('C:/Users/ren/AppData/Local/hermes/profiles/hex/cache/scratch')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--allow-private-install', action='store_true', required=True)
-    parser.parse_args()
+    parser.add_argument('--manifest', type=Path, required=True, help='Portable release-artifacts.json to exercise')
+    parser.add_argument('--tooling-receipt', type=Path)
+    args = parser.parse_args()
     spec = importlib.util.spec_from_file_location('simple_builder', ROOT / 'scripts/build-harmony-installer.py')
     if spec is None or spec.loader is None:
         raise RuntimeError('Builder unavailable')
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
     identity = uuid.uuid4()
-    fixture = SCRATCH / ('simple-installer-' + identity.hex[:12])
-    fixture.mkdir()
+    scratch = builder.SCRATCH.resolve()
+    fixture = scratch / ('simple-installer-' + identity.hex[:12])
+    fixture.mkdir(parents=True)
     evidence = ROOT / '.local/evidence/simple-installer' / identity.hex[:12]
     evidence.mkdir(parents=True)
-    manifest = ROOT / '.local/evidence/upstream-041-branding/release/release-artifacts.json'
-    package = builder.build(manifest, evidence / 'compiled', fixture, str(identity))
+    package = builder.build(args.manifest, evidence / 'compiled', fixture, str(identity), args.tooling_receipt)
     key = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{' + str(identity).upper() + '}_is1'
     env = dict(os.environ)
     for name in ('TMP', 'TEMP', 'TMPDIR', 'HARMONY_TEST_SCRATCH'):
-        env[name] = str(SCRATCH)
+        env[name] = str(scratch)
     canary = fixture / 'synthetic-user-data.bin'
     canary.write_bytes(b'SYNTHETIC DATA ONLY; NO ACCOUNT OR CREDENTIALS\n' + identity.bytes)
     canary_hash = builder.digest(canary)
@@ -54,9 +57,9 @@ def main():
                                    encoding='utf-8', errors='replace', timeout=150, creationflags=subprocess.CREATE_NO_WINDOW)
         (evidence / (label + '-exit.json')).write_text(json.dumps({'exit_code': completed.returncode, 'stdout': completed.stdout, 'stderr': completed.stderr}, indent=2))
         builder.require(completed.returncode == 0, label + ' failed; inspect native log')
-    def install(target, label):
+    def install(target, label, *extra):
         run([package['installer'], '/CURRENTUSER', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART',
-             '/DIR=' + str(target), '/LOG=' + str(evidence / (label + '.log'))], label)
+             '/DIR=' + str(target), '/LOG=' + str(evidence / (label + '.log')), *extra], label)
         for name, checksum in package['payload_files'].items():
             builder.require(builder.digest(target / name) == checksum, 'Payload differs: ' + name)
         info = registration()
@@ -69,7 +72,12 @@ def main():
         record('fresh current-user install, custom Unicode folder, every payload hash and registration')
         foreign = target / 'foreign.keep'
         foreign.write_bytes(b'FOREIGN PROGRAM CANARY; KEEP')
-        install(target, 'update')
+        # The installer must let the handing-off process exit without interrupting it.
+        with subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(7)'],
+                              creationflags=subprocess.CREATE_NO_WINDOW) as parent:
+            install(target, 'update', '/HARMONYWAITPID=' + str(parent.pid), '/HARMONYINSTALLED=' + str(target))
+            builder.require(parent.poll() == 0, 'The update did not wait for the handing-off process')
+        record('updater handoff preserved the registered folder and waited for full exit')
         builder.require(foreign.read_bytes() == b'FOREIGN PROGRAM CANARY; KEEP', 'Foreign file changed')
         record('same-location update detects previous installation and preserves foreign/data canaries')
         relocated = fixture / 'Moved Program'

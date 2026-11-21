@@ -55,11 +55,12 @@ after removal, rerun Setup; there is no claimed custom rollback framework.
 ## Native smoke test
 
 ```sh
-python3 testing/test_simple_installer_native.py --allow-private-install
+python3 testing/test_simple_installer_native.py --allow-private-install --manifest PATH/TO/release-artifacts.json
 ```
 
-This private-identity test covers current-user install, custom Unicode directory,
-update, relocation, uninstall, reinstall and final cleanup. Every payload hash and
+For a separate release worktree, pass `--tooling-receipt PATH/TO/tooling-provenance.json` to either command to use the prepared compiler.
+
+The private-identity test covers current-user installation, a custom Unicode directory, the full-quit update handoff, relocation, uninstall, reinstall and cleanup. Every payload hash and
 registration is read back; synthetic data and a foreign file must survive. Harmony
 is never run. Real machine-scope/UAC migration and real account restoration require
 separate interactive validation. Evidence and Defender results live under

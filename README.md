@@ -15,7 +15,9 @@ This repository contains the source and development notes, not Discord credentia
 
 **Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. See the build notes for actual test results and platform-verification limits; an upstream feature description or performance number is not Harmony validation. The upstream GitHub Actions workflow is disabled in this fork to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain for reference.
 
-**Settings → About** checks Harmony’s public GitHub releases. Windows x64 can download a publisher-signed installer and run it on the next full quit. Automatic checks and background downloads are optional. The release includes the portable Windows build, installer and corresponding source.
+**Settings → About** checks Harmony’s public GitHub releases. Windows x64 can verify a downloaded installer against Harmony’s signed update manifest and run it on the next full quit. Automatic checks and downloads are optional.
+
+Games can share Rich Presence through Discord’s local desktop RPC, and the **Activity** tab on a profile shows available history. In a Discord conversation, use the composer’s **+** menu to schedule a message or record and review a voice message. The local schedule sends while Harmony is running and connected to that account.
 
 ---
 

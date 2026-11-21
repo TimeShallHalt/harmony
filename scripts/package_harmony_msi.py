@@ -1,4 +1,4 @@
-"""Create an offline per-user Harmony MSI from verified portable artifacts."""
+"""Create a legacy per-user MSI from verified, updater-free Harmony artifacts before 1.2.0."""
 
 import re
 import os
@@ -234,6 +234,8 @@ def stage_release(manifest_file, destination):
         info = json.loads(read('harmony-build-info.json'))
         build = json.loads(read('build.json'))
         msi_version(info['version'], info['build_id'])
+        if tuple(map(int, info['version'].split('.'))) >= (1, 2, 0):
+            raise ValueError('Harmony 1.2.0 and later use the Inno Setup installer; run scripts/build-harmony-installer.py')
         if info.get('dirty') is not False or info.get('commit') != manifest['commit'] or info['version'] != manifest['version'] or info['build_id'] != manifest['build_id'] or info.get('platform') != 'windows' or info.get('architecture') != 'x86_64' or info.get('license') != 'GPL-3.0-or-later':
             raise ValueError('Clean Windows build identity does not match the release manifest')
         if info.get('upstream') != 'Yapfast 0.4.1' or any(build.get(key) != value for key, value in info.items()) or build.get('updater_included') is not False:

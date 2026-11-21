@@ -180,6 +180,7 @@ begin
   if Id <= 0 then RaiseException('Invalid Harmony process ID.');
   Handle := OpenParent($00100000, 0, Id);
   if Handle = 0 then Exit; { The application can exit before Setup starts. }
+  Log('Waiting for Harmony to quit before updating.');
   try
     if WaitForParent(Handle, 60000) <> 0 then RaiseException('Harmony is still running. Quit it and try again.');
   finally CloseParent(Handle); end;
@@ -198,7 +199,7 @@ begin
       RaiseException('The Harmony installation changed. Open Setup to choose the installation to update.');
     Log('Harmony previous install: ' + OldKind + ' ' + OldVersion + ' at ' + OldDirectory);
     Result := True;
-  except MsgBox(GetExceptionMessage, mbError, MB_OK); end;
+  except SuppressibleMsgBox(GetExceptionMessage, mbError, MB_OK, IDOK); end;
 end;
 function DefaultDestination(Param: String): String;
 begin

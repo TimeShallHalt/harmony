@@ -1,4 +1,4 @@
-//! Read-only About page. No worker, timer, network or installation callbacks.
+//! Build identity and clipboard actions for About. Release controls are bound in release_updates.
 use super::*;
 
 pub(super) fn bind(window: &YapfastWindow) {

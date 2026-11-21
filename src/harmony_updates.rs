@@ -206,6 +206,36 @@ pub struct Staged {
     manifest: Manifest,
 }
 
+#[cfg(windows)]
+fn hold_update_directories(path: &Path) -> Result<Vec<fs::File>> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+    ensure!(path.is_absolute(), "Expected an absolute update cache path");
+    let parents: Vec<_> = path
+        .ancestors()
+        .skip(1)
+        .filter(|p| p.parent().is_some())
+        .collect();
+    let mut guards = Vec::new();
+    for parent in parents.into_iter().rev() {
+        let handle = fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(parent)?;
+        let meta = handle.metadata()?;
+        ensure!(
+            meta.is_dir() && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0,
+            "The update cache must be on a local path without junctions"
+        );
+        guards.push(handle);
+    }
+    Ok(guards)
+}
+
 fn verified_file(path: &Path, manifest: &Manifest) -> Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
@@ -213,9 +243,23 @@ fn verified_file(path: &Path, manifest: &Manifest) -> Result<fs::File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        options.share_mode(1);
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        };
+        options
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
     let mut file = options.open(path)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        ensure!(
+            file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0,
+            "Expected an ordinary installer file"
+        );
+    }
     ensure!(
         file.metadata()?.is_file() && file.metadata()?.len() == manifest.bytes,
         "Installer size changed"
@@ -329,6 +373,8 @@ fn installed_scope(program: &Path) -> Option<&'static str> {
 impl Staged {
     pub fn launch(&self) -> Result<()> {
         ensure!(WINDOWS_INSTALLER, "Installer requires Windows x64");
+        #[cfg(windows)]
+        let _directories = hold_update_directories(&self.path)?;
         let _guard = verified_file(&self.path, &self.manifest)?;
         // The signed installer waits for this process and checks for other running copies.
         // Its wizard preserves the previous installation's scope, location and registrations.

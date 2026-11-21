@@ -1,14 +1,10 @@
 # Harmony Update Roadmap
 
-Planning revision: 2026-11-07T18:41:43-05:00
+Planning revision: 2026-11-21
 
 ## Current stage
 
-**Update 1 is authorized and in progress: About, theme-pack, window-control and media-viewer acceptance. Ren explicitly deferred ALL updater/auto-update and sharing/hosting work. Publish the verified remaining update only to the existing private Harmony repository.**
-
-Implementation uses isolated worktrees and bounded workers. Earlier unrelated repair checkpoints remain preserved and paused; they are not being folded into this release. No physical input, forced app restart or automatic checks/downloads are authorized by starting development.
-
-**Updater and hosting deferred by Ren.** They are not acceptance gates for this release. Experimental updater code must not be activated or shipped as part of Update 1.
+Harmony 1.1.0 incorporates Yapfast 0.4.1 and the fork’s first four updates. The upstream fork provides the expressions and profiles listed under Update 5. The 1.2.0 Windows build adds the public-release updater, Discord Rich Presence, profile activity history, local scheduled messages and voice recording.
 
 ## How these lists work
 
@@ -24,21 +20,21 @@ Implementation uses isolated worktrees and bounded workers. Earlier unrelated re
 
 ## Planned updates
 
-### Update 1: The foundation (updater deferred)
+### Update 1: The foundation
 
-- [ ] **DEFERRED, outside Update 1: update / auto-update system** (`auto-update`)
+- [x] **Public-release updater in Harmony 1.2.0** (`auto-update`)
   - Manual **Check for updates** action.
   - Optional checks on startup and at a configurable interval while the app is running.
   - Check published GitHub Releases rather than ordinary repository commits.
   - Show version, release notes and an **Update available / Download update** button.
   - Optional background download, with an explicit user setting.
   - Verify the correct platform/version and signed update metadata/artifact before staging.
-  - Apply the verified update on the next normal app restart; do not force-close a call or session.
-  - Preserve app data, retain rollback and recover safely from interrupted downloads/installations.
+  - Run verified Setup on the next full quit when the user chooses it. A registered Windows installation retains its scope and location.
+  - Interrupted downloads can be retried. Previous installers remain available for manual rollback. Recovery from a failed scope migration can require rerunning Setup.
   - Keep notify-only and automatic-download behaviour separately configurable.
   - Resolve release hosting, access and licence compliance before distributing to friends; never embed a shared GitHub token.
 
-- [ ] **Settings About panel: app version and build; updater explicitly unavailable in this release** (`app-info`)
+- [ ] **Settings About panel with app version and build** (`app-info`)
 
 - [ ] **Native theme packs: retain and verify the existing foundation** (`theme-packs`)
 
@@ -82,29 +78,29 @@ Implementation uses isolated worktrees and bounded workers. Earlier unrelated re
 
 - [ ] **Animated emoji** (`animated-emoji`)
 
-### Update 5: Expressions and richer interactions
+### Update 5: Expressions and richer interactions (provided by Yapfast)
 
-- [ ] **Stickers** (`stickers`)
+- [x] **Stickers** (`stickers`)
 
-- [ ] **Animated stickers** (`animated-stickers`)
+- [x] **Animated stickers** (`animated-stickers`)
 
-- [ ] **Nameplates** (`nameplates`)
+- [x] **Nameplates** (`nameplates`)
 
-- [ ] **Polls** (`polls`)
+- [x] **Polls** (`polls`)
 
-- [ ] **Profile widgets** (`profile-widgets`)
+- [x] **Profile widgets** (`profile-widgets`)
 
 ### Update 6: Activity and composer workflows
 
 - [ ] **Quick game-activity sharing toggle** (`game-toggle`)
 
-- [ ] **Activity/game detection and Rich Presence** (`game-detection`)
+- [x] **Activity/game detection and Discord desktop Rich Presence** (`game-detection`)
 
-- [ ] **Detailed activity/history tab** (`activity-tab`)
+- [x] **Detailed activity/history tab** (`activity-tab`)
 
-- [ ] **Scheduled messages** (`scheduled-messages`)
+- [x] **Local scheduled messages with account-scoped delivery** (`scheduled-messages`)
 
-- [ ] **Voice messages** (`voice-messages`)
+- [x] **Record, review and send voice messages** (`voice-messages`)
 
 ### Update 7: Music and service integrations
 
@@ -139,21 +135,11 @@ Implementation uses isolated worktrees and bounded workers. Earlier unrelated re
 - [ ] Install/update integrity, app-data preservation and rollback are verified.
 - [ ] Installation and activation are reported separately; no forced restart during active sessions.
 
-## Distribution and licensing decision: still to resolve
+## Distribution
 
-- [ ] Agree on the friends-only/public distribution and update-hosting arrangement.
-- [ ] Keep the development repository and unfinished history private where desired.
-- [ ] Resolve licence requirements before offering downloadable binaries. The current codebase is declared **GPL-3.0-or-later**. Heavy modifications, renaming, or becoming visually different do not by themselves permit replacing that licence for the derived combined work.
-- [ ] If the GPL-based application is distributed, provide compliant access to the matching Corresponding Source and retain required notices. Recipients do not have to download or browse that source, and the private working repository/history need not be made public.
-- [ ] If a different distribution licence is essential, obtain the necessary permissions or agree on a genuinely independent implementation/foundation before proceeding; do not simply change the existing licence file.
-
-No licence or repository visibility has been changed. Reference: [GPLv3 sections 5 and 6](https://www.gnu.org/licenses/gpl-3.0.html#section5).
+Harmony publishes stable releases in the public TimeShallHalt/harmony repository. Include matching GPL source, installer source and dependency notices with each binary release. Publish the signed update manifest and its detached signature beside the Windows installer.
 
 ## Future ideas
 
 - Additional features: to discuss after Ren's remaining instruction.
 - No additional feature has been added to the 39-item roadmap yet.
-
-## Next agreed action
-
-**Finish the four remaining Update 1 features, verify and package the candidate, then publish to the existing private Harmony repository. Auto-update and sharing/hosting are deferred. Keep other updates paused and do not force an app restart.**

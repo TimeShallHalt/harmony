@@ -172,7 +172,7 @@ class HarmonyMsiTests(unittest.TestCase):
             with zipfile.ZipFile(source,'w') as archive:archive.writestr('Fixture-source/Cargo.toml','fixture source, never built')
             sha=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
             raw=bytearray(80);raw[:2]=b'MZ';struct.pack_into('<I',raw,60,64);raw[64:70]=b'PE\0\0\x64\x86'
-            info={'version':'1.0.0','build_id':1,'commit':'a'*40,'dirty':False,'platform':'windows','architecture':'x86_64','upstream':'Yapfast 0.4.1','license':'GPL-3.0-or-later'}
+            info={'version':'1.1.0','build_id':1,'commit':'a'*40,'dirty':False,'platform':'windows','architecture':'x86_64','upstream':'Yapfast 0.4.1','license':'GPL-3.0-or-later'}
             exe_hash=hashlib.sha256(raw).hexdigest()
             build=dict(info,executable_sha256=exe_hash,source_archive_sha256=sha(source),updater_included=False)
             bundle=root/'Fixture-windows-x64.zip'
@@ -186,7 +186,7 @@ class HarmonyMsiTests(unittest.TestCase):
                         entry.orig_filename=entry.filename
                         archive.writestr(entry,data)
             write_bundle()
-            manifest={'commit':info['commit'],'version':'1.0.0','build_id':1,'executable':{'sha256':exe_hash},'artifacts':[{'path':str(bundle),'sha256':sha(bundle)},{'path':str(source),'sha256':sha(source)}]}
+            manifest={'commit':info['commit'],'version':info['version'],'build_id':1,'executable':{'sha256':exe_hash},'artifacts':[{'path':str(bundle),'sha256':sha(bundle)},{'path':str(source),'sha256':sha(source)}]}
             path=root/'manifest.json';path.write_text(json.dumps(manifest))
             staged_info,files=module.stage_release(path,root/'positive')
             self.assertEqual(staged_info,info)
@@ -220,6 +220,15 @@ class HarmonyMsiTests(unittest.TestCase):
                     bad=root/f'bad-identity-{index}'
                     with self.assertRaises(ValueError):module.stage_release(path,bad)
                     self.assertFalse(bad.exists())
+            # Even a self-consistent archive claiming the updater is disabled
+            # must use the 1.2+ installer path for an app at that version.
+            info['version'] = build['version'] = manifest['version'] = '1.2.0'
+            write_bundle()
+            manifest['artifacts'][0]['sha256'] = sha(bundle)
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'Inno Setup'):
+                module.stage_release(path, root / 'modern-msi')
+            self.assertFalse((root / 'modern-msi').exists())
 
     def test_command_line_exposes_verified_input_and_explicit_tool_paths(self):
         import os,subprocess,sys

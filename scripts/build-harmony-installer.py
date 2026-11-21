@@ -118,7 +118,7 @@ def build(manifest, output_dir, fixture_root=None, fixture_id=None, tooling_rece
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--manifest', type=Path, default=ROOT / '.local/evidence/upstream-041-branding/release/release-artifacts.json')
+    parser.add_argument('--manifest', type=Path, required=True, help='Portable release-artifacts.json for the version to package')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--tooling-receipt', type=Path, help='Verified Inno compiler receipt from prepare-windows-inno.py')
     parser.add_argument('--fixture-root', type=Path)
