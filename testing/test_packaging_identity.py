@@ -21,6 +21,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_ID = 'io.github.TimeShallHalt.Harmony'
+VERSION = tomllib.loads((ROOT / 'Cargo.toml').read_text(encoding='utf-8'))['package']['version']
 
 
 def load_script(name):
@@ -47,50 +48,80 @@ class PackagingIdentityTests(unittest.TestCase):
         self.assertEqual(component.findtext('launchable'), APP_ID + '.desktop')
         self.assertEqual(component.findtext('project_license'), 'GPL-3.0-or-later')
         self.assertIn('wiredtenshi', ET.tostring(component, encoding='unicode'))
+        if '-' not in VERSION:
+            self.assertEqual(component.find('releases/release').get('version'), VERSION)
         self.assertFalse((ROOT / 'packaging/linux/io.github.yapfast.Yapfast.desktop').exists())
         self.assertFalse((ROOT / 'packaging/linux/io.github.yapfast.Yapfast.metainfo.xml').exists())
 
-    def test_windows_resources_and_optional_installer_target_exact_binary_name(self):
+    def test_windows_resources_and_setup_target_exact_binary_name(self):
         rc = (ROOT / 'packaging/windows/harmony.rc').read_text(encoding='utf-8')
         self.assertIn('1 ICON "harmony.ico"', rc)
         for field, value in (('ProductName', 'Harmony'), ('FileDescription', 'Harmony'), ('OriginalFilename', 'Harmony.exe')):
             self.assertIn(f'VALUE "{field}", "{value}\\0"', rc)
         self.assertIn('wiredtenshi', rc)
-        version = tomllib.loads((ROOT / 'Cargo.toml').read_text(encoding='utf-8'))['package']['version']
-        self.assertIn('FILEVERSION ' + version.replace('.', ',') + ',0', rc)
-        self.assertIn('PRODUCTVERSION ' + version.replace('.', ',') + ',0', rc)
-        self.assertIn('VALUE "FileVersion", "' + version + '\\0"', rc)
-        recipe = (ROOT / 'packaging/windows/harmony.iss').read_text(encoding='utf-8')
+        fixed_version = VERSION.split('-', 1)[0].replace('.', ',') + ',0'
+        self.assertIn('FILEVERSION ' + fixed_version, rc)
+        self.assertIn('PRODUCTVERSION ' + fixed_version, rc)
+        self.assertIn('VALUE "FileVersion", "' + VERSION + '\\0"', rc)
+        self.assertIn('VALUE "ProductVersion", "' + VERSION + '\\0"', rc)
+        recipe = (ROOT / 'packaging/windows/harmony-simple.iss').read_text(encoding='utf-8')
         self.assertIn('AppName=Harmony', recipe)
+        self.assertIn('OutputBaseFilename=Harmony-{#AppVersion}-Setup', recipe)
+        self.assertIn('LicenseFile={#PayloadDir}\\LICENSE.txt', recipe)
         self.assertIn('UninstallDisplayIcon={app}\\Harmony.exe', recipe)
         self.assertIn('SetupIconFile=harmony.ico', recipe)
         self.assertIn('CloseApplications=no', recipe)
         self.assertIn('RestartApplications=no', recipe)
         self.assertNotIn('19FF8D53-8D7E-4E66-91BB-E2F5BE307E9A', recipe)
-        for section in ('[Registry]', '[Run]', '[UninstallRun]'):
-            self.assertNotIn(section, '\n'.join(line for line in recipe.splitlines() if not line.startswith(';')))
+        sections = {line.strip() for line in recipe.splitlines() if line.startswith('[')}
+        self.assertFalse(sections & {'[Registry]', '[Run]', '[UninstallRun]'})
         self.assertFalse((ROOT / 'packaging/windows/yapfast.rc').exists())
         self.assertFalse((ROOT / 'packaging/windows/yapfast.iss').exists())
 
-    def test_offline_inno_tool_discovery_never_downloads_or_installs(self):
-        common = load_script('release_package')
-        with patch.dict(sys.modules, release_package=common):
-            module = load_script('package-windows')
+    def test_default_setup_build_uses_the_pinned_local_compiler(self):
+        module = load_script('build-harmony-installer')
         with tempfile.TemporaryDirectory() as folder:
-            prefix = Path(folder) / 'offline-tool'
-            with patch.dict(os.environ, HARMONY_INNO_PREFIX=str(prefix)), patch.object(module.subprocess, 'run') as run:
-                with self.assertRaisesRegex(SystemExit, 'Offline Inno Setup'):
-                    module.inno_setup()
+            root = Path(folder)
+            compiler = root / '.local/tools/inno-7.1.1-x64/compiler/ISCC.exe'
+            compiler.parent.mkdir(parents=True)
+            compiler.write_bytes(b'fixture compiler, never executed')
+            receipt = compiler.parent.parent / 'tooling-provenance.json'
+            output = root / 'compiled'
+            def stage(manifest, payload):
+                payload.mkdir()
+                executable = payload / 'Harmony.exe'
+                executable.write_bytes(b'fixture application, never executed')
+                return {'version': VERSION, 'build_id': 1, 'commit': 'a' * 40}, {'Harmony.exe': module.digest(executable)}
+            def compile_fixture(command, **kwargs):
+                self.assertEqual(command[0], str(compiler))
+                self.assertEqual(command[-1], str(root / 'packaging/windows/harmony-simple.iss'))
+                self.assertIn('--define=AppVersion=' + VERSION, command)
+                (output / f'Harmony-{VERSION}-Setup.exe').write_bytes(b'fixture installer')
+                return subprocess.CompletedProcess(command, 0)
+            with patch.object(module, 'ROOT', root), patch.object(module, 'stage', side_effect=stage), \
+                 patch.object(module, 'build_repair', return_value=root / 'HarmonyRepair.exe'), \
+                 patch.object(module.subprocess, 'run', side_effect=compile_fixture) as run:
+                with self.assertRaises(FileNotFoundError):
+                    module.build(root / 'release.json', output)
+                provenance = {'version': '7.1.1', 'compiler': str(compiler),
+                              'compiler_scan': {'file_sha256': {'ISCC.exe': '0' * 64}}}
+                receipt.write_text(json.dumps(provenance), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'Pinned compiler file changed'):
+                    module.build(root / 'release.json', output)
                 run.assert_not_called()
-                compiler = prefix / 'drive_c/InnoSetup/ISCC.exe'
-                compiler.parent.mkdir(parents=True)
-                compiler.write_bytes(b'offline compiler discovery fixture, never executed')
-                self.assertEqual(module.inno_setup(), prefix)
-                run.assert_not_called()
+                provenance['compiler_scan']['file_sha256']['ISCC.exe'] = module.digest(compiler)
+                receipt.write_text(json.dumps(provenance), encoding='utf-8')
+                result = module.build(root / 'release.json', output)
+                self.assertEqual(result['app_id'], module.PUBLIC_ID)
+                self.assertIsNone(result['fixture_root'])
+                self.assertEqual(Path(result['installer']).name, f'Harmony-{VERSION}-Setup.exe')
+                run.assert_called_once()
 
     def test_arch_and_appimage_keep_harmony_paths_and_disable_update_feeds(self):
         arch = (ROOT / 'packaging/arch/PKGBUILD').read_text(encoding='utf-8')
         self.assertIn('pkgname=harmony', arch)
+        if '-' not in VERSION:
+            self.assertIn(f'pkgver={VERSION}\n', arch)
         self.assertIn('_id=' + APP_ID, arch)
         self.assertIn('target/release/Harmony "$pkgdir/usr/bin/harmony"', arch)
         self.assertNotIn('git+https://github.com/yapfast/yapfast.git', arch)
@@ -124,7 +155,8 @@ class PackagingIdentityTests(unittest.TestCase):
             with patch.object(module, 'nix_build', side_effect=[parts, root / 'skia-source']), \
                  patch.object(module.subprocess, 'check_output', return_value=metadata), \
                  patch.object(module.subprocess, 'run') as run, patch.object(sys, 'argv', argv), \
-                 patch.dict(os.environ, SKIA_BINARIES_URL=(root / 'skia.tar.gz').as_uri(), LK_CUSTOM_WEBRTC=str(root / 'webrtc')):
+                 patch.object(module.os, 'environ', dict(os.environ, SKIA_BINARIES_URL=(root / 'skia.tar.gz').as_uri(),
+                                                        LK_CUSTOM_WEBRTC=str(root / 'webrtc'))):
                 with self.assertRaisesRegex(SystemExit, 'must not contain upstream update information'):
                     module.main()
                 run.assert_not_called()
@@ -157,24 +189,29 @@ class PackagingIdentityTests(unittest.TestCase):
         package = (ROOT / 'nix/package.nix').read_text(encoding='utf-8')
         body = package.split("  postInstall = ''\n", 1)[1].split("\n  '';", 1)[0]
         body = body.replace('${id}', APP_ID).replace('${lib.makeLibraryPath native.runtimeLibraries}', '/fixture/lib')
-        with tempfile.TemporaryDirectory(prefix='harmony-nix-install-fixture-') as folder:
-            output = Path(folder)
-            (output / 'bin').mkdir()
-            (output / 'bin/Harmony').write_bytes(b'fixture program, never executed')
-            script = '''set -euo pipefail
+        # Let the shell allocate the scratch directory on its own filesystem.
+        # WSL can read the checkout from NTFS but needs its Linux /tmp for a case-only rename.
+        script = '''set -euo pipefail
+out=$(mktemp -d "${TMPDIR:-/tmp}/harmony-nix-install.XXXXXXXX")
+trap 'rm -r -- "$out"' EXIT
+mkdir "$out/bin"
+printf 'fixture binary' > "$out/bin/Harmony"
+if [[ -e "$out/bin/harmony" ]]; then exit 77; fi
 wrapProgram() {
   mv "$1" "${1%/*}/.${1##*/}-wrapped"
   printf '# wrapper fixture, never executed\\n' > "$1"
 }
-''' + body
-            result = subprocess.run(['bash'], input=script, text=True, capture_output=True, timeout=30,
-                                    cwd=ROOT, env=dict(os.environ, out=str(output).replace('\\', '/')))
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertNotIn('Harmony', {path.name for path in (output / 'bin').iterdir()})
-            self.assertTrue((output / 'bin/harmony').is_file())
-            self.assertEqual((output / 'bin/.harmony-wrapped').read_bytes(), b'fixture program, never executed')
-            self.assertTrue((output / 'share/applications' / (APP_ID + '.desktop')).is_file())
-            self.assertEqual((output / 'share/licenses/harmony/LICENSE').read_bytes(), (ROOT / 'LICENSE').read_bytes())
+''' + body + f'''
+test ! -e "$out/bin/Harmony"
+test -f "$out/bin/harmony"
+test "$(cat "$out/bin/.harmony-wrapped")" = 'fixture binary'
+cmp "packaging/linux/{APP_ID}.desktop" "$out/share/applications/{APP_ID}.desktop"
+cmp LICENSE "$out/share/licenses/harmony/LICENSE"
+'''
+        result = subprocess.run(['bash'], input=script.encode(), capture_output=True, timeout=30, cwd=ROOT)
+        if result.returncode == 77:
+            self.skipTest('Linux install fixture requires a case-sensitive shell scratch directory')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_desktop_installer_exec_quoting_preserves_special_paths_without_launch(self):
         script = (ROOT / 'scripts/install-desktop-entry').read_text(encoding='utf-8')
@@ -196,23 +233,24 @@ wrapProgram() {
             self.assertNotIn('Exec=yapfast', text)
             self.assertFalse(Path(executable).exists(), 'The renderer must never create or run an executable')
 
-    def test_portable_producer_manifest_round_trips_into_msi_stager(self):
+    def test_current_portable_manifest_feeds_the_simple_installer(self):
         common = load_script('release_package')
         module = load_script('package-harmony')
+        setup = load_script('build-harmony-installer')
         msi = load_script('package_harmony_msi')
         with tempfile.TemporaryDirectory(prefix='harmony-package-fixture-') as folder:
             root = Path(folder)
-            (root / 'Cargo.toml').write_text('[package]\nname="yapfast"\nversion="1.1.0"\n', encoding='utf-8')
+            (root / 'Cargo.toml').write_text(f'[package]\nname="yapfast"\nversion="{VERSION}"\n', encoding='utf-8')
             (root / 'LICENSE').write_bytes((ROOT / 'LICENSE').read_bytes())
             raw = bytearray(80)
             raw[:2] = b'MZ'
             struct.pack_into('<I', raw, 60, 64)
             raw[64:70] = b'PE\0\0\x64\x86'
             (root / 'fixture.exe').write_bytes(raw)  # PE-header fixture, not a runnable production build.
-            stamp = dict(version='1.1.0', build_id=1, commit='a' * 40, dirty=False, platform='windows',
+            stamp = dict(version=VERSION, build_id=1, commit='a' * 40, dirty=False, platform='windows',
                          architecture='x86_64', upstream='Yapfast 0.4.1', license='GPL-3.0-or-later')
             (root / 'stamp.json').write_text(json.dumps(stamp), encoding='utf-8')
-            metadata = {'packages': [{'name': 'yapfast', 'version': '1.1.0', 'manifest_path': str(root / 'Cargo.toml')}]}
+            metadata = {'packages': [{'name': 'yapfast', 'version': VERSION, 'manifest_path': str(root / 'Cargo.toml')}]}
             (root / 'metadata.json').write_text(json.dumps(metadata), encoding='utf-8')
             def source_fixture(metadata, base, temporary, destination):
                 with zipfile.ZipFile(destination, 'w') as archive:
@@ -238,17 +276,26 @@ wrapProgram() {
             self.assertFalse(receipt['uploaded'])
             self.assertFalse(receipt['installed'])
             self.assertEqual(len(receipt['artifacts']), 2)
-            info, files = msi.stage_release(manifest, root / 'msi-stage')
-            self.assertEqual(info, stamp)
+            staged = root / 'setup-stage'
+            info, files = setup.stage(manifest, staged)
+            self.assertEqual(info, receipt)
             self.assertIn('Harmony.exe', files)
             self.assertNotIn('yapfast.exe', files)
-            self.assertEqual((root / 'msi-stage/Harmony.exe').read_bytes(), raw)
-            self.assertIn('corresponding-source/Harmony-1.1.0-b1-source.zip', files)
-            self.assertIn('Upstream: Yapfast 0.4.1', (root / 'msi-stage/SOURCE.txt').read_text())
-            with zipfile.ZipFile(output / 'Harmony-1.1.0-b1-windows-x64.zip') as archive:
+            self.assertEqual((staged / 'Harmony.exe').read_bytes(), raw)
+            source_name = f'Harmony-{VERSION}-b1-source.zip'
+            self.assertEqual(files['corresponding-source/' + source_name], module.digest(output / source_name))
+            self.assertEqual((staged / 'LICENSE.txt').read_bytes(), (ROOT / 'LICENSE').read_bytes())
+            self.assertIn('Upstream: Yapfast 0.4.1', (staged / 'SOURCE.txt').read_text())
+            self.assertIn('licenses/fixture.txt', files)
+            self.assertIn('installer-source/harmony-simple.iss', files)
+            self.assertIs(json.loads((staged / 'BUILD.json').read_text())['updater_included'], True)
+            with self.assertRaisesRegex(ValueError, 'Inno Setup'):
+                msi.stage_release(manifest, root / 'msi-stage')
+            self.assertFalse((root / 'msi-stage').exists())
+            with zipfile.ZipFile(output / f'Harmony-{VERSION}-b1-windows-x64.zip') as archive:
                 self.assertIsNone(archive.testzip())
                 names = archive.namelist()
-                self.assertIn('Harmony-1.1.0-b1-windows-x64/Harmony.exe', names)
+                self.assertIn(f'Harmony-{VERSION}-b1-windows-x64/Harmony.exe', names)
                 self.assertFalse(any(name.endswith('/yapfast.exe') for name in names))
 
     def test_dormant_nightly_uses_current_artifact_names_and_cannot_use_upstream_signing_keys(self):
@@ -289,8 +336,8 @@ wrapProgram() {
         for name in ('build-windows', 'build-appimage', 'make-windows-icon', 'install-desktop-entry', 'package-arch'):
             with self.subTest(script=name):
                 # Decode checkout newlines just as Git's Unix checkout does.
-                result = subprocess.run(['bash', '-n'], input=(ROOT / 'scripts' / name).read_text(),
-                                        text=True, capture_output=True, timeout=20)
+                result = subprocess.run(['bash', '-n'], input=(ROOT / 'scripts' / name).read_text().encode(),
+                                        capture_output=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(os.name == 'nt' and os.environ.get('HARMONY_RC_EXE'), 'Requires explicit Windows SDK resource compiler')
@@ -306,7 +353,9 @@ wrapProgram() {
                 self.assertIn(value.encode('utf-16-le'), raw)
             offset = raw.index(b'\xbd\x04\xef\xfe')
             fixed = struct.unpack_from('<6I', raw, offset)
-            self.assertEqual(fixed[2:6], (0x00010001, 0, 0x00010001, 0))
+            major, minor, patch = map(int, VERSION.split('-', 1)[0].split('.'))
+            product = (major << 16 | minor, patch << 16)
+            self.assertEqual(fixed[2:6], product + product)
 
 
 if __name__ == '__main__':

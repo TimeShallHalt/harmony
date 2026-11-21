@@ -17,7 +17,7 @@ impl BuildInfo {
     }
     pub fn diagnostics(&self) -> String {
         format!(
-            "Harmony {}\nRunning build: {}{}\nCommit: {}\nPlatform: {}\nArchitecture: {}\nUpstream: Yapfast 0.4.1\nLicense: GPL-3.0-or-later\nSource: https://github.com/TimeShallHalt/harmony\nUpstream source: https://github.com/yapfast/yapfast\nUpdater not included in this build.",
+            "Harmony {}\nRunning build: {}{}\nCommit: {}\nPlatform: {}\nArchitecture: {}\nUpstream: Yapfast 0.4.1\nLicense: GPL-3.0-or-later\nSource: https://github.com/TimeShallHalt/harmony\nUpstream source: https://github.com/yapfast/yapfast\nUpdates: Harmony public releases with publisher-signed Windows installers.",
             self.version,
             self.build_id,
             if self.dirty {
@@ -194,7 +194,7 @@ mod tests {
         assert!(text.contains(info.commit));
         assert!(text.contains("Upstream: Yapfast 0.4.1"));
         assert!(text.contains("GPL-3.0-or-later"));
-        assert!(text.contains("Updater not included"));
+        assert!(text.contains("publisher-signed Windows installers"));
     }
 
     const COMMIT_FULL: &str = "59391f96a1b2c3d4e5f60718293a4b5c6d7e8f90";

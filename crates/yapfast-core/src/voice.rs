@@ -99,6 +99,72 @@ pub enum Resolution {
     Source,
 }
 
+/// Screen-share ceilings for the connected Discord account and voice channel.
+/// Basic permits 60 fps at 720p or 30 fps at 1080p. Boosts and Nitro may
+/// increase both. A saved choice is only a preference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreamLimits {
+    pub resolution: Resolution,
+    pub fps_720: u32,
+    pub fps_hd: u32,
+}
+
+impl Default for StreamLimits {
+    fn default() -> Self {
+        Self {
+            resolution: Resolution::P720,
+            fps_720: 30,
+            fps_hd: 30,
+        }
+    }
+}
+
+impl StreamLimits {
+    pub fn discord(premium: u8, boost: u8) -> Self {
+        let resolution = match (premium, boost) {
+            (2, _) => Resolution::Source,
+            (1 | 3, _) | (_, 2 | 3) => Resolution::P1080,
+            _ => Resolution::P720,
+        };
+        Self {
+            resolution,
+            fps_720: if matches!(premium, 1..=3) || matches!(boost, 1..=3) {
+                60
+            } else {
+                30
+            },
+            fps_hd: if matches!(premium, 1 | 2) || matches!(boost, 2 | 3) {
+                60
+            } else {
+                30
+            },
+        }
+    }
+
+    pub fn constrain(self, choice: StreamQuality) -> StreamQuality {
+        let resolution = match (choice.resolution, self.resolution) {
+            (Resolution::P720, _) | (_, Resolution::P720) => Resolution::P720,
+            (Resolution::P1080, _) | (_, Resolution::P1080) => Resolution::P1080,
+            _ => Resolution::Source,
+        };
+        let max = if resolution == Resolution::P720 {
+            self.fps_720
+        } else {
+            self.fps_hd
+        };
+        let fps = match choice.fps.min(max) {
+            0..=29 => 15,
+            30..=59 => 30,
+            _ => 60,
+        };
+        StreamQuality {
+            resolution,
+            fps,
+            ..choice
+        }
+    }
+}
+
 /// How a screen is shared: chosen before going live, and remembered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct StreamQuality {
@@ -241,6 +307,7 @@ pub struct State {
     pub watching: Option<Box<Watching>>,
     /// How the next screen share is sent.
     pub quality: StreamQuality,
+    pub stream_limits: StreamLimits,
     /// This account's camera, turned on or starting.
     pub camera_phase: CameraPhase,
     /// The call carries camera video, so the camera can be turned on.
@@ -310,6 +377,7 @@ impl Default for State {
             sharing: None,
             watching: None,
             quality: StreamQuality::default(),
+            stream_limits: StreamLimits::default(),
             camera_phase: CameraPhase::Off,
             can_film: false,
             link: None,
@@ -710,6 +778,47 @@ pub const NAMED: &str = "name:";
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stream_limits_apply_to_remembered_and_new_choices() {
+        use super::{Resolution::*, StreamLimits, StreamQuality};
+        let choice = StreamQuality {
+            resolution: Source,
+            fps: 60,
+            high_quality: true,
+        };
+        for (premium, boost, resolution, fps) in [
+            (0, 0, P720, 30),
+            (0, 1, P720, 60),
+            (0, 2, P1080, 60),
+            (0, 3, P1080, 60),
+            (1, 0, P1080, 60),
+            (2, 0, Source, 60),
+            (3, 0, P1080, 30),
+            (3, 2, P1080, 60),
+            (50, 50, P720, 30),
+        ] {
+            let output = StreamLimits::discord(premium, boost).constrain(choice);
+            assert_eq!(
+                output,
+                StreamQuality {
+                    resolution,
+                    fps,
+                    ..choice
+                }
+            );
+        }
+        let basic = StreamLimits::discord(3, 0);
+        assert_eq!(
+            basic
+                .constrain(StreamQuality {
+                    resolution: P720,
+                    ..choice
+                })
+                .fps,
+            60
+        );
+        assert_eq!(basic.constrain(StreamQuality { fps: 15, ..choice }).fps, 15);
+    }
     use super::*;
 
     #[test]

@@ -141,56 +141,64 @@ pub struct RecentEntry {
     pub picture: Option<String>,
     /// It's music, marked with a note.
     pub music: bool,
-    /// When it ended, in milliseconds.
+    /// When it was last active, in Unix milliseconds.
     pub at: Option<u64>,
+    pub duration_ms: Option<u64>,
 }
 
 /// What's in someone's outbox that this shows: music, what they watched and
 /// games they played, by the client's numbers for `content_type`.
-pub fn recent_entries(value: &Value) -> Vec<RecentEntry> {
+pub fn recent_entries(value: &Value) -> Option<Vec<RecentEntry>> {
     const PLAYED_GAME: u64 = 1;
     const WATCHED_MEDIA: u64 = 2;
     const TOP_GAME: u64 = 3;
     const LISTENED_SESSION: u64 = 5;
-    value["entries"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            let extra = &entry["extra"];
-            let at = entry["ended_at"]
-                .as_str()
-                .or_else(|| entry["started_at"].as_str())
-                .and_then(iso_ms)
-                // A session has no times of its own; its id says when it began.
-                .or_else(|| text(&entry["id"]).map(snowflake_ms).filter(|ms| *ms > 0));
-            match entry["content_type"].as_u64()? {
-                LISTENED_SESSION => {
-                    let media = &extra["entries"][0]["media"];
-                    Some(RecentEntry {
-                        title: text(&media["title"])?.to_owned(),
-                        subtitle: text(&media["artists"][0]["name"])
-                            .unwrap_or_default()
-                            .to_owned(),
-                        picture: text(&media["image_url"]).map(str::to_owned),
-                        music: true,
+    Some(
+        value["entries"]
+            .as_array()?
+            .iter()
+            .filter_map(|entry| {
+                let extra = &entry["extra"];
+                let started = entry["started_at"].as_str().and_then(iso_ms);
+                let ended = entry["ended_at"].as_str().and_then(iso_ms);
+                let duration_ms = started
+                    .zip(ended)
+                    .and_then(|(start, end)| end.checked_sub(start));
+                let at = ended
+                    .or(started)
+                    // A session has no times of its own; its id says when it began.
+                    .or_else(|| text(&entry["id"]).map(snowflake_ms).filter(|ms| *ms > 0));
+                match entry["content_type"].as_u64()? {
+                    LISTENED_SESSION => {
+                        let media = &extra["entries"][0]["media"];
+                        Some(RecentEntry {
+                            title: text(&media["title"])?.to_owned(),
+                            subtitle: text(&media["artists"][0]["name"])
+                                .unwrap_or_default()
+                                .to_owned(),
+                            picture: text(&media["image_url"]).map(str::to_owned),
+                            music: true,
+                            at,
+                            duration_ms,
+                        })
+                    }
+                    WATCHED_MEDIA => Some(RecentEntry {
+                        title: text(&extra["media_title"])?.to_owned(),
                         at,
-                    })
+                        duration_ms,
+                        ..Default::default()
+                    }),
+                    PLAYED_GAME | TOP_GAME => Some(RecentEntry {
+                        title: text(&extra["game_name"])?.to_owned(),
+                        at,
+                        duration_ms,
+                        ..Default::default()
+                    }),
+                    _ => None,
                 }
-                WATCHED_MEDIA => Some(RecentEntry {
-                    title: text(&extra["media_title"])?.to_owned(),
-                    at,
-                    ..Default::default()
-                }),
-                PLAYED_GAME | TOP_GAME => Some(RecentEntry {
-                    title: text(&extra["game_name"])?.to_owned(),
-                    at,
-                    ..Default::default()
-                }),
-                _ => None,
-            }
-        })
-        .collect()
+            })
+            .collect(),
+    )
 }
 
 /// An account on another service that a profile shows, such as Steam.
@@ -577,17 +585,24 @@ mod tests {
 
     #[test]
     fn recent_activity_reads_songs_and_games_and_leaves_the_rest() {
+        assert_eq!(recent_entries(&json!({"entries": []})), Some(Vec::new()));
+        assert_eq!(recent_entries(&json!({})), None);
         let entries = recent_entries(&json!({"entries": [
             {"content_type": 5, "ended_at": "2026-10-27T00:00:00+00:00", "extra": {"entries": [{"media": {
                 "title": "A song", "artists": [{"name": "A band"}], "image_url": "https://art",
             }}]}},
-            {"content_type": 1, "extra": {"game_name": "A game"}},
+            {"content_type": 1, "started_at":"2026-11-01T13:00:00Z", "ended_at":"2026-11-01T13:55:00Z", "extra": {"game_name": "A game"}},
             {"content_type": 7, "extra": {}},
-        ]}));
+        ]})).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].subtitle, "A band");
         assert!(entries[0].music && entries[0].at.is_some());
         assert_eq!(entries[1].title, "A game");
+        assert_eq!(entries[1].duration_ms, Some(55 * 60_000));
+        assert_eq!(
+            entries[0].duration_ms, None,
+            "a single timestamp does not establish duration"
+        );
     }
 
     #[test]
@@ -599,7 +614,7 @@ mod tests {
                 {"media": {"title": "Song", "artists": [{"name": "Band"}]}},
             ]},
         }]});
-        let entries = recent_entries(&outbox);
+        let entries = recent_entries(&outbox).unwrap();
         assert_eq!(entries[0].at, Some(snowflake_ms("1522378878083924051")));
     }
 

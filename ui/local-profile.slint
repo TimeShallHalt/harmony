@@ -1,0 +1,70 @@
+import { Label } from "theme.slint";
+import { ActionButton, TextField } from "controls.slint";
+import { Picker, SettingsHeading, SettingsTitle } from "settings.slint";
+import { ProfileCard, ProfileData } from "people.slint";
+
+export global LocalProfile {
+    in property <bool> available;
+    in property <ProfileData> preview;
+    in property <[string]> fonts;
+    in property <int> font;
+    in property <string> top;
+    in property <string> bottom;
+    in property <bool> has-banner;
+    in property <bool> has-decoration;
+    in property <bool> can-save;
+    in property <string> status;
+    callback editing(bool);
+    callback choose-font(int);
+    callback edit-color(bool, string);
+    callback pick-image(bool);
+    callback clear-image(bool);
+    callback reset();
+    callback save();
+}
+
+export component LocalProfileSettings inherits VerticalLayout {
+    spacing: 12px;
+    SettingsTitle { text: "Local profile"; }
+    Label { text: "Only you see these changes in Harmony on this device. Everyone else sees your Discord profile."; }
+    if LocalProfile.available: VerticalLayout {
+        spacing: 12px;
+        SettingsHeading { text: "Preview"; }
+        ProfileCard { data: LocalProfile.preview; preview: true; max-width: 360px; limit: 360px; }
+        SettingsHeading { text: "Display name font"; }
+        Picker {
+            model: LocalProfile.fonts; chosen: LocalProfile.font;
+            accessible-label: "Display name font";
+            selected(_) => { LocalProfile.choose-font(self.current-index); }
+        }
+        for banner in [true, false]: VerticalLayout {
+            spacing: 4px;
+            SettingsHeading { text: banner ? "Banner" : "Avatar decoration"; }
+            HorizontalLayout {
+                alignment: start; spacing: 8px;
+                ActionButton {
+                    text: banner ? "Choose banner PNG" : "Choose decoration PNG";
+                    clicked => { LocalProfile.pick-image(banner); }
+                }
+                if (banner ? LocalProfile.has-banner : LocalProfile.has-decoration): ActionButton {
+                    text: "Use profile default"; clicked => { LocalProfile.clear-image(banner); }
+                }
+            }
+        }
+        for top in [true, false]: VerticalLayout {
+            spacing: 4px;
+            SettingsHeading { text: top ? "Top color" : "Bottom color"; }
+            TextField {
+                label: top ? "Top color" : "Bottom color"; placeholder: "#RRGGBB";
+                text: top ? LocalProfile.top : LocalProfile.bottom;
+                edited(value) => { LocalProfile.edit-color(top, value); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px; alignment: start;
+            ActionButton { text: "Save on this device"; primary: true; enabled: LocalProfile.can-save; clicked => { LocalProfile.save(); } }
+            ActionButton { text: "Restore profile defaults"; clicked => { LocalProfile.reset(); } }
+        }
+    }
+    if LocalProfile.status != "": Label { text: LocalProfile.status; }
+}

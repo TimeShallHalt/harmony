@@ -580,6 +580,30 @@ mod tests {
     }
 
     #[test]
+    fn the_received_player_decodes_a_voice_note_recorded_by_harmony() {
+        use yapfast_discord::voice_note::{Builder, RATE as NOTE_RATE};
+
+        let tone: Vec<_> = (0..NOTE_RATE)
+            .map(|i| 0.3 * (i as f32 * 440.0 * std::f32::consts::TAU / NOTE_RATE as f32).sin())
+            .collect();
+        let mut encoder = Builder::new().unwrap();
+        encoder.push(&tone).unwrap();
+        let note = encoder.finish().unwrap();
+
+        let (_control, controls) = mpsc::channel();
+        let (reported, mut reports) = tokio::sync::mpsc::unbounded_channel();
+        let mut speakers = Kept::default();
+        assert!(
+            play(note.data(), &mut speakers, &controls, &normal(), &reported, None).unwrap()
+        );
+        assert_eq!(reports.try_recv().unwrap(), Report::Loaded);
+        let seconds = speakers.0.len() as f64 / (2.0 * f64::from(RATE));
+        // The stereo player can add a final output buffer to the encoded length.
+        assert!((seconds - note.duration_secs()).abs() < 0.1, "played {seconds} s");
+        assert!(speakers.0.iter().any(|sample| sample.unsigned_abs() > 1000));
+    }
+
+    #[test]
     fn plays_a_recording_to_its_end_telling_how_far_it_got() {
         let (_control, controls) = mpsc::channel();
         let (reported, mut reports) = tokio::sync::mpsc::unbounded_channel();

@@ -25,11 +25,18 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
             return;
         };
         let voice = &adapter.app.state.voice;
-        let stats = voice
+        let mut stats = voice
             .link
             .as_ref()
             .map(yapfast_core::voice::Link::read)
             .unwrap_or_default();
+        if !voice
+            .sharing
+            .as_ref()
+            .is_some_and(|s| s.phase == voice::SharePhase::Live)
+        {
+            stats.stream = None;
+        }
         show(
             &window.global::<CallLink>(),
             &stats,
@@ -68,6 +75,8 @@ fn show(link: &CallLink<'_>, stats: &LinkStats, others: bool) {
         link.set_target(rate(stream.target_kbps).into());
         link.set_keyframes(stream.keyframe_requests.to_string().into());
         link.set_resent(stream.resent.to_string().into());
+    } else {
+        link.set_picture(Default::default());
     }
 }
 
@@ -143,6 +152,28 @@ fn groups(code: &str) -> Vec<slint::SharedString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_quality_displays_the_sample_and_clears_on_stop() {
+        i_slint_backend_testing::init_no_event_loop();
+        let w = YapfastWindow::new().unwrap();
+        let link = w.global::<CallLink>();
+        let stats = LinkStats {
+            stream: Some(voice::StreamStats {
+                width: 640,
+                height: 360,
+                fps: 12,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        show(&link, &stats, false);
+        assert!(link.get_streaming());
+        assert_eq!(link.get_picture(), "640×360 at 12 fps");
+        show(&link, &LinkStats::default(), false);
+        assert!(!link.get_streaming());
+        assert!(link.get_picture().is_empty());
+    }
 
     #[test]
     fn graphs_the_pings_up_to_a_round_top() {

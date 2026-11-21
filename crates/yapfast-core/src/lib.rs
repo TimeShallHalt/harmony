@@ -76,6 +76,8 @@ pub mod profile_media;
 mod profile_media_io;
 pub mod push_to_talk;
 #[cfg(feature = "discord")]
+pub mod recording;
+#[cfg(feature = "discord")]
 pub mod ring;
 pub mod runtime;
 #[cfg(feature = "matrix")]
@@ -83,6 +85,7 @@ pub mod session;
 #[cfg(feature = "discord")]
 pub mod soundboard;
 pub mod sounds;
+pub mod scheduled;
 pub mod spoiler;
 #[cfg(feature = "discord")]
 pub mod stream_audio;

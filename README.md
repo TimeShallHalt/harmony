@@ -1,6 +1,6 @@
 # Harmony
 
-Harmony is a private development fork of [Yapfast](https://github.com/yapfast/yapfast) by wiredtenshi and contributors, a native Rust/Slint Discord client. This source integrates upstream 0.4.1 with Harmony customization; it is not an official Yapfast release.
+Harmony is a community fork of [Yapfast](https://github.com/yapfast/yapfast) by wiredtenshi and contributors, a native Rust/Slint Discord client. This source integrates upstream 0.4.1 with Harmony customization; it is not an official Yapfast release.
 
 <p align="center"><img src="packaging/icon.svg" width="96" height="96" alt="Harmony logo"></p>
 
@@ -13,9 +13,11 @@ Windows builds are **`Harmony.exe`**. Linux packages install **`harmony`** (Carg
 
 This repository contains the source and development notes, not Discord credentials, account data, local toolchains or compiled application binaries. Upstream licenses and attribution are retained; see [LICENSE](LICENSE).
 
-**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. See the build notes for actual test results and platform-verification limits; an upstream feature description or performance number is not Harmony validation. GitHub Actions are disabled for this private copy to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain for reference.
+**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. See the build notes for actual test results and platform-verification limits; an upstream feature description or performance number is not Harmony validation. The upstream GitHub Actions workflow is disabled in this fork to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain for reference.
 
-**Updates are manual.** Harmony does not include the upstream updater, check GitHub for releases, download updates, or publish packages. Packaging is local and includes matching GPL source and original dependency notices. The fork's primary Windows path is [`scripts/package-harmony.py`](scripts/package-harmony.py) plus the optional offline [MSI builder](packaging/windows-msi.md). Close Harmony yourself before replacing program files. Existing data and credentials retain their legacy storage identity; packaging does not migrate accounts or modify installed shortcuts.
+**Settings → About** checks Harmony’s public GitHub releases. Windows x64 can verify a downloaded installer against Harmony’s signed update manifest and run it on the next full quit. Automatic checks and downloads are optional.
+
+Games can share Rich Presence through Discord’s local desktop RPC, and the **Activity** tab on a profile shows available history. In a Discord conversation, use the composer’s **+** menu to schedule a message or record and review a voice message. The local schedule sends while Harmony is running and connected to that account.
 
 ---
 
@@ -101,10 +103,21 @@ stays up while you read other channels, busy voice channels say how long
 their call has gone on, and pointing at a Discord voice channel shows who is
 in it, who is live and whose camera is on.
 
+Choose a supported resolution and frame rate in the Share menu. The call
+connection's Stream tab shows the output size and measured sending frame rate.
+
 The noise suppression could be better, though. Know an open source one that
 does a better job? PLEASE tell me.
 
 <img src="docs/images/features/voice.webp" alt="A voice channel of seven people, two with their cameras on. One person's stream opens large, then the grid comes back.">
+
+### Local profiles, Quests and Orbs
+
+**Settings → Local Profile** previews and saves a font, banner, avatar decoration
+and colors for your own cards on this device. **Settings → Quests & Orbs** reads
+your reported Quest progress, balance and Orbs Shop listings when Discord
+provides them. Open a Quest or item in Discord with the same account to
+participate, check eligibility or confirm a redemption.
 
 ### Forums and polls
 
@@ -129,13 +142,13 @@ change as you type each color.
 ### Games on your profile
 
 The game you play, found among your running programs on Linux, Windows and
-macOS, Steam's and Wine's included, and on Linux the Rich Presence games send,
+macOS, Steam's and Wine's included, and the Rich Presence games send on Windows and Linux,
 with details, elapsed time, images and buttons.
 
 **Settings → Game activity** turns sharing on and off as Discord's own setting
 does, and names games Yapfast doesn't know. See
 [game detection](docs/discord/people.md#game-detection) and
-[Rich Presence](docs/discord/people.md#linux-rich-presence).
+[Rich Presence](docs/discord/people.md#rich-presence).
 
 What your linked Spotify account plays shows as "Listening to Spotify" with only
 Yapfast open, from any player, as Discord's own "Display Spotify as your status"

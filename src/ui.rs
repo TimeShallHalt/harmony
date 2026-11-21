@@ -37,6 +37,7 @@ use crate::drop::Drag;
 use crate::{autostart, custom_emoji, emoji, emoji_text, graphics, zoom};
 
 mod about;
+mod release_updates;
 mod active_now;
 mod app_commands;
 mod appearance;
@@ -63,10 +64,13 @@ mod pictures;
 mod placement;
 mod polls;
 mod profile;
+mod local_profile;
+mod orbs;
 mod profile_media;
 #[cfg(test)]
 mod profile_media_tests;
 mod refresh;
+mod scheduled;
 mod server_settings;
 mod shell;
 mod stickers;
@@ -108,6 +112,9 @@ mod update4_read_all_tests;
 #[cfg(test)]
 mod update4_tests;
 mod viewer_picture;
+mod voice_notes;
+#[cfg(test)]
+mod voice_notes_tests;
 mod yapfast;
 
 use callbacks::bind_callbacks;
@@ -232,6 +239,7 @@ pub fn run(
     let adapter = Adapter::new(Arc::new(runtime), root, &window)?;
     bind_callbacks(&window, &adapter);
 
+    if !preview { release_updates::start(&adapter); }
     new_tags::start(&adapter);
     watch_window(&window, &adapter);
     adapter.borrow_mut().watch_away();
@@ -302,7 +310,11 @@ pub fn run(
             "the window did not appear".into(),
             "Harmony's window did not appear",
         ),
-        Ok(()) => Ok(if restart { Exit::Restart } else { Exit::Closed }),
+        Ok(()) if restart => Ok(Exit::Restart),
+        Ok(()) => {
+            adapter.updates.finish()?;
+            Ok(Exit::Closed)
+        }
     }
 }
 
@@ -1229,6 +1241,9 @@ struct KeptStickerUse {
 #[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct Layout {
+    harmony_release_checks: bool,
+    harmony_release_downloads: bool,
+    harmony_check_hours: Option<u64>,
     sidebar_width: Option<f32>,
     /// The width of a Discord thread shown beside its channel.
     aside_width: Option<f32>,
@@ -2091,9 +2106,12 @@ struct Icons {
 }
 
 struct Adapter {
+    updates: release_updates::Updates,
     // Cancel the UI event receiver before releasing the actor and runtime.
     events: Option<slint::JoinHandle<()>>,
     backend: Option<Backend>,
+    #[cfg(test)]
+    backend_command_count: usize,
     runtime: Arc<BackgroundRuntime>,
     root: PathBuf,
     layout: Layout,
@@ -2110,6 +2128,10 @@ struct Adapter {
     window: slint::Weak<YapfastWindow>,
     away: away::Away,
     call_timer: call_timer::CallTimer,
+    scheduled: scheduled::Controller,
+    local_profile: local_profile::Editor,
+    #[cfg(feature = "discord")]
+    orbs_shown: Option<Arc<yapfast_core::yapfast_discord::orbs::Overview>>,
     /// Ticks ActivityClock while a profile on screen times an activity, or
     /// the channel list a busy voice channel's call.
     activity_clock: slint::Timer,
@@ -2279,6 +2301,8 @@ struct Adapter {
     dialog: Option<slint::JoinHandle<()>>,
     /// Reads the microphone while the input menu shows its level.
     meter: Option<InputMeter>,
+    #[cfg(feature = "discord")]
+    voice_notes: voice_notes::Recorder,
     /// Films with the chosen camera while voice settings try it.
     camera_test: Option<(yapfast_core::camera::Camera, yapfast_core::picture::Feed)>,
     /// Films for a preview call with the camera on.
@@ -2519,9 +2543,16 @@ impl Adapter {
         let notifier = crate::notify::Notifier::start(open_from_notification, &root);
         Ok(Rc::new_cyclic(|weak| {
             RefCell::new(Self {
+                updates: Default::default(),
                 events: None,
                 backend: None,
+                #[cfg(test)]
+                backend_command_count: 0,
                 runtime,
+                scheduled: scheduled::Controller::new(&root),
+                local_profile: Default::default(),
+                #[cfg(feature = "discord")]
+                orbs_shown: None,
                 root,
                 layout,
 
@@ -2608,6 +2639,8 @@ impl Adapter {
                 viewer_size: None,
                 dialog: None,
                 meter: None,
+                #[cfg(feature = "discord")]
+                voice_notes: voice_notes::Recorder::default(),
                 camera_test: None,
                 preview_camera: None,
                 frame_ids: vec![],
@@ -2718,6 +2751,14 @@ impl Adapter {
 
     /// Present the existing models and state in a new window.
     fn attach(&mut self, window: &YapfastWindow) {
+        #[cfg(feature = "discord")]
+        {
+            self.app.dispatch(Action::CloseOrbs);
+            self.orbs_shown = None;
+        }
+        self.local_profile
+            .editing(window, false, self.app.state.cosmetics);
+        self.local_profile.redraw_account = true;
         self.models.attach(window);
         self.layout.apply(window);
 
@@ -2891,6 +2932,7 @@ impl Adapter {
             events.abort();
         }
         self.backend = None;
+        self.scheduled_context_changed();
     }
 
     fn execute(&mut self, effects: Vec<Effect>) {
@@ -2948,6 +2990,7 @@ impl Adapter {
                             adapter.app.stopped();
                             adapter.call_timer.observe(None);
                             adapter.backend = None;
+                            adapter.scheduled_context_changed();
                             if let Some(window) = window {
                                 adapter.refresh(&window);
                             }
@@ -3044,6 +3087,13 @@ impl Adapter {
                 Effect::Backend(Command::Typing { .. })
                     if !self.layout.share_typing.unwrap_or(true) => {}
                 Effect::Backend(command) => {
+                    #[cfg(test)]
+                    {
+                        self.backend_command_count += 1;
+                    }
+                    if self.scheduled_before_command(&command).is_err() {
+                        continue;
+                    }
                     let result = match &self.backend {
                         Some(backend) => backend.send(command),
                         None => Err(command),
@@ -3225,6 +3275,7 @@ impl Adapter {
         );
         let effects = self.app.dispatch(action);
         self.execute(effects);
+        self.scheduled_context_changed();
         if quiet {
             return;
         }
@@ -3248,6 +3299,16 @@ impl Adapter {
 
     /// Applies a backend event; the caller shows what it can have changed after.
     fn apply(&mut self, event: Event) -> Reach {
+        if let Event::ScheduledResult {
+            ref account,
+            ref id,
+            ref result,
+        } = event
+        {
+            self.scheduled_result(account, id, result.clone());
+            return Reach::EVERYTHING;
+        }
+        self.scheduled_before_event(&event);
         if let Event::HistoryLoaded {
             room,
             direction,
@@ -3316,6 +3377,7 @@ impl Adapter {
             Reach::EVERYTHING
         };
         self.execute(effects);
+        self.scheduled_context_changed();
         reach
     }
 }

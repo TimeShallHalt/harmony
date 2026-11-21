@@ -11556,13 +11556,15 @@ checksum = "aee1b19627c7c60102ab80d3a9cbe18de90bfe03bfa6c3715447681f0e8c8af6"
 
 [[package]]
 name = "yapfast"
-version = "1.1.0"
+version = "1.3.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "base64 0.22.1",
  "emojis",
  "futures-util",
  "harfrust",
+ "hex",
  "i-slint-backend-testing",
  "i-slint-core",
  "i-slint-renderer-skia",
@@ -11572,7 +11574,9 @@ dependencies = [
  "memmap2",
  "png",
  "qrcode",
+ "reqwest 0.13.5",
  "rfd",
+ "ring",
  "serde",
  "serde_json",
  "skia-safe",
@@ -11602,6 +11606,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "cc",
+ "chacha20poly1305 0.10.1",
  "chrono",
  "chrono-tz",
  "cxx",
@@ -11647,6 +11652,7 @@ dependencies = [
  "windows-core",
  "x264-src",
  "yapfast-discord",
+ "zeroize",
 ]
 
 [[package]]
@@ -11685,6 +11691,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "webrtc-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

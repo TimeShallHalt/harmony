@@ -1,5 +1,22 @@
 # Discord in Harmony
 
+**Settings → Quests & Orbs** reads the linked account's current and claimed
+Quests, wallet, Orbs catalog and collectible purchases on opening the page or
+choosing Refresh. A return to Harmony after opening a Quest or Shop item reads
+them again. Each response belongs to the account and request that opened it.
+An unavailable read leaves its section unknown. Discord handles participation,
+eligibility checks, item previews and checkout confirmation. These consumer
+reads can vary by session. Discord documents the user flows in its
+[Quests FAQ](https://support.discord.com/hc/en-us/articles/22225719947543-Discord-Quests-FAQ)
+and [Orbs FAQ](https://support.discord.com/hc/en-us/articles/30593690165783-Discord-Orbs-FAQ).
+
+The existing authenticated Discord client reads `/quests/@me` and
+`/quests/@me/claimed` for progress and reward history. It reads the wallet
+from `/users/@me/virtual-currency/balance`, requests the Orbs tab from
+`/collectibles-categories/v2`, and matches collectible SKU IDs against
+`/users/@me/collectibles-purchases`. All five requests use GET. Discord’s
+checkout presents the final account, price and confirmation.
+
 | Area | Works on Linux | Open |
 | --- | --- | --- |
 | [Linking](#account-linking) | QR code from Settings, or the sign-in of a build without Matrix; unlinking; Discord's captcha, in the browser | A captcha solved against real Discord |

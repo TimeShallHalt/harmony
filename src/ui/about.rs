@@ -1,4 +1,4 @@
-//! Read-only About page. No worker, timer, network or installation callbacks.
+//! Build identity and clipboard actions for About. Release controls are bound in release_updates.
 use super::*;
 
 pub(super) fn bind(window: &YapfastWindow) {
@@ -34,7 +34,7 @@ mod tests {
         bind_callbacks(&window, &adapter);
         let expected = crate::build_info::BuildInfo::current().diagnostics();
         assert_eq!(window.global::<HarmonyAbout>().get_running_info(), expected);
-        assert!(expected.contains("Updater not included in this build."));
+        assert!(expected.contains("Updates: Harmony public releases with publisher-signed Windows installers."));
         assert!(!expected.contains(&dir.path().display().to_string()));
         window.global::<HarmonyAbout>().invoke_copy_diagnostics();
         let copied = i_slint_core::window::WindowInner::from_pub(window.window())

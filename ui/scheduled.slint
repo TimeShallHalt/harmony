@@ -1,0 +1,142 @@
+//! Native queue UI model. Kept separate so targeted tests import production UI.
+export struct ScheduledRow { id: string, destination: string, due: string, body: string, status: string, editable: bool, cancellable: bool, dismissible: bool }
+export global Scheduling {
+    in-out property <bool> available;
+    in-out property <bool> can-schedule;
+    in-out property <bool> open;
+    in-out property <bool> composing;
+    in-out property <bool> reviewed;
+    in-out property <string> body;
+    in property <string> review-body;
+    in-out property <string> time;
+    in-out property <string> zone: "Local";
+    in-out property <[string]> zones;
+    in-out property <int> zone-index;
+    callback pick-zone(int);
+    in-out property <string> utc;
+    in-out property <string> attachments;
+    in-out property <string> destination;
+    in-out property <string> error;
+    in-out property <string> connection;
+    in-out property <bool> storage-ready;
+    in-out property <string> confirmation;
+    in-out property <string> retention: "Messages and files are encrypted on this device with a key in OS secure storage. Completed entries stay until dismissed. Unlinking the account removes its queue.";
+    in-out property <string> attachment-policy: "Attachments are frozen when saved. To replace a file, cancel this entry and schedule a new message.";
+    callback request-storage(string);
+    callback confirm-storage;
+    callback abort-storage;
+    in-out property <[ScheduledRow]> entries;
+    callback compose;
+    callback list;
+    callback close;
+    callback changed;
+    callback review;
+    callback save;
+    callback edit(string);
+    callback cancel(string);
+    callback dismiss(string);
+}
+import { Theme } from "theme.slint";
+import { ComboBox } from "std-widgets.slint";
+import { ActionButton, IconButton, TextField } from "controls.slint";
+import { Composer } from "composer.slint";
+import { ScrollView } from "scrollview.slint";
+export component ScheduledDialog inherits Rectangle {
+    background: #00000099;
+    TouchArea { clicked => { Scheduling.close(); } }
+    Rectangle {
+        width: min(680px, root.width - 40px); height: min(680px, root.height - 40px);
+        x: (root.width - self.width) / 2; y: (root.height - self.height) / 2;
+        background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 12px;
+        accessible-role: groupbox; accessible-label: "Local scheduled messages";
+        TouchArea { }
+        FocusScope {
+            key-pressed(event) => { if event.text == Key.Escape { Scheduling.close(); return accept; } return reject; }
+            VerticalLayout {
+                padding: 20px; spacing: 10px;
+                HorizontalLayout {
+                    Text { text: Scheduling.composing ? "Schedule a message locally" : "Local scheduled messages"; color: Theme.text; font-size: 20px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                    IconButton { icon: @image-url("icons/x.svg"); label: "Close scheduled messages"; clicked => { Scheduling.close(); } }
+                }
+                Text { text: "Harmony sends while this account is online. If you close the app, it checks the queue when you return. Messages more than 24 hours late need your review."; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
+                Text { text: Scheduling.connection; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                if Scheduling.error != "": Text { text: Scheduling.error; color: Theme.danger; font-size: 13px; wrap: word-wrap; }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        padding-right: 8px; spacing: 10px; alignment: start;
+                        if Scheduling.composing: VerticalLayout {
+                            spacing: 9px;
+                            Text { text: "TO " + Scheduling.destination; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                            Composer {
+                                label: "Scheduled message content"; placeholder: "Message (up to 2,000 characters)"; text <=> Scheduling.body;
+                                background: Theme.sunken;
+                                edited(text) => { Scheduling.changed(); }
+                                accepted => { Scheduling.review(); }
+                                escaped => { Scheduling.close(); return true; }
+                                paste => { self.paste-text(); }
+                            }
+                            Text { text: "Due date and time — YYYY-MM-DD HH:MM"; color: Theme.secondary; font-size: 13px; }
+                            TextField { label: "Scheduled due date and time"; placeholder: "2026-11-07 18:30"; text <=> Scheduling.time; edited(text) => { Scheduling.changed(); } }
+                            Text { text: "Choose a time zone or enter a UTC offset such as +05:45."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            ComboBox { accessible-label: "Choose IANA timezone"; model: Scheduling.zones; current-index: Scheduling.zone-index; selected => { Scheduling.pick-zone(self.current-index); } }
+                            TextField { label: "Scheduled timezone"; text <=> Scheduling.zone; placeholder: "Local"; edited(text) => { Scheduling.changed(); } }
+                            Text { text: "Attachments (local snapshots on save; max 10 × 10 MiB, 25 MiB total)"; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
+                            Text { text: Scheduling.attachment-policy; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            Text { text: Scheduling.attachments; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                            if Scheduling.reviewed: Rectangle {
+                                background: Theme.sunken; border-radius: 6px;
+                                VerticalLayout { padding: 10px; spacing: 6px;
+                                    Text { text: Scheduling.utc; color: Theme.text; font-weight: 700; font-size: 14px; wrap: word-wrap; }
+                                    Text { text: Scheduling.review-body; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
+                                }
+                            }
+                            HorizontalLayout {
+                                alignment: end; spacing: 8px;
+                                ActionButton { text: "Back to queue"; ghost: true; clicked => { Scheduling.list(); } }
+                                ActionButton { text: "Review UTC and content"; clicked => { Scheduling.review(); } }
+                                ActionButton { text: "Save schedule"; primary: true; enabled: Scheduling.reviewed; clicked => { Scheduling.save(); } }
+                            }
+                        }
+                        Text { text: Scheduling.retention; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                        if !Scheduling.composing: HorizontalLayout { spacing: 8px; alignment: start;
+                            if Scheduling.storage-ready: ActionButton { text: "Rotate scheduler key"; small: true; clicked => { Scheduling.request-storage("rotate"); } }
+                            if Scheduling.storage-ready && Scheduling.available: ActionButton { text: "Purge this account"; small: true; clicked => { Scheduling.request-storage("purge"); } }
+                            if !Scheduling.storage-ready: ActionButton { text: "Recover / reopen storage"; small: true; clicked => { Scheduling.request-storage("recover"); } }
+                            if !Scheduling.storage-ready: ActionButton { text: "Encrypt legacy queue"; small: true; clicked => { Scheduling.request-storage("migrate"); } }
+                        }
+                        if Scheduling.confirmation != "": VerticalLayout { spacing: 8px;
+                            Text { text: Scheduling.confirmation; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                            HorizontalLayout { alignment: end; spacing: 8px;
+                                ActionButton { text: "Keep current storage"; clicked => { Scheduling.abort-storage(); } }
+                                ActionButton { text: "Confirm storage action"; clicked => { Scheduling.confirm-storage(); } }
+                            }
+                        }
+                        if !Scheduling.composing && Scheduling.entries.length == 0: Text { text: "No local scheduled messages for this account."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                        if !Scheduling.composing: VerticalLayout {
+                            spacing: 10px;
+                            for entry in Scheduling.entries: Rectangle {
+                                background: Theme.sunken; border-radius: 6px;
+                                VerticalLayout { padding: 12px; spacing: 7px;
+                                    Text { text: entry.destination; color: Theme.text; font-size: 14px; font-weight: 700; wrap: word-wrap; }
+                                    Text { text: entry.due; color: Theme.secondary; font-size: 12px; wrap: word-wrap; }
+                                    Text { text: entry.body; color: Theme.text; font-size: 14px; wrap: word-wrap; }
+                                    Text { text: entry.status; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
+                                    HorizontalLayout { alignment: end; spacing: 8px;
+                                        if entry.editable: ActionButton { text: "Edit / reschedule"; small: true; clicked => { Scheduling.edit(entry.id); } }
+                                        if entry.cancellable: ActionButton { text: "Cancel send"; small: true; clicked => { Scheduling.cancel(entry.id); } }
+                                        if entry.dismissible: ActionButton { text: "Dismiss local record"; small: true; clicked => { Scheduling.dismiss(entry.id); } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !Scheduling.composing: HorizontalLayout { alignment: end; spacing: 8px;
+                    ActionButton { text: "Schedule composer message"; enabled: Scheduling.can-schedule; clicked => { Scheduling.compose(); } }
+                    ActionButton { text: "Close"; clicked => { Scheduling.close(); } }
+                }
+            }
+        }
+    }
+}

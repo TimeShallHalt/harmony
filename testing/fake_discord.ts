@@ -3,6 +3,9 @@
 // mirrors the Matrix fixture (Alice reads #general, Bob posts, three people sit
 // in the Lounge voice channel). Run `bun testing/fake_discord.ts --port 18400`,
 // then start Yapfast with YAPFAST_DISCORD_TEST_SERVER=http://127.0.0.1:18400.
+// The Quest, claimed-history, Orbs balance and Shop GETs return fixtures.
+// /_control/orbs reads the requested methods and paths. POSTing a fixture
+// mode there models a hosted checkout succeeding, declining, or losing sync.
 // `--env PATH` puts an environment's content in place of all of the below's,
 // for demos, promo recordings and screenshots: the account, people with
 // their pictures, presences and friendships, DMs and groups, servers with
@@ -6383,6 +6386,36 @@ async function api(req: Request, path: string, origin: string): Promise<Response
     return json(wirePrivate(id, channel, "objects"));
   }
 
+  if (["/quests/@me", "/quests/@me/claimed", "/users/@me/virtual-currency/balance", "/collectibles-categories/v2", "/users/@me/collectibles-purchases"].includes(path)) {
+    orbsReads.push([method, path]);
+    if (method !== "GET") return new Response(null, { status: 405 });
+    if (orbsMode === "unavailable" || (orbsMode === "wallet-offline" && path.endsWith("/balance"))) {
+      return new Response(null, { status: 503 });
+    }
+    const completed = ["completed", "claimed", "claim-expired"].includes(orbsMode);
+    const config = { messages: { quest_name: "A quiet afternoon" }, expires_at: "2099-06-01T00:00:00Z",
+      task_config_v2: { tasks: { PLAY_ON_DESKTOP: { target: 900 } } },
+      rewards_config: { rewards: [{ messages: { name: "100 Orbs" } }],
+        rewards_expire_at: orbsMode === "claim-expired" ? "2025-07-01T00:00:00Z" : null } };
+    if (path === "/quests/@me") return json({ quests: [{ id: "901", config, user_status: orbsMode === "available" ? null : {
+      enrolled_at: "2025-06-01T00:00:00Z", progress: { PLAY_ON_DESKTOP: { value: completed ? 900 : 300 } },
+      completed_at: completed ? "2025-06-02T00:00:00Z" : null,
+      claimed_at: null,
+    }}], excluded_quests: [{ id: "902" }], quest_enrollment_blocked_until: null });
+    if (path === "/quests/@me/claimed") return json({ quests: orbsMode === "claimed" ? [{
+      id: "901", config: { messages: config.messages, rewards: [{ name: "100 Orbs", orb_quantity: 100 }] },
+      user_status: { claimed_at: "2025-06-02T01:00:00Z", orb_quantity_claimed: 100 },
+    }] : [] });
+    if (path === "/users/@me/collectibles-purchases") return json(orbsMode === "redeemed" ? [{ sku_id: "903" }] : []);
+    if (path === "/users/@me/virtual-currency/balance") return json({ balance: orbsMode === "claimed" ? 350 : orbsMode === "redeemed" ? 50 : 250 });
+    if (url.searchParams.get("tab") !== "orbs") return new Response(null, { status: 400 });
+    return json({ categories: [{ products: [
+      { sku_id: "903", name: "Night sky", summary: "A starry decoration", prices: { "0": { country_prices: { prices: [{ currency: "discord_orb", amount: 200 }] } } } },
+      { sku_id: "904", name: "Cash item", prices: { "0": { country_prices: { prices: [{ currency: "usd", amount: 199 }] } } } },
+    ] }, { is_orbs_exclusive: true, products: [
+      { sku_id: "905", name: "Aurora", summary: "An animated backdrop", premium_type: 2 },
+    ] }], collections: [] });
+  }
   if (method === "GET" && path === "/users/@me") {
     return json({ ...wireUser(users.alice), email: world?.email ?? "alice@example.org", verified: true });
   }
@@ -8806,6 +8839,8 @@ function withDeviceCookie(req: Request, response: Response) {
 
 // Private test diagnostics: how much media the UI actually asks for.
 const mediaRequests = { avatars: 0, previews: 0 };
+const orbsReads: [string, string][] = [];
+let orbsMode = "active";
 // The query of each request for a channel's messages, oldest first.
 const historyRequests: string[] = [];
 // Each forward's channel and its X-Context-Properties, oldest first.
@@ -8934,6 +8969,10 @@ const server = Bun.serve<SocketData>({
       nitro = !url.searchParams.has("off");
       dispatch("USER_UPDATE", { ...wireUser(users.alice), premium_type: nitro ? 2 : 0 });
       return new Response(nitro ? "Alice has Nitro\n" : "Alice has no Nitro\n");
+    }
+    if (path === "/_control/orbs") {
+      if (req.method === "POST") orbsMode = await req.text();
+      return Response.json(orbsReads);
     }
     if (path === "/_control/profile") {
       const { global_name, avatar } = users.alice;

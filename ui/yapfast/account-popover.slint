@@ -64,7 +64,11 @@ export component AccountPopover inherits Rectangle {
                 Rectangle {
                     x: 12px; y: 36px; width: 88px; height: 88px;
                     border-radius: 44px; background: header.ring;
-                    Avatar { size: 80px; initial: root.initial; tint: root.tint; picture: root.picture; decoration-url: AccountLook.decoration-url; animate: true; }
+                    Avatar { size: 80px; initial: root.initial; tint: root.tint; picture: root.picture; decoration-url: root.profile.local-decoration ? "" : AccountLook.decoration-url; animate: true; }
+                    if root.profile.local-decoration: Image {
+                        x: -4px; y: -4px; width: 96px; height: 96px; source: root.profile.decoration; image-fit: contain;
+                        accessible-role: image; accessible-label: "Local avatar decoration";
+                    }
                     StatusDot { x: 66px; y: 65px; width: 20px; height: 20px; border-radius: 10px; presence: root.status == "invisible" ? "offline" : root.status; ring: header.ring; }
                 }
                 HorizontalLayout {

@@ -23,6 +23,8 @@ const UNAUTHORIZED: &str = "Discord rejected the login. Link Discord again.";
 pub struct Sending<'a> {
     /// Matches the message to its echo from the gateway.
     pub nonce: &'a str,
+    /// Ask Discord to return an earlier send with the same author and nonce.
+    pub enforce_nonce: bool,
     /// The message it replies to, in the same channel.
     pub reply: Option<&'a str>,
     /// Whether a reply notifies the author of what it replies to.
@@ -302,6 +304,25 @@ pub struct Api {
 const DOWNLOADS: usize = 8;
 
 impl Api {
+    pub(crate) async fn orbs(&self) -> crate::orbs::Overview {
+        let read = |path: &str| self.json(self.request(Method::GET, path));
+        let (quests, history, wallet, shop, purchases) = tokio::join!(
+            read("/quests/@me"),
+            read("/quests/@me/claimed"),
+            read("/users/@me/virtual-currency/balance"),
+            read("/collectibles-categories/v2?tab=orbs&variants_return_style=1"),
+            read("/users/@me/collectibles-purchases?variants_return_style=1")
+        );
+        crate::orbs::overview(
+            &quests.unwrap_or_default(),
+            &history.unwrap_or_default(),
+            &wallet.unwrap_or_default(),
+            &shop.unwrap_or_default(),
+            &purchases.unwrap_or_default(),
+            chrono::Utc::now(),
+        )
+    }
+
     pub fn new(token: String) -> Result<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let http = Client::builder()
@@ -515,7 +536,7 @@ impl Api {
 
     /// The application a game's Rich Presence names, for its name, as the
     /// desktop client asks when a game connects.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pub(crate) async fn rpc_application(&self, id: &str) -> Result<Value> {
         let path = format!("/oauth2/applications/{id}/rpc");
         self.json(self.request(Method::GET, &path)).await
@@ -523,7 +544,7 @@ impl Api {
 
     /// Discord's media proxy's names for images a game's Rich Presence gives
     /// by address, as the desktop client asks for them.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pub(crate) async fn rpc_external_assets(&self, id: &str, urls: &[&str]) -> Result<Value> {
         let path = format!("/applications/{id}/external-assets");
         self.json(with_json(
@@ -534,7 +555,7 @@ impl Api {
     }
 
     /// The images an application uploaded, by name, for its Rich Presence.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pub(crate) async fn rpc_assets(&self, id: &str) -> Result<Value> {
         let path = format!("/oauth2/applications/{id}/assets");
         self.json(self.request(Method::GET, &path)).await
@@ -593,6 +614,9 @@ impl Api {
         uploads: &[Upload],
     ) -> Result<Value> {
         let mut body = message_body(content, options.nonce);
+        if options.enforce_nonce {
+            body["enforce_nonce"] = true.into();
+        }
         if options.silent {
             body["flags"] = SUPPRESS_NOTIFICATIONS.into();
         }
@@ -618,6 +642,28 @@ impl Api {
         let path = format!("/channels/{channel}/messages");
         self.json(with_json(self.request(Method::POST, &path), &body))
             .await
+    }
+
+    /// Discord accepts a voice message in one multipart Create Message request.
+    pub async fn send_voice_note(
+        &self,
+        channel: &str,
+        note: &crate::voice_note::Note,
+        nonce: &str,
+    ) -> Result<Value> {
+        let payload = note.message_body(nonce)?.to_string();
+        let (mime, body) = form(
+            &[("payload_json", &payload)],
+            "files[0]",
+            (crate::voice_note::FILENAME, "audio/ogg", note.data()),
+        );
+        let path = format!("/channels/{channel}/messages");
+        let request = self
+            .request(Method::POST, &path)
+            .header(header::CONTENT_TYPE, mime)
+            .body(body)
+            .timeout(self.stall);
+        self.json(request).await
     }
 
     /// Posts a poll, a message with nothing else.
@@ -1669,7 +1715,7 @@ impl Api {
         file: (&str, &str, &[u8]),
     ) -> Result<Value> {
         let path = format!("/guilds/{guild}/stickers");
-        let (content_type, body) = form(&fields, file);
+        let (content_type, body) = form(&fields, "file", file);
         self.json(
             self.request(Method::POST, &path)
                 .header(header::CONTENT_TYPE, content_type)
@@ -2674,7 +2720,7 @@ fn post_body(
 
 /// A `multipart/form-data` body of text `fields` and a file, given by its
 /// name, type and bytes, with its content type.
-fn form(fields: &[(&str, &str)], file: (&str, &str, &[u8])) -> (String, Vec<u8>) {
+fn form(fields: &[(&str, &str)], file_field: &str, file: (&str, &str, &[u8])) -> (String, Vec<u8>) {
     let boundary = format!("yapfast{:016x}", rand::random::<u64>());
     let mut body = Vec::with_capacity(file.2.len() + 512);
     for (name, value) in fields {
@@ -2689,7 +2735,7 @@ fn form(fields: &[(&str, &str)], file: (&str, &str, &[u8])) -> (String, Vec<u8>)
     let filename = filename.replace(['"', '\r', '\n'], "_");
     body.extend_from_slice(
         format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
         )
         .as_bytes(),
     );
@@ -2769,6 +2815,10 @@ fn discord_file(url: &str) -> bool {
         .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()));
     proxy || host == "cdn.discordapp.com" || host == "media.discordapp.net"
 }
+
+#[cfg(test)]
+#[path = "api/voice_note_tests.rs"]
+mod voice_note_tests;
 
 #[cfg(test)]
 mod tests {

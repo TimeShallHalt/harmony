@@ -429,6 +429,7 @@ export struct ProfileFrameRow { url: string, kind: string, anchor: string, front
 export struct ProfileData {
     name-font: int, name-effect: int, name-colors: [color],
     decoration: image,
+    local-decoration: bool,
     avatar-media: bool, banner-media: bool,
     local-timezone-owner: string, local-timezone: string, local-time: string,
     id: string, name: string, initial: string, tint: color, picture: image,
@@ -494,7 +495,7 @@ export struct ProfileData {
     /// It's a bot's.
     bot: bool,
     /// Discord's answer to what they did lately came, or none is waited for.
-    recent-known: bool,
+    recent-known: bool, recent-unavailable: bool,
     /// Their Discord board and wishlist, each with a line about it: why it
     /// doesn't show, or that it's private.
     widgets: [ProfileWidgetRow], board-note: string,
@@ -1414,7 +1415,7 @@ export component ProfileCard inherits Rectangle {
                                 source: root.data.decoration; image-fit: contain;
                                 width: root.avatar-size * 1.2; height: self.width;
                                 x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-                                accessible-role: image; accessible-label: "Received avatar decoration (still preset)";
+                                accessible-role: image; accessible-label: root.data.local-decoration ? "Local avatar decoration" : "Received avatar decoration (still preset)";
                             }
                             if root.data.presence != "" && root.data.presence != "offline": StatusDot {
                                 x: parent.width - self.width - (root.large ? 14px : 10px); y: parent.height - self.height - (root.large ? 14px : 10px);
@@ -1997,7 +1998,12 @@ export component ProfileModal inherits Rectangle {
             }
             // Discord's words for an empty tab, once it has said; a bot's
             // profile words its servers as the client's does.
-            if root.empty-tab: ProfileTabEmpty {
+            if root.page == 0 && root.data.recent-unavailable: HorizontalLayout {
+                alignment: start; spacing: 8px;
+                Text { text: "Couldn't load activity history."; color: root.ink2; vertical-alignment: center; }
+                ActionButton { text: "Retry"; small: true; clicked => { root.tab-opened(0); } }
+            }
+            if root.empty-tab && !(root.page == 0 && root.data.recent-unavailable): ProfileTabEmpty {
                 vertical-stretch: 1;
                 ink: root.ink; ink2: root.ink2;
                 heading: root.page == 0 ? (root.data.own ? "You don't have any activity here" : root.data.name + " doesn't have any activity to share here")
@@ -2035,7 +2041,7 @@ export component ProfileModal inherits Rectangle {
                                     alignment: center; spacing: 2px; horizontal-stretch: 1;
                                     Text { text: entry.title; color: root.ink; font-size: 14px; font-weight: 600; overflow: elide; }
                                     if entry.subtitle != "": Text { text: entry.subtitle; color: root.ink2; font-size: 13px; overflow: elide; }
-                                    if entry.when != "": Text { text: (entry.music ? "\u{266b} " : "") + entry.when; color: root.ink3; font-size: 12px; }
+                                    if entry.when != "": Text { text: (entry.music ? "\u{266b} " : "") + entry.when; color: root.ink3; font-size: 12px; wrap: word-wrap; }
                                 }
                             }
                         }

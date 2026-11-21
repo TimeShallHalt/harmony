@@ -38,10 +38,11 @@ pub mod oauth;
 pub mod opus;
 pub mod own_activity;
 pub mod profile;
+pub mod orbs;
 pub mod profile_effect;
 pub mod ready;
 pub mod remote_auth;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod rpc;
 pub mod rtp;
 pub mod scheduled_event;
@@ -58,6 +59,7 @@ pub mod token;
 pub mod unread;
 pub mod voice;
 mod voice_connection;
+pub mod voice_note;
 mod websocket;
 pub mod widgets;
 pub mod wishlist;

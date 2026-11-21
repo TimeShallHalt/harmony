@@ -1007,6 +1007,23 @@ fn keep_note(notes: &Notes, user: &str, note: &str) {
 }
 
 impl Discord {
+    pub async fn orbs(&self, owner: &str) -> crate::orbs::Overview {
+        let snapshots = self.snapshots();
+        let current = || {
+            let s = snapshots.borrow();
+            s.status == Status::Online && s.user_id.as_deref() == Some(owner)
+        };
+        if !current() {
+            return Default::default();
+        }
+        let report = self.api.orbs().await;
+        if current() {
+            report
+        } else {
+            Default::default()
+        }
+    }
+
     /// Connects on the current Tokio runtime and keeps reconnecting until
     /// Discord rejects the token.
     pub fn start(token: String) -> Result<Self> {
@@ -1678,6 +1695,34 @@ impl Discord {
         let value = sent?;
         self.write_names().learn_message(server(guild), &value);
         message::parse(&value).ok_or_else(|| anyhow!("could not understand Discord's answer"))
+    }
+
+    /// Send a reviewed recording only under the Discord account that recorded it.
+    pub async fn send_voice_note(
+        &self,
+        channel: &str,
+        account: &str,
+        note: &crate::voice_note::Note,
+        nonce: &str,
+    ) -> Result<()> {
+        {
+            let snapshot = self.snapshots.borrow();
+            anyhow::ensure!(
+                snapshot.status == Status::Online && snapshot.user_id.as_deref() == Some(account),
+                "Reconnect to the account that recorded this message."
+            );
+        }
+        let answer = self.api.send_voice_note(channel, note, nonce).await?;
+        let message = message::parse(&answer)
+            .ok_or_else(|| anyhow!("Discord returned an incomplete voice message."))?;
+        anyhow::ensure!(
+            message.author_id == account
+                && message.channel_id == channel
+                && message.nonce.as_deref() == Some(nonce)
+                && message.voice.is_some(),
+            "Discord did not confirm this voice message. Check the conversation before retrying."
+        );
+        Ok(())
     }
 
     /// Uploads files for a message in `channel`, given as their names and
@@ -2884,7 +2929,8 @@ impl Discord {
 
     /// What someone did lately, for their full profile's Activity tab.
     pub async fn recent_activity(&self, user: &str) -> Result<Vec<profile::RecentEntry>> {
-        Ok(profile::recent_entries(&self.api.outbox(user).await?))
+        profile::recent_entries(&self.api.outbox(user).await?)
+            .ok_or_else(|| anyhow!("Discord did not return an activity list"))
     }
 
     /// Names a board's games and applications. What Discord doesn't say

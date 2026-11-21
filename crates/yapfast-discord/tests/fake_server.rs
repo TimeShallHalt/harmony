@@ -878,14 +878,15 @@ async fn live_where<T>(
 
 /// A real SDK-shaped IPC exchange all the way to the fake Gateway, while
 /// Alice has a custom status. The normal service runner opts in with a private
-/// directory so this test never takes the desktop's Discord IPC socket.
-#[cfg(target_os = "linux")]
-async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::path::Path) {
+/// socket or named pipe reserved for this test.
+#[cfg(any(target_os = "linux", windows))]
+async fn plays_through_rpc(discord: &Discord, server: &str, endpoint: &std::path::Path) {
     use serde_json::{Value, json};
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::UnixStream,
-    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[cfg(target_os = "linux")]
+    use tokio::net::UnixStream as Client;
+    #[cfg(windows)]
+    use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient as Client};
 
     struct GameProcess {
         child: std::process::Child,
@@ -897,7 +898,9 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
             let _ = self.child.wait();
         }
     }
-    let mut detected = if let Some(cache) = std::env::var_os("YAPFAST_DISCORD_GAMES_CACHE") {
+    let mut detected = if let Some(cache) =
+        std::env::var_os("YAPFAST_DISCORD_GAMES_CACHE").filter(|_| cfg!(target_os = "linux"))
+    {
         let executable = std::env::current_exe().unwrap();
         let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
         let game = directory.path().join("yapfast_detected_game");
@@ -935,13 +938,13 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
         None
     };
 
-    async fn send(stream: &mut UnixStream, opcode: u32, value: Value) {
+    async fn send(stream: &mut Client, opcode: u32, value: Value) {
         let payload = serde_json::to_vec(&value).unwrap();
         stream.write_u32_le(opcode).await.unwrap();
         stream.write_u32_le(payload.len() as u32).await.unwrap();
         stream.write_all(&payload).await.unwrap();
     }
-    async fn receive(stream: &mut UnixStream) -> Value {
+    async fn receive(stream: &mut Client) -> Value {
         timeout(Duration::from_secs(20), async {
             assert_eq!(stream.read_u32_le().await.unwrap(), 1);
             let size = stream.read_u32_le().await.unwrap();
@@ -953,10 +956,21 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
         .await
         .unwrap()
     }
-    async fn connect(directory: &std::path::Path) -> UnixStream {
-        let mut stream = UnixStream::connect(directory.join("discord-ipc-0"))
-            .await
-            .unwrap();
+    async fn connect(endpoint: &std::path::Path) -> Client {
+        let mut stream = timeout(Duration::from_secs(5), async {
+            loop {
+                #[cfg(target_os = "linux")]
+                let connected = Client::connect(endpoint.join("discord-ipc-0")).await;
+                #[cfg(windows)]
+                let connected = ClientOptions::new().open(endpoint);
+                if let Ok(stream) = connected {
+                    return stream;
+                }
+                tokio::time::sleep(Duration::from_millis(15)).await;
+            }
+        })
+        .await
+        .expect("private RPC listener did not start");
         send(
             &mut stream,
             0,
@@ -966,7 +980,7 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
         assert_eq!(receive(&mut stream).await["evt"], "READY");
         stream
     }
-    let mut first = connect(directory).await;
+    let mut first = connect(endpoint).await;
     // PING is an opaque IPC payload and must be echoed as PONG.
     send(&mut first, 3, json!({"ping":1})).await;
     assert_eq!(first.read_u32_le().await.unwrap(), 4);
@@ -1018,7 +1032,7 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
     assert_eq!(refused["evt"], "ERROR");
     assert_eq!(refused["nonce"], "invalid");
 
-    let mut second = connect(directory).await;
+    let mut second = connect(endpoint).await;
     send(
         &mut second,
         1,
@@ -1039,7 +1053,7 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
     send(
         &mut second,
         1,
-        json!({"cmd":"SET_ACTIVITY","nonce":"clear","args":{"pid":43,"activity":null}}),
+        json!({"cmd":"SET_ACTIVITY","nonce":"clear","args":{"pid":43}}),
     )
     .await;
     assert!(receive(&mut second).await["data"].is_null());
@@ -1052,7 +1066,25 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
     })
     .await;
     drop(second);
-    // Disconnect without a clear must remove the game, preserving custom status.
+    discord.set_status("invisible").await.unwrap();
+    presence_where(server, |p| {
+        p["status"] == "invisible"
+            && p["activities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|a| a["type"] == 4)
+    })
+    .await;
+    let closed = timeout(Duration::from_secs(5), first.read(&mut [0]))
+        .await
+        .unwrap();
+    assert!(
+        matches!(&closed, Ok(0))
+            || closed.is_err_and(|err| err.kind() == std::io::ErrorKind::BrokenPipe),
+        "Invisible ends the Rich Presence connection"
+    );
+    discord.set_status("online").await.unwrap();
     drop(first);
     if detected.is_some() {
         use yapfast_discord::game_detection::custom_games::{self, CustomGame};
@@ -1074,7 +1106,7 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
                 .is_some_and(|playing| playing.name == "My custom game")
         })
         .await;
-        let mut disabled_client = connect(directory).await;
+        let mut disabled_client = connect(endpoint).await;
         send(&mut disabled_client, 1, json!({"cmd":"SET_ACTIVITY","nonce":"before-disable","args":{"pid":44,"activity":{"details":"Before disabling"}}})).await;
         receive(&mut disabled_client).await;
         presence_where(server, |p| {
@@ -1091,7 +1123,7 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
         })
         .await;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-        while directory.join("discord-ipc-0").exists() {
+        while endpoint.join("discord-ipc-0").exists() {
             assert!(
                 tokio::time::Instant::now() < deadline,
                 "disabled RPC must release its socket"
@@ -1118,7 +1150,7 @@ async fn plays_through_rpc(discord: &Discord, server: &str, directory: &std::pat
         })
         .await;
         custom_games::set(Vec::new());
-        drop(connect(directory).await);
+        drop(connect(endpoint).await);
         presence_where(server, |p| {
             p["activities"]
                 .as_array()
@@ -1170,11 +1202,14 @@ struct Games {
 }
 
 impl Games {
+    #[cfg(not(windows))]
     const VARIABLES: [&str; 3] = [
         "YAPFAST_DISCORD_RPC_DIR",
         "YAPFAST_DISCORD_GAMES_CACHE",
         "YAPFAST_STEAM_DIR",
     ];
+    #[cfg(windows)]
+    const VARIABLES: [&str; 1] = ["YAPFAST_DISCORD_RPC_PIPE"];
 
     fn new() -> Games {
         // As short a path as a socket's may be, which must stay under 108
@@ -1188,8 +1223,15 @@ impl Games {
             .prefix("yapfast-rpc")
             .tempdir_in(base)
             .unwrap();
+        #[cfg(windows)]
+        let endpoint = std::path::PathBuf::from(format!(
+            r"\\.\pipe\harmony-fake-rpc-{:032x}",
+            rand::random::<u128>()
+        ));
+        #[cfg(not(windows))]
+        let endpoint = directory.path().to_owned();
         let paths = [
-            directory.path().to_owned(),
+            endpoint,
             directory.path().join("games.json"),
             directory.path().join("steam"),
         ];
@@ -3329,6 +3371,7 @@ async fn calls_and_goes_live() {
     // the fake reported lost, resent.
     let sent = sender.sent();
     assert!(sent.video_bytes > 1000, "{sent:?}");
+    assert_eq!(sent.video_frames, 5, "one completed frame despite its retransmitted packet");
     assert_eq!(sent.resent, 1);
     drop(sender);
     for codec in [Codec::Av1, Codec::H265] {
@@ -4270,9 +4313,10 @@ async fn shows_status_and_games() {
         presence["activities"][0]["state"] == "Testing Yapfast"
     })
     .await;
-    #[cfg(target_os = "linux")]
-    if let Some(directory) = std::env::var_os("YAPFAST_DISCORD_RPC_DIR") {
-        plays_through_rpc(&discord, server, std::path::Path::new(&directory)).await;
+    #[cfg(any(target_os = "linux", windows))]
+    {
+        let endpoint = std::env::var_os(Games::VARIABLES[0]).expect("private RPC endpoint");
+        plays_through_rpc(&discord, server, std::path::Path::new(&endpoint)).await;
     }
     let away = CustomStatus {
         text: "Fixing the bridge".into(),
@@ -6802,6 +6846,85 @@ async fn gives_up_the_server_as_discords_client_does() {
     snapshot_where(discord, owner(bob)).await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "starts a loopback fake Discord with bun"]
+async fn reads_orbs_and_reconciles_hosted_outcomes() {
+    let fixture = Fixture::start("reads_orbs_and_reconciles_hosted_outcomes").await;
+    let owner = fixture.snapshot.user_id.as_deref().unwrap();
+    let report = fixture.discord.orbs(owner).await;
+    assert_eq!(report.balance, Some(250));
+    let quests = report.quests.unwrap();
+    assert_eq!(quests[0].status, "Active");
+    assert_eq!(quests[0].progress, ["play on desktop: 300/900"]);
+    assert_eq!(quests[1].status, "Ineligible");
+    let items = report.items.unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[1].price, None);
+    assert_eq!(items[1].summary, "An animated backdrop · Requires Nitro");
+    assert_eq!(
+        (items[0].name.as_str(), items[0].price, items[0].owned),
+        ("Night sky", Some(200), Some(false))
+    );
+
+    for (outcome, balance) in [
+        ("available", Some(250)),
+        ("completed", Some(250)),
+        ("claim-expired", Some(250)),
+        ("claimed", Some(350)),
+        ("declined", Some(250)),
+        ("redeemed", Some(50)),
+        ("wallet-offline", None),
+        ("unavailable", None),
+    ] {
+        post_control(fixture.server, "/_control/orbs", outcome);
+        let report = fixture.discord.orbs(owner).await;
+        assert_eq!(report.balance, balance);
+        if outcome == "available" {
+            let quests = report.quests.unwrap();
+            assert_eq!(quests[0].status, "Available");
+            assert!(quests[0].progress.is_empty());
+        } else if outcome == "completed" {
+            let quests = report.quests.unwrap();
+            assert_eq!(
+                (quests[0].status, quests[0].claimed_orbs),
+                ("Completed", None)
+            );
+            assert_eq!(quests[0].progress, ["play on desktop: 900/900"]);
+        } else if outcome == "claim-expired" {
+            let quests = report.quests.unwrap();
+            assert_eq!(quests[0].status, "Claim window ended");
+            assert_eq!(quests[0].claim_by.as_deref(), Some("2025-07-01 00:00 UTC"));
+        } else if outcome == "claimed" {
+            let quests = report.quests.unwrap();
+            assert_eq!(quests.len(), 2);
+            assert_eq!(
+                (quests[0].status, quests[0].claimed_orbs),
+                ("Reward claimed", Some(100))
+            );
+        } else if outcome == "declined" {
+            assert_eq!(report.items.unwrap()[0].owned, Some(false));
+        } else if outcome == "redeemed" {
+            assert_eq!(report.items.unwrap()[0].owned, Some(true));
+        } else if outcome == "wallet-offline" {
+            assert!(report.quests.is_some() && report.items.is_some());
+        } else if outcome == "unavailable" {
+            assert!(report.quests.is_none() && report.items.is_none());
+        }
+    }
+    assert!(
+        fixture
+            .discord
+            .orbs("another account")
+            .await
+            .balance
+            .is_none()
+    );
+    let calls: Vec<(String, String)> =
+        serde_json::from_str(&control(fixture.server, "GET", "/_control/orbs", "")).unwrap();
+    assert_eq!(calls.len(), 45);
+    assert!(calls.iter().all(|(method, _)| method == "GET"));
+}
+
 /// Editing her main profile as Discord's client does, then putting it
 /// back; part of [`talks_to_the_fake_server`], whose session it shares.
 #[tokio::test(flavor = "multi_thread")]
@@ -7588,6 +7711,7 @@ async fn starts_threads_as_discords_client_does() {
 fn sending<'a>(nonce: &'a str, reply: Option<&'a str>) -> yapfast_discord::api::Sending<'a> {
     yapfast_discord::api::Sending {
         nonce,
+        enforce_nonce: false,
         reply,
         ping_reply: true,
         silent: false,

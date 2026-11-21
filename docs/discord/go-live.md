@@ -125,15 +125,22 @@ Before sharing, the share button's menu picks a resolution and a frame rate, as
 Discord's client asks for them: 720p, 1080p or the screen's own size (up to
 4K), at 15, 30 or 60 fps. Its "Higher quality" checkbox, which Discord's client
 doesn't have, has x264 work harder on each frame. Yapfast remembers the choice
-beside the chosen audio devices (`devices.json`), and starts at 1080p30 without
-it. The menu lists every screen, window and camera, and is never taller than
+beside the chosen audio devices (`devices.json`). The picker and the capture worker's
+launch path limit a saved choice to the current Discord account and server. The
+base choice is up to 720p30. A level-one boost enables 720p60, and level two
+enables 1080p60. Basic allows 720p60 or 1080p30, Classic allows 1080p60, and
+full Nitro allows source resolution at 60 fps within the worker's 4K limit.
+If an active stream loses the required tier, Harmony ends that share and offers
+the supported settings on restart. The menu lists every screen, window and camera, and is never taller than
 the window: where they don't all fit, as with many windows open or the window
 short or zoomed, the choices scroll as one above Go Live, which stays in view.
 Larger screens, and those of another shape, are scaled down to fit. Yapfast
 caps them at the bitrates Discord's client uses: at most 3.5 Mbit/s up to 720p
 and 9 Mbit/s above, the cap op 12 announces, with the frame rate as its
-`max_framerate`. Discord's client allows accounts without Nitro 720p30, but
-trials 1080p30 at 3.5 or 5 Mbit/s for them. The worker converts captured
+`max_framerate`. **Call connection → Stream → Measured output** shows the
+encoder dimensions and the number of complete original frames sent per second
+over the last reporting interval. Retransmitted packets do not add frames.
+The worker converts captured
 frames to I420 with libyuv, scales them with libyuv's filtering scaler, and
 encodes those; the preview is the same picture scaled down to 720p.
 

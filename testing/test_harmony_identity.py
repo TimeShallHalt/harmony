@@ -22,7 +22,7 @@ class HarmonyIdentity(unittest.TestCase):
     def test_cargo_produces_the_named_executable(self):
         manifest = tomllib.loads(text("Cargo.toml"))
         self.assertEqual(manifest["package"]["name"], "yapfast")  # stable internal package
-        self.assertEqual(manifest["package"]["version"], "1.1.0")
+        self.assertEqual(manifest["package"]["version"], "1.3.0")
         self.assertFalse(manifest["package"]["autobins"])
         self.assertEqual(manifest["bin"], [{"name": "Harmony", "path": "src/main.rs"}])
         self.assertEqual(manifest["package"]["license"], "GPL-3.0-or-later")
@@ -93,7 +93,7 @@ class HarmonyIdentity(unittest.TestCase):
         self.assertNotIn("update::fetch", text("src/ui.rs"))
         manifest = tomllib.loads(text("Cargo.toml"))
         self.assertNotIn("dep:minisign-verify", manifest["features"]["desktop"])
-        self.assertIn("Updater not included in this build", text("src/build_info.rs"))
+        self.assertIn("publisher-signed Windows installers", text("src/build_info.rs"))
 
     def test_build_stamp_records_exact_upstream_baseline(self):
         for path in ("src/build_info.rs", "scripts/harmony_build_stamp.rs"):

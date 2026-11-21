@@ -461,6 +461,7 @@ impl Application {
             })
         {
             self.clear_read_all();
+            self.state.orbs = None;
             self.retire_profile_ownership();
         }
         if self.discord.as_ref().is_some_and(|earlier| {
@@ -773,6 +774,7 @@ impl Application {
         self.forget_activity_feed();
         #[cfg(feature = "discord")]
         {
+            self.state.orbs = None;
             self.state.discord_names = None;
         }
         self.state.person_dialog = None;

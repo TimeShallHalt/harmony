@@ -339,6 +339,13 @@ Yapfast is back, rather than showing an error.
   squared, so its middle sounds about half as loud. Turning it to nothing
   mutes, and unmuting brings back the level it had. The next video plays as
   loud, until Yapfast closes.
+- In a writable Discord conversation, open the composer's **+** menu and choose
+  **Record Voice Message**. Choose the microphone and start recording, then
+  stop to review up to 20 minutes of audio. You can listen, save the Ogg file,
+  discard it, or send it. The recording stays on this device until you press
+  **Send voice message**. Server channels require Attach Files and Send Voice
+  Messages permission. Harmony sends a single mono 48 kHz Ogg/Opus attachment
+  with its duration and waveform. [Discord's voice message format](https://docs.discord.com/developers/resources/message#voice-messages)
 - A voice message, a message flagged `IS_VOICE_MESSAGE` (`1 << 13`) whose
   only attachment is its Ogg Opus recording, shows as a pill instead of a file
   card, mixing Discord's phone and desktop players: a round button that plays

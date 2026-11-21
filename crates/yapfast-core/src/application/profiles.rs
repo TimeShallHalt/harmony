@@ -1,7 +1,7 @@
 //! Profile cards, the profile beside a DM, and role cards.
 
 use super::*;
-use crate::chat::{ProfileWidget, Wishlist};
+use crate::chat::{ActivityHistory, ProfileWidget, Wishlist};
 
 impl Application {
     pub(super) fn request_profile(&mut self, room: String, user: String, panel: bool) -> Effect {
@@ -450,6 +450,7 @@ impl Application {
             .flatten()
         {
             view.profile.retire_appearance();
+            view.profile.recent = ActivityHistory::Unasked;
             view.loading = false;
             view.kept = false;
         }
@@ -463,7 +464,12 @@ impl Application {
         };
         match tab {
             ProfileTab::Board => view.board_open = true,
-            ProfileTab::Activity => view.activity_open = true,
+            ProfileTab::Activity => {
+                view.activity_open = true;
+                if matches!(view.profile.recent, ActivityHistory::Unavailable) {
+                    view.profile.recent = ActivityHistory::Unasked;
+                }
+            }
             ProfileTab::Wishlist => view.wishlist_open = true,
         }
         self.ask_open_tabs()
@@ -482,11 +488,14 @@ impl Application {
         if preview || profile.id.starts_with('@') {
             return effects;
         }
-        if view.activity_open && !profile.recent_asked && !view.loading {
-            profile.recent_asked = true;
+        if view.activity_open && matches!(profile.recent, ActivityHistory::Unasked) && !view.loading
+        {
+            let request = Arc::new(());
+            profile.recent = ActivityHistory::Loading(request.clone());
             effects.push(Effect::Backend(Command::Discord(
                 DiscordCommand::ProfileRecent {
                     user: profile.id.clone(),
+                    request,
                 },
             )));
         }
@@ -530,15 +539,18 @@ impl Application {
         }
     }
 
-    pub(super) fn profile_recent_came(&mut self, user: &str, recent: Vec<chat::RecentActivity>) {
-        if let Some(view) = self
-            .state
-            .profile
-            .as_mut()
-            .filter(|view| view.profile.id == user)
+    pub(super) fn profile_recent_came(
+        &mut self,
+        request: &Arc<()>,
+        recent: Result<Vec<chat::RecentActivity>, ()>,
+    ) {
+        if let Some(view) = self.state.profile.as_mut()
+            && matches!(&view.profile.recent, ActivityHistory::Loading(current) if Arc::ptr_eq(current, request))
         {
-            view.profile.recent = recent;
-            view.profile.recent_came = true;
+            view.profile.recent = match recent {
+                Ok(entries) => ActivityHistory::Loaded(entries),
+                Err(()) => ActivityHistory::Unavailable,
+            };
         }
     }
 
@@ -653,8 +665,6 @@ fn fill_profile(view: &mut ProfileView, profile: &Profile) {
         ..profile.clone()
     };
     filled.recent = std::mem::take(&mut view.profile.recent);
-    filled.recent_asked = view.profile.recent_asked;
-    filled.recent_came = view.profile.recent_came;
     if same_place {
         filled.wishlist = std::mem::take(&mut view.profile.wishlist);
     }

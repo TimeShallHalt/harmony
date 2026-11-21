@@ -20,7 +20,7 @@ use crate::{
     stream_worker::{self, Report, Worker},
     voice::{
         CameraPhase, Chosen, Command, Link, LinkStats, Participant, Phase, Quality, SharePhase,
-        Sharing, State, StreamQuality, StreamStats, Watching, devices,
+        Sharing, State, StreamLimits, StreamQuality, StreamStats, Watching, devices,
     },
 };
 
@@ -322,6 +322,7 @@ pub(crate) async fn call(
         "Discord voice has no sound on this system yet."
     );
     let mut discord_states = discord.snapshots();
+    state.stream_limits = stream_limits(&discord_states.borrow(), guild);
     let me = discord_states.borrow().user_id.clone().unwrap_or_default();
     state.name = call_name(&discord_states.borrow(), guild, channel)
         .unwrap_or(if guild == PRIVATE {
@@ -649,6 +650,9 @@ pub(crate) async fn call(
                         }
                         Some(Command::GoLive(quality)) => {
                             if share.is_none() {
+                                state.stream_limits = stream_limits(&discord_states.borrow(), guild);
+                                let quality = state.stream_limits.constrain(quality);
+                                *sending.lock().unwrap_or_else(|e| e.into_inner()) = None;
                                 state.quality = quality;
                                 Chosen::write(remembered, state);
                                 match Share::start(state, quality) {
@@ -1039,6 +1043,16 @@ pub(crate) async fn call(
                     if changed.is_err() || discord_states.borrow().status != Status::Online {
                         bail!("Lost the connection to Discord. Join again when it's back.");
                     }
+                    let limits = stream_limits(&discord_states.borrow(), guild);
+                    if limits != state.stream_limits {
+                        state.stream_limits = limits;
+                        if limits.constrain(state.quality) != state.quality && let Some(stopped) = share.take() {
+                            stopped.stop(discord, state);
+                            starting = None;
+                            state.warning = Some("Stream quality limits changed. Choose a supported quality to share again.".into());
+                        }
+                        snapshots.send_replace(state.clone());
+                    }
                     // A channel made for the call may be named only now.
                     if let Some(name) = call_name(&discord_states.borrow(), guild, &channel)
                         && name != state.name
@@ -1232,6 +1246,22 @@ fn moved_to(state: &mut State, snapshot: &Snapshot, guild: &str, channel: &str) 
     if let Some(name) = call_name(snapshot, guild, channel) {
         state.name = name.to_owned();
     }
+}
+
+fn stream_limits(snapshot: &Snapshot, guild: &str) -> StreamLimits {
+    if snapshot.status != Status::Online {
+        return StreamLimits::default();
+    }
+    let premium = snapshot
+        .account
+        .as_ref()
+        .map_or(0, |account| account.premium_type);
+    let boost = snapshot
+        .servers
+        .iter()
+        .find(|s| s.id == guild && !s.unavailable)
+        .map_or(0, |s| s.premium_tier);
+    StreamLimits::discord(premium, boost)
 }
 
 /// The name of the voice channel or DM call, once Discord said it.

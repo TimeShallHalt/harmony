@@ -147,6 +147,8 @@ struct Shared {
     /// Sending: the video's bytes sent so far, resent ones too, as UDP
     /// payloads; the keyframes viewers asked for; and the packets resent.
     video_bytes: AtomicU64,
+    /// Original frames for which the final paced packet reached the socket.
+    video_frames: AtomicU64,
     keyframe_requests: AtomicU64,
     resent: AtomicU64,
 }
@@ -162,6 +164,7 @@ impl Shared {
             offers_changed: AtomicBool::new(false),
             chosen: Mutex::new(None),
             video_bytes: AtomicU64::new(0),
+            video_frames: AtomicU64::new(0),
             keyframe_requests: AtomicU64::new(0),
             resent: AtomicU64::new(0),
         })
@@ -295,6 +298,7 @@ impl StreamSender {
         let load = |count: &AtomicU64| count.load(Ordering::Relaxed);
         SentSoFar {
             video_bytes: load(&self.shared.video_bytes),
+            video_frames: load(&self.shared.video_frames),
             keyframe_requests: load(&self.shared.keyframe_requests),
             resent: load(&self.shared.resent),
         }
@@ -317,6 +321,7 @@ impl StreamSender {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SentSoFar {
     pub video_bytes: u64,
+    pub video_frames: u64,
     pub keyframe_requests: u64,
     pub resent: u64,
 }
@@ -610,6 +615,11 @@ async fn send(
                     connection.udp.send(&packet).await?;
                     shared.video_bytes.fetch_add(packet.len() as u64, Ordering::Relaxed);
                     pacing.sent(std::time::Instant::now(), packet.len());
+                }
+                // The queue holds packets of exactly one original frame.
+                // Retransmissions take a separate path.
+                if pending.is_empty() {
+                    shared.video_frames.fetch_add(1, Ordering::Relaxed);
                 }
                 if pending.is_empty() && reported.elapsed() >= SENDER_REPORTS {
                     reported = Instant::now();

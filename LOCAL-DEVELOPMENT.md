@@ -1,8 +1,12 @@
 # Ren's Harmony workspace
 
-## Current checkout
+## Harmony 1.2.0
 
-- Editable source: `C:\Users\ren\Documents\Apps\Harmony` (renamed from `yapfast`).
+The `codex/harmony-next` branch integrates the Harmony updater, Discord Rich Presence, profile activity history, local scheduling and voice messages. The Windows package targets `desktop,discord`. Set `HARMONY_BUILD_ID` and `YAPFAST_RELEASE=1` when building a clean release commit. The Windows installer and update-signing commands are documented in [Windows installer](packaging/windows-installer.md).
+
+## Harmony 1.1.0 integration
+
+- Editable source: `C:\Users\ren\Documents\Apps\Harmony\Harmony-App`.
 - Integration branch: `harmony/upstream-0.4.1-branding`.
 - Harmony version: `1.1.0`; upstream stable baseline: Yapfast `v0.4.1`.
 - Installed Update 4 (`53ccbfe3`) is the preserved fork baseline for the merge.
@@ -11,7 +15,7 @@
 - Default Windows data stays `%LOCALAPPDATA%\Harmony\data`; legacy credential
   identifiers remain unchanged. Never copy tokens or remove saved data to rebrand.
 - Original dirty work, staged/unstaged patches, untracked-file ZIP and a complete
-  Git bundle are preserved in sibling `Harmony-preserved-20261116-203135`.
+  Git bundle are preserved in `Apps/Harmony-preserved-20261116-203135`.
   Its `preservation.json` records the stash and permanent backup branch; all
   33 relocated linked worktrees were checked after `git worktree repair`.
 - Current verification/deployment evidence is under

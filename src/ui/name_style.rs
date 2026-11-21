@@ -172,7 +172,7 @@ pub(super) fn family(font: u8) -> &'static str {
 
 /// The weight of that font's only face, which the name is drawn in whatever
 /// weight the row asks for.
-fn weight(font: u8) -> i32 {
+pub(super) fn weight(font: u8) -> i32 {
     match font {
         6 | 8 => 500,
         10 => 548,
@@ -290,15 +290,19 @@ pub(super) fn font_only_in(in_server: bool, row: ModelRc<NameStyleRow>) -> Model
     let Some(style) = row.row_data(0) else {
         return row;
     };
-    let key = (style.family.to_string(), style.weight);
+    plain_font(style.family, style.weight)
+}
+
+pub(super) fn plain_font(family: SharedString, weight: i32) -> ModelRc<NameStyleRow> {
+    let key = (family.to_string(), weight);
     PLAIN_ROWS.with_borrow_mut(|rows| {
         if let Some(plain) = rows.get(&key) {
             return plain.clone();
         }
         let plain = NameStyleRow {
             effect: 1,
-            family: style.family,
-            weight: style.weight,
+            family,
+            weight,
             ..NameStyleRow::default()
         };
         let plain = ModelRc::new(VecModel::from(vec![plain.clone(), plain]));

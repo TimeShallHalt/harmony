@@ -48,6 +48,10 @@ mod place_search;
 mod places;
 mod platforms;
 mod polls;
+#[cfg(feature = "discord")]
+mod voice_notes;
+#[cfg(feature = "discord")]
+pub use voice_notes::VoiceNoteDelivery;
 mod preview;
 mod profile_editor;
 mod profile_media;
@@ -478,8 +482,16 @@ pub struct Editing {
     pub original: String,
 }
 
+#[cfg(feature = "discord")]
+pub struct OrbsPage {
+    pub request: Arc<str>,
+    pub report: Option<Arc<yapfast_discord::orbs::Overview>>,
+}
+
 #[derive(Default)]
 pub struct AppState {
+    #[cfg(feature = "discord")]
+    pub orbs: Option<OrbsPage>,
     /// Bots' controls and forms used, waiting for Discord's word.
     pub interactions: Interactions,
     /// The open room's apps' commands, once the person typed `/`.
@@ -492,6 +504,8 @@ pub struct AppState {
     pub interaction_failed: Option<(String, String)>,
     /// The choices of a bot's select menu, in a message or a form, open.
     pub select_menu: Option<SelectMenu>,
+    #[cfg(feature = "discord")]
+    pub voice_note_delivery: Option<VoiceNoteDelivery>,
     pub voice: voice::State,
     /// Discord is linked on this device and connected.
     pub discord_online: bool,
@@ -1553,6 +1567,10 @@ pub enum Relation {
 }
 
 pub enum Action {
+    #[cfg(feature = "discord")]
+    ReadOrbs,
+    #[cfg(feature = "discord")]
+    CloseOrbs,
     UseButton {
         item: String,
         custom_id: String,
@@ -1667,6 +1685,13 @@ pub enum Action {
     StartDm(Contact),
     CloseNewDm,
     Send,
+    #[cfg(feature = "discord")]
+    SendVoiceNote {
+        room: String,
+        account: String,
+        request: String,
+        note: Arc<yapfast_discord::voice_note::Note>,
+    },
     Reply(String),
     /// Open this message of this account's for editing in place.
     Edit(String),
@@ -3527,6 +3552,13 @@ impl Application {
             Action::CancelSend(item) => {
                 self.queue_action(item, |room, item| Command::Cancel { room, item })
             }
+            #[cfg(feature = "discord")]
+            Action::SendVoiceNote {
+                room,
+                account,
+                request,
+                note,
+            } => self.send_voice_note(room, account, request, note),
             Action::Stage(paths) => {
                 self.stage(paths);
                 vec![]
@@ -3843,6 +3875,28 @@ impl Application {
                 vec![]
             }
             Action::EditProfile => self.edit_profile(),
+            #[cfg(feature = "discord")]
+            Action::ReadOrbs => {
+                if self.state.preview || !self.state.discord_online {
+                    return vec![];
+                }
+                let Some(owner) = self.state.discord_user.as_deref() else {
+                    return vec![];
+                };
+                let request: Arc<str> = Arc::from(owner);
+                self.state.orbs = Some(OrbsPage {
+                    request: request.clone(),
+                    report: None,
+                });
+                vec![Effect::Backend(Command::Discord(DiscordCommand::ReadOrbs(
+                    request,
+                )))]
+            }
+            #[cfg(feature = "discord")]
+            Action::CloseOrbs => {
+                self.state.orbs = None;
+                vec![]
+            }
             Action::EditServerProfile(place) => self.edit_server_profile(place),
             Action::WriteProfile { field, text } => {
                 self.write_profile(field, text);
@@ -4463,7 +4517,7 @@ impl Application {
             Event::KeptProfile { user, profile } => return self.show_kept_profile(user, profile),
             Event::Wishlist { id, wishlist } => self.wishlist_loaded(&id, wishlist),
             Event::ProfileBoard { user, widgets } => self.profile_board_named(&user, widgets),
-            Event::ProfileRecent { user, recent } => self.profile_recent_came(&user, recent),
+            Event::ProfileRecent { request, recent } => self.profile_recent_came(&request, recent),
             Event::BadgeLevels { user, badges } => self.show_badge_levels(&user, badges),
             Event::ProfileFrame { request, frame } => self.show_profile_frame(&request, &frame),
             Event::ProfileEffect(effect) => {
@@ -4627,6 +4681,16 @@ impl Application {
             Event::ServerTransferred { server, result } => self.server_transferred(server, result),
             Event::ServerPincodeSent { server, result } => self.server_pincode_sent(server, result),
             Event::OwnProfile { server, result } => return self.own_profile_loaded(server, result),
+            #[cfg(feature = "discord")]
+            Event::Orbs { request, report } => {
+                if self.state.discord_online
+                    && self.state.discord_user.as_deref() == Some(&*request)
+                    && let Some(page) = &mut self.state.orbs
+                    && Arc::ptr_eq(&page.request, &request)
+                {
+                    page.report = Some(report);
+                }
+            }
             Event::ProfilePicture { kind, path, result } => {
                 self.profile_picture_read(kind, path, result);
             }
@@ -4872,6 +4936,19 @@ impl Application {
                     self.aside_history(direction, history);
                 } else if self.state.selected.as_ref() == Some(&room) {
                     return self.history_loaded(direction, history);
+                }
+            }
+            // The desktop local queue owns its correlated completion record.
+            Event::ScheduledResult { .. } => {}
+            #[cfg(feature = "discord")]
+            Event::VoiceNoteSent { request, result } => {
+                if let Some(delivery) = self
+                    .state
+                    .voice_note_delivery
+                    .as_mut()
+                    .filter(|delivery| delivery.request == request)
+                {
+                    delivery.result = Some(result);
                 }
             }
             Event::SendResult { room, body, result } => {

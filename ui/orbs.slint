@@ -1,0 +1,70 @@
+import { Theme, Label } from "theme.slint";
+import { ActionButton } from "controls.slint";
+import { SettingsHeading, SettingsTitle } from "settings.slint";
+
+export struct QuestRow { id: string, name: string, state: string, details: string }
+export struct OrbItemRow { id: string, name: string, summary: string, price: string, ownership: string }
+export global Orbs {
+    in property <string> balance;
+    in property <string> quest-note;
+    in property <string> shop-note;
+    in property <[QuestRow]> quests;
+    in property <[OrbItemRow]> items;
+    in property <bool> can-refresh;
+}
+
+export component OrbsSettings inherits VerticalLayout {
+    callback refresh;
+    callback visit(string);
+    property <string> selected;
+    property <[OrbItemRow]> offers: Orbs.items;
+    changed offers => { root.selected = ""; }
+    spacing: 12px;
+    SettingsTitle { text: "Quests & Orbs"; }
+    HorizontalLayout {
+        alignment: start; spacing: 12px;
+        Text { text: Orbs.balance; vertical-alignment: center; color: Theme.text; font-weight: 700; }
+        ActionButton { text: "Refresh"; enabled: Orbs.can-refresh; clicked => { root.refresh(); } }
+    }
+    SettingsHeading { text: "Quests"; }
+    if Orbs.quest-note != "": Label { text: Orbs.quest-note; }
+    for quest in Orbs.quests: VerticalLayout {
+        spacing: 4px;
+        Text { text: quest.name + " · " + quest.state; color: Theme.text; font-weight: 600; wrap: word-wrap; }
+        if quest.details != "": Label { text: quest.details; }
+        HorizontalLayout {
+            alignment: start;
+            ActionButton {
+                text: quest.state == "Completed" ? "Review reward in Discord" : "View Quest in Discord";
+                clicked => { root.visit("https://discord.com/quests/" + quest.id); }
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: start;
+        ActionButton { text: "Open Discord Quest Home"; clicked => { root.visit("https://discord.com/discovery/quests"); } }
+    }
+    SettingsHeading { text: "Orbs Shop"; }
+    Label { text: "Review the item, final Orbs price, and confirmation in Discord’s Shop."; }
+    if Orbs.shop-note != "": Label { text: Orbs.shop-note; }
+    for item in root.offers: VerticalLayout {
+        spacing: 4px;
+        HorizontalLayout {
+            alignment: start; spacing: 8px;
+            ActionButton { text: item.name + " · " + item.price; clicked => { root.selected = root.selected == item.id ? "" : item.id; } }
+        }
+        if root.selected == item.id: VerticalLayout {
+            spacing: 4px;
+            if item.summary != "": Label { text: item.summary; }
+            if item.ownership != "": Label { text: item.ownership; }
+            HorizontalLayout {
+                alignment: start;
+                ActionButton { text: "Review in Discord Shop"; clicked => { root.visit("https://discord.com/shop#itemSkuId=" + item.id); } }
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: start;
+        ActionButton { text: "Open Discord Orbs Shop"; clicked => { root.visit("https://discord.com/shop?tab=orbs"); } }
+    }
+}

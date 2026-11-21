@@ -1,159 +1,54 @@
-# Harmony Update Roadmap
+# Harmony Roadmap
 
-Planning revision: 2026-11-07T18:41:43-05:00
+| Update | Focus |
+| --- | --- |
+| **7 · Orbs** | Quests, the Orbs Shop, and free local enhancements for streaming and profiles |
+| **8 · Customization Heaven** | Custom wallpapers, visual theme editors, and shareable theme packs |
+| **9 · Plugins** | Optional built-in plugins and a path for community-created extensions |
 
-## Current stage
+## Update 7 · Orbs
 
-**Update 1 is authorized and in progress: About, theme-pack, window-control and media-viewer acceptance. Ren explicitly deferred ALL updater/auto-update and sharing/hosting work. Publish the verified remaining update only to the existing private Harmony repository.**
+Give users a place to discover Quests, track rewards, and browse the Orbs Shop. Add free streaming and profile customization that works within Harmony’s existing capabilities.
 
-Implementation uses isolated worktrees and bounded workers. Earlier unrelated repair checkpoints remain preserved and paused; they are not being folded into this release. No physical input, forced app restart or automatic checks/downloads are authorized by starting development.
+- **Quests.** Show available, active, and completed Quests with eligibility, progress, expiry, and reward status. Let users opt in and claim rewards through supported flows. Use Discord’s reported state for progress and balances.
+- **Orbs Shop.** Show the current balance, browse eligible rewards, preview items, and confirm redemptions. Keep the displayed balance and purchase state in sync after success, rejection, or an interrupted request.
+- **Free streaming enhancements.** Expose HD quality settings where the capture pipeline and session support them. Let users choose resolution and frame rate, and show the quality actually in use. Honor service limits.
+- **Local profiles.** Give users a profile editor and preview for custom fonts, banners, decorations, and colors. Store those overrides on the device. Nitro-exclusive appearance changes are visible only to the user who sets them. Other people continue to see the profile served by Discord.
 
-**Updater and hosting deferred by Ren.** They are not acceptance gates for this release. Experimental updater code must not be activated or shipped as part of Update 1.
+**Ready when** users can follow an eligible Quest through to its reported reward, redeem an eligible Shop item with confirmation, see the active stream quality, and verify that local profile changes stay on their device.
 
-## How these lists work
+### Implementation on the 1.2.0 baseline
 
-- Work in updates of up to five features; the final listed update has four.
-- Agree on each update's exact scope and acceptance criteria before implementation.
-- Complete one feature end to end at a time with focused checks, then verify the integrated update.
-- Existing working or partially implemented features are reused, not rewritten to fill a batch.
-- Checkboxes below mean acceptance/delivery in this new roadmap, not that all existing code is absent.
-- Repairs are part of finishing a feature, not additional features to pad a release.
-- Add future ideas to the backlog without silently enlarging the active update.
-- The order after Update 1 remains provisional and can change for dependencies or agreed priorities.
-- No feature is labelled delivered because only a screen, mock, source module or cached test exists.
+**1.3.0 build 1 is the Windows test candidate.** Local profile acceptance is verified on Windows. Final acceptance covers a hardware stream observed by a second client, a live Quest reward and a confirmed Shop redemption on an eligible account.
 
-## Planned updates
+| Slice | Where to use it | Acceptance |
+| --- | --- | --- |
+| Local profiles | **Settings → Local Profile** previews the same card used by the account popover and profile views. Save stores the font, colors and still PNG artwork under the current account in Harmony’s data directory. | **Verified in native UI tests.** The saved appearance survives reopening, stays with its owner and emits zero backend commands. A subsequent Discord display-name edit carries only that change. |
+| Streaming | Choose resolution and frame rate in the existing **Share your screen** menu. The **Stream** tab in the call details shows encoded dimensions and complete frames sent per second. | **Verified in core, UI and loopback tests.** The tier limits apply to remembered choices. Five video frames and one retransmitted packet counted as five frames. The readout clears on stop. A hardware capture and remote viewer still need verification. |
+| Quests | **Settings → Quests & Orbs** reads available, excluded, active, completed and claimed Quests. Discord handles opt-in, task tracking and reward claims. Returning to Harmony refreshes the account’s reported state. | **Verified against loopback Discord.** Discovery, task counts, completion, claim history, claimed Orbs and an expired claim window matched the service responses. End-to-end acceptance needs an eligible account and Quest. |
+| Orbs Shop | The same page reads the wallet, catalog and collectible ownership. Item details lead to Discord’s item preview and final confirmation. Harmony reads the balance and collection again on return. | **Verified in native UI and loopback tests.** Opening checkout leaves the balance intact. A refresh reflects confirmed ownership, a declined redemption or an unavailable wallet. A real redemption requires an eligible offer and explicit approval. |
 
-### Update 1: The foundation (updater deferred)
+Quest and Shop data depend on the consumer service making each read available to the signed-in account. Missing sections show as unavailable. Discord controls regional eligibility, available rewards, the final price and fulfillment. [Discord Quests FAQ](https://support.discord.com/hc/en-us/articles/22225719947543-Discord-Quests-FAQ) · [Discord Orbs FAQ](https://support.discord.com/hc/en-us/articles/30593690165783-Discord-Orbs-FAQ)
 
-- [ ] **DEFERRED, outside Update 1: update / auto-update system** (`auto-update`)
-  - Manual **Check for updates** action.
-  - Optional checks on startup and at a configurable interval while the app is running.
-  - Check published GitHub Releases rather than ordinary repository commits.
-  - Show version, release notes and an **Update available / Download update** button.
-  - Optional background download, with an explicit user setting.
-  - Verify the correct platform/version and signed update metadata/artifact before staging.
-  - Apply the verified update on the next normal app restart; do not force-close a call or session.
-  - Preserve app data, retain rollback and recover safely from interrupted downloads/installations.
-  - Keep notify-only and automatic-download behaviour separately configurable.
-  - Resolve release hosting, access and licence compliance before distributing to friends; never embed a shared GitHub token.
+## Update 8 · Customization Heaven
 
-- [ ] **Settings About panel: app version and build; updater explicitly unavailable in this release** (`app-info`)
+Make the visible Harmony interface editable through the app. A user should be able to change the whole look in a minute or spend an evening tuning a single panel.
 
-- [ ] **Native theme packs: retain and verify the existing foundation** (`theme-packs`)
+- **Custom wallpapers.** Import still images and animated wallpapers. Control fit, position, dimming, blur, and where the wallpaper appears. Offer a pause control and a still fallback for reduced motion.
+- **Simple theme editor.** Start with a preset and change the wallpaper, accent, background, text, and overall corner roundness. Preview changes live and apply them together.
+- **Detailed theme editor.** Edit visible surfaces and components individually, including the title bar, sidebars, chat, composer, menus, dialogs, and controls. Expose colors, typography, spacing, corner radii, outline color and width, shadows, and opacity. Include states such as hover, focus, selection, and unread. Let users select a visible element in the preview to find its controls.
+- **Theme management.** Create, duplicate, rename, import, and export themes from the GUI. Let users undo changes, reset individual properties, and restore a readable theme if an edit makes the app difficult to use.
+- **Shareable packs.** Export one versioned Harmony theme file with the settings and wallpaper assets bundled. Preview imported packs before applying them, and use built-in defaults for fields an older theme omits.
 
-- [ ] **Native window dragging and resizing: finish verification** (`window-controls`)
+**Ready when** a user can build a theme with a custom animated wallpaper, style individual components, export the result, and import it on another installation with its appearance and assets intact.
 
-- [ ] **Image/GIF viewer: zoom, pan and navigation** (`media-viewer`)
+## Update 9 · Plugins
 
-### Update 2: Media, privacy and server badges
+Give users a Plugins page where they can enable optional features independently. Start with built-in plugins to establish the controls and extension points. Use those lessons to design and test a community plugin format for Harmony.
 
-- [ ] **Original/full-resolution media viewing** (`fullres`)
+- **Plugin manager.** List installed plugins with descriptions, settings, permissions, and version compatibility. Make enable, disable, and removal easy. Provide a recovery mode that starts Harmony with plugins disabled.
+- **Built-in plugins.** Use a **Message Logger** as the first example. With the plugin enabled, save edits and deletions that Harmony observes locally and let users review that history. Offer conversation exclusions, retention limits, and a clear-history control. Keep logging off by default and scope the history to the account.
+- **Community authoring.** Explore a versioned plugin API with documented events, settings, and supported UI locations. Provide a sample plugin and a local development workflow. Test permission prompts and isolation before widening distribution. A public catalog can follow once installation, updates, and removal are dependable.
+- **Release scope.** Ship a useful set of built-in plugins first. Include community authoring in Update 9 if the API, permission model, and recovery flow are ready. Harmony plugins use Harmony’s own format and API.
 
-- [ ] **Open profile avatars and banners in the media viewer** (`profile-media`)
-
-- [ ] **Silent typing** (`silent-typing`)
-
-- [ ] **Voice-channel badges on servers** (`server-voice-badge`)
-
-- [ ] **Streaming badges on servers** (`server-stream-badge`)
-
-### Update 3: Presence and personal controls
-
-- [ ] **Desktop/web/mobile platform indicators** (`platform-indicators`)
-
-- [ ] **Call timer** (`call-timer`)
-
-- [ ] **Precise extended per-user voice and stream volume** (`better-volume`)
-
-- [ ] **Locally assigned contact timezones** (`timezones`)
-
-- [ ] **Consistent emoji artwork and improved picker** (`emoji-art`)
-
-### Update 4: Names, navigation and profile appearance
-
-- [ ] **Name fonts and styles** (`name-fonts`)
-
-- [ ] **Jump-to-top and Home/End history navigation** (`jump-top`)
-
-- [ ] **Read-all notification buttons with confirmation** (`read-all`)
-
-- [ ] **Profile decorations** (`avatar-decorations`)
-
-- [ ] **Animated emoji** (`animated-emoji`)
-
-### Update 5: Expressions and richer interactions
-
-- [ ] **Stickers** (`stickers`)
-
-- [ ] **Animated stickers** (`animated-stickers`)
-
-- [ ] **Nameplates** (`nameplates`)
-
-- [ ] **Polls** (`polls`)
-
-- [ ] **Profile widgets** (`profile-widgets`)
-
-### Update 6: Activity and composer workflows
-
-- [ ] **Quick game-activity sharing toggle** (`game-toggle`)
-
-- [ ] **Activity/game detection and Rich Presence** (`game-detection`)
-
-- [ ] **Detailed activity/history tab** (`activity-tab`)
-
-- [ ] **Scheduled messages** (`scheduled-messages`)
-
-- [ ] **Voice messages** (`voice-messages`)
-
-### Update 7: Music and service integrations
-
-- [ ] **Pear Desktop / YouTube Music Listen Along** (`pear-listen-along`)
-
-- [ ] **Spotify Listen Along** (`spotify-listen-along`)
-
-- [ ] **Wishlists** (`wishlists`)
-
-- [ ] **Orbs Shop** (`orbs-shop`)
-
-- [ ] **App support: supported commands, forms and interactions** (`apps`)
-
-### Update 8: Largest remaining features
-
-- [ ] **Regular Shop** (`shop`)
-
-- [ ] **Local Nitro-inspired enhancements, without pretending to unlock paid entitlements** (`nitro-inspired`)
-
-- [ ] **Clips** (`clips`)
-
-- [ ] **Quests with legitimate participation and reward state** (`quests`)
-
-## Release acceptance for each update
-
-- [ ] The agreed features are reachable through the actual app and have meaningful error/cancel paths.
-- [ ] Relevant focused tests and integrated regressions pass against the exact candidate.
-- [ ] Security/privacy findings are resolved or explicitly block the affected release.
-- [ ] Windows and Linux build/test coverage is stated accurately; untested runtime behaviour is not labelled verified.
-- [ ] Version/build information matches the packaged artifact.
-- [ ] Distribution includes required licences, notices and compliant source availability.
-- [ ] Install/update integrity, app-data preservation and rollback are verified.
-- [ ] Installation and activation are reported separately; no forced restart during active sessions.
-
-## Distribution and licensing decision: still to resolve
-
-- [ ] Agree on the friends-only/public distribution and update-hosting arrangement.
-- [ ] Keep the development repository and unfinished history private where desired.
-- [ ] Resolve licence requirements before offering downloadable binaries. The current codebase is declared **GPL-3.0-or-later**. Heavy modifications, renaming, or becoming visually different do not by themselves permit replacing that licence for the derived combined work.
-- [ ] If the GPL-based application is distributed, provide compliant access to the matching Corresponding Source and retain required notices. Recipients do not have to download or browse that source, and the private working repository/history need not be made public.
-- [ ] If a different distribution licence is essential, obtain the necessary permissions or agree on a genuinely independent implementation/foundation before proceeding; do not simply change the existing licence file.
-
-No licence or repository visibility has been changed. Reference: [GPLv3 sections 5 and 6](https://www.gnu.org/licenses/gpl-3.0.html#section5).
-
-## Future ideas
-
-- Additional features: to discuss after Ren's remaining instruction.
-- No additional feature has been added to the 39-item roadmap yet.
-
-## Next agreed action
-
-**Finish the four remaining Update 1 features, verify and package the candidate, then publish to the existing private Harmony repository. Auto-update and sharing/hosting are deferred. Keep other updates paused and do not force an app restart.**
+**Ready when** built-in plugins can be enabled, configured, disabled, and removed independently, and a failing plugin can be disabled through recovery mode. If community authoring ships, an external developer should be able to build and install the sample plugin using the published documentation.

@@ -246,7 +246,7 @@ export component CallLinkCard inherits Rectangle {
             spacing: 8px;
             LinkRow { label: "Encoder:"; value: CallLink.encoder; }
             LinkRow { label: "Codec:"; value: CallLink.codec; }
-            LinkRow { label: "Resolution:"; value: CallLink.picture; }
+            LinkRow { label: "Measured output"; value: CallLink.picture; }
             LinkRow { label: "Sending:"; value: CallLink.sent; }
             LinkRow { label: "Aiming for:"; value: CallLink.target; }
             LinkRow { label: "Keyframes viewers asked for:"; value: CallLink.keyframes; }
@@ -1290,6 +1290,12 @@ export component ShareMenu inherits Rectangle {
     in-out property <int> pick-source;
     in-out property <int> pick-resolution;
     in-out property <int> pick-fps;
+    in property <int> max-resolution;
+    in property <int> fps-720: 30;
+    in property <int> fps-hd: 30;
+    property <int> max-fps: root.pick-resolution == 0 ? root.fps-720 : root.fps-hd;
+    changed max-resolution => { root.pick-resolution = min(root.pick-resolution, root.max-resolution); }
+    changed max-fps => { root.pick-fps = min(root.pick-fps, root.max-fps); }
     /// The encoder's slower preset: a sharper picture for more CPU.
     in-out property <bool> pick-high-quality;
     callback go-live(int, int, int, bool);
@@ -1363,7 +1369,8 @@ export component ShareMenu inherits Rectangle {
                     spacing: 2px;
                     for choice[index] in ["720p", "1080p", "Source"]: MenuItem {
                         text: choice; checked: index == root.pick-resolution;
-                        clicked => { root.pick-resolution = index; }
+                        disabled: index > root.max-resolution;
+                        clicked => { if !self.disabled { root.pick-resolution = index; } }
                     }
                 }
                 if !root.switching: HorizontalLayout {
@@ -1374,7 +1381,8 @@ export component ShareMenu inherits Rectangle {
                     spacing: 2px;
                     for fps in [15, 30, 60]: MenuItem {
                         text: fps + " fps"; checked: fps == root.pick-fps;
-                        clicked => { root.pick-fps = fps; }
+                        disabled: fps > root.max-fps;
+                        clicked => { if !self.disabled { root.pick-fps = fps; } }
                     }
                 }
                 if !root.switching: HorizontalLayout {

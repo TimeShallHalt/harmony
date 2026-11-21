@@ -505,6 +505,8 @@ impl Adapter {
     }
 
     pub(super) fn refresh(&mut self, window: &YapfastWindow) {
+        self.local_profile.sync(&self.root, &self.app.state, window);
+        self.show_orbs(window);
         if self.pictures_sourced != Some(self.app.state.picture_changes) {
             self.pictures_sourced = Some(self.app.state.picture_changes);
             bump_picture_slots(window, refresh_avatar_sources(&self.app.state));
@@ -563,6 +565,7 @@ impl Adapter {
         self.show_emoji_animations(window);
         self.show_stickers(window);
         self.show_composer(window);
+        self.show_scheduled(window);
         self.show_messages(window, &changes);
         self.show_aside(window);
         self.show_voice(window);
@@ -1654,7 +1657,7 @@ impl Adapter {
             (None, None) => true,
             _ => false,
         };
-        if !same {
+        if !same || self.local_profile.needs_account(window, state, own.is_some()) {
             let data = own.as_ref().map_or_else(ProfileData::default, |own| {
                 let view = ProfileView {
                     profile: yapfast_core::chat::Profile::clone(&own.profile),
@@ -1662,7 +1665,7 @@ impl Adapter {
                 };
                 profile_data(&mut self.pictures, state, &view)
             });
-            window.set_account_profile(data);
+            self.local_profile.account(window, state, data);
         }
         self.account_profile_shown = own;
         let look = window.global::<AccountLook>();
@@ -4082,6 +4085,7 @@ impl Adapter {
     }
 
     pub(super) fn show_composer(&mut self, window: &YapfastWindow) {
+        self.show_voice_notes(window);
         self.mark_mentions();
         self.show_inline_edit(window);
         let state = &self.app.state;
@@ -4538,6 +4542,7 @@ impl Adapter {
     /// The call: the voice dock, sharing and watching a screen, a DM's call,
     /// ringing, and the devices.
     fn show_voice(&mut self, window: &YapfastWindow) {
+        self.show_voice_notes(window);
         self.ring();
         // The server of a call shows it on the rail, so the rail follows a
         // call that starts, ends or moves; other voice events leave it be.
@@ -4592,12 +4597,18 @@ impl Adapter {
                     .is_some_and(|room| Network::of(room) == Network::Discord),
         );
         window.set_sharing(voice.sharing.is_some());
-        window.set_share_resolution(match voice.quality.resolution {
+        let resolution_index = |resolution| match resolution {
             voice::Resolution::P720 => 0,
             voice::Resolution::P1080 => 1,
             voice::Resolution::Source => 2,
-        });
-        window.set_share_fps(voice.quality.fps as i32);
+        };
+        let limits = voice.stream_limits;
+        window.set_share_max_resolution(resolution_index(limits.resolution));
+        window.set_share_fps_720(limits.fps_720 as i32);
+        window.set_share_fps_hd(limits.fps_hd as i32);
+        let choice = limits.constrain(voice.quality);
+        window.set_share_resolution(resolution_index(choice.resolution));
+        window.set_share_fps(choice.fps as i32);
         window.set_share_high_quality(voice.quality.high_quality);
         window.set_share_live(
             voice
@@ -5056,6 +5067,11 @@ impl Adapter {
         self.models.entrance_rows.set_vec(rows);
     }
 
+    pub(super) fn refresh_local_profile(&mut self, window: &YapfastWindow) {
+        self.show_account(window);
+        self.show_profile(window);
+    }
+
     /// The open profile card, and the profile beside a one-to-one DM, with
     /// what's known so far.
     fn show_profile(&mut self, window: &YapfastWindow) {
@@ -5069,6 +5085,7 @@ impl Adapter {
         }
         if let Some(view) = &state.panel_profile {
             let mut data = profile_data(&mut self.pictures, state, view);
+            self.local_profile.decorate(&mut data, state);
             // The DM list keeps up with whether they're around; the profile
             // was as it was when it opened.
             if let Some(room) = state.selected_room() {
@@ -5106,7 +5123,8 @@ impl Adapter {
         } else {
             view.profile.id.clone().into()
         });
-        let data = profile_data(&mut self.pictures, state, view);
+        let mut data = profile_data(&mut self.pictures, state, view);
+        self.local_profile.decorate(&mut data, state);
         if let Some(data) = changed_profile(&window.get_profile(), data) {
             window.set_profile(data);
         }

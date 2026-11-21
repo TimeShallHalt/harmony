@@ -61,6 +61,10 @@ webrtc-sys = "=0.3.35"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.189"
 
+[target.'cfg(windows)'.dependencies]
+# Build a local named pipe whose ACL grants access only to the current user.
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+
 [dev-dependencies]
 # Building DAVE handshake messages in tests, at the versions davey uses.
 openmls = "0.8.1"

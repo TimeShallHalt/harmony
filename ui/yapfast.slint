@@ -1,4 +1,10 @@
 import { AccountPopover } from "yapfast/account-popover.slint";
+import { VoiceNotes, VoiceNoteDialog } from "voice_notes.slint";
+export { VoiceNotes } from "voice_notes.slint";
+import { LocalProfile, LocalProfileSettings } from "local-profile.slint";
+import { OrbsSettings } from "orbs.slint";
+export { Orbs, QuestRow, OrbItemRow } from "orbs.slint";
+export { LocalProfile } from "local-profile.slint";
 import { ClientStyle } from "yapfast/style.slint";
 import { WindowBar } from "yapfast/window-bar.slint";
 import { AboutUpdatesSettings } from "about_updates.slint";
@@ -68,6 +74,7 @@ import { BotSelectDropdown, BotModalDialog, SelectChoice, ModalField } from "int
 import { CommandChoice, CommandOptionPill, CommandList } from "app_commands.slint";
 import { PostTag, PostRow, PostTagChoice, ForumPanel } from "forum.slint";
 import { BrowseRow, BrowseScreen } from "browse.slint";
+import { Scheduling, ScheduledDialog } from "scheduled.slint";
 
 // Rust sees these, besides YapfastWindow.
 export { LocalTimezones } from "personal-controls.slint";
@@ -92,6 +99,7 @@ export { RequestRow, FriendRow } from "friends.slint";
 export { ContactRow, PlaceRow, ReactionPill, ReactorRow, PollAnswerDraft } from "dialogs.slint";
 export { FoundRow, PickRow } from "header.slint";
 export { GifTile, GifFavorites } from "gifs.slint";
+export { Scheduling, ScheduledRow } from "scheduled.slint";
 export { SelectChoice, ModalField } from "interactions.slint";
 export { CommandChoice, CommandOptionPill } from "app_commands.slint";
 
@@ -1015,6 +1023,9 @@ export component YapfastWindow inherits Window {
     /// harder for a sharper picture.
     in property <int> share-resolution: 1;
     in property <int> share-fps: 30;
+    in property <int> share-max-resolution: 0;
+    in property <int> share-fps-720: 30;
+    in property <int> share-fps-hd: 30;
     in property <bool> share-high-quality;
     in property <string> share-status;
     /// The newest preview of what's shared, refreshed by stream-tick while sharing.
@@ -1286,6 +1297,18 @@ export component YapfastWindow inherits Window {
         if !self.settings-open && self.theme-editor { self.cancel-theme(); }
     }
     in-out property <int> settings-section;
+    property <bool> editing-local-profile: root.settings-open && root.settings-section == 11;
+    changed editing-local-profile => { LocalProfile.editing(self.editing-local-profile); }
+    callback orbs-page(bool);
+    property <bool> viewing-orbs: root.settings-open && root.settings-section == 12;
+    property <bool> returning-to-orbs;
+    changed viewing-orbs => { root.returning-to-orbs = false; root.orbs-page(self.viewing-orbs); }
+    changed window-focused => {
+        if self.window-focused && root.returning-to-orbs && root.viewing-orbs {
+            root.returning-to-orbs = false;
+            root.orbs-page(true);
+        }
+    }
     // The section whose NEW tags are showing, so leaving it can say they were seen.
     property <int> new-viewing: -1;
     function track-new() {
@@ -1706,9 +1729,9 @@ export component YapfastWindow inherits Window {
         || root.switcher-open || root.mfa-open || root.add-friend-open || root.invite-open
         || root.join-open || root.event-open || root.gift-open || root.oauth-open
         || root.channel-open || root.move-sync-open || root.leave-open || root.person-open
-        || root.status-open || root.poll-open || root.new-dm-open || root.reactions-open
+        || root.status-open || root.poll-open || Scheduling.open || root.new-dm-open || root.reactions-open
         || root.forward-open || root.leaving-link != "" || root.switch-prompt != ""
-        || root.confirm-delete != "" || root.incoming-open;
+        || root.confirm-delete != "" || root.incoming-open || VoiceNotes.open;
     // The channel has no composer here: a call, a forum, a message request, the
     // friends list, the friend requests or Browse Channels.
     property <bool> composer-missing: !root.room-selected || root.voice-panel || root.room-forum
@@ -2052,6 +2075,8 @@ export component YapfastWindow inherits Window {
         share-content := ShareMenu {
             screens: root.share-screens; windows: root.share-windows; cameras: root.share-cameras;
             dialog: !root.share-lists; switching: root.pick-switch;
+            max-resolution: root.share-max-resolution;
+            fps-720: root.share-fps-720; fps-hd: root.share-fps-hd;
             pick-source <=> root.pick-source; pick-resolution <=> root.pick-resolution; pick-fps <=> root.pick-fps;
             pick-high-quality <=> root.pick-high-quality;
             go-live(source, resolution, fps, high-quality) => {
@@ -2230,10 +2255,22 @@ export component YapfastWindow inherits Window {
                     text: "Upload a File"; icon: @image-url("icons/file.svg"); disabled: !root.can-attach;
                     clicked => { if root.can-attach { plus-menu.close(); root.attach(); } }
                 }
+                if VoiceNotes.available: MenuItem {
+                    text: "Record Voice Message"; icon: @image-url("icons/mic.svg");
+                    clicked => { plus-menu.close(); VoiceNotes.request-open(); }
+                }
                 // Closing the menu takes these away, so they act first.
                 if root.can-start-threads: MenuItem {
                     text: "Create Thread"; icon: @image-url("icons/thread.svg");
                     clicked => { root.new-thread("", "plus"); plus-menu.close(); }
+                }
+                if Scheduling.available: MenuItem {
+                    text: "Schedule Message…"; icon: @image-url("icons/clock.svg"); disabled: !Scheduling.can-schedule;
+                    clicked => { Scheduling.compose(); plus-menu.close(); }
+                }
+                if Scheduling.available: MenuItem {
+                    text: "Local scheduled messages"; icon: @image-url("icons/clock.svg");
+                    clicked => { Scheduling.list(); plus-menu.close(); }
                 }
                 if root.can-create-polls: MenuItem {
                     text: "Create Poll"; icon: @image-url("icons/chart-bar.svg");
@@ -2292,6 +2329,10 @@ export component YapfastWindow inherits Window {
                 asked => { root.ask-read-all(); }
                 confirmed => { root.confirm-read-all(); }
                 cancelled => { root.cancel-read-all(); }
+            }
+            if Scheduling.available: MenuItem {
+                text: "Local scheduled messages"; icon: @image-url("icons/clock.svg");
+                clicked => { Scheduling.list(); status-menu.close(); }
             }
             if ClientStyle.enabled: AccountPopover {
                 available-height: max(120px, root.menu-y - 12px - read-control.preferred-height);
@@ -3946,11 +3987,11 @@ export component YapfastWindow inherits Window {
                                             IconButton {
                                                 // Discord's is a plain 18px plus, not a circled one.
                                                 icon: ClientStyle.enabled ? @image-url("icons/plus.svg") : @image-url("icons/circle-plus.svg");
-                                                label: root.can-start-threads || root.can-create-polls ? "More options" : "Attach files";
+                                                label: root.can-start-threads || root.can-create-polls || Scheduling.available || VoiceNotes.available ? "More options" : "Attach files";
                                                 glyph: ClientStyle.enabled ? 27px : 22px;
-                                                enabled: root.can-attach || root.can-start-threads || root.can-create-polls;
+                                                enabled: root.can-attach || root.can-start-threads || root.can-create-polls || Scheduling.available || VoiceNotes.available;
                                                 clicked => {
-                                                    if root.can-start-threads || root.can-create-polls {
+                                                    if root.can-start-threads || root.can-create-polls || Scheduling.available || VoiceNotes.available {
                                                         root.menu-x = self.absolute-position.x;
                                                         root.menu-y = self.absolute-position.y;
                                                         plus-menu.show();
@@ -4445,6 +4486,11 @@ export component YapfastWindow inherits Window {
             set-custom-status => { root.settings-open = false; root.open-status(); }
             edit-profile => { root.settings-open = false; root.edit-profile(); }
             sign-out => { root.settings-open = false; root.logout(); }
+        }
+        if root.settings-section == 11: LocalProfileSettings {}
+        if root.settings-section == 12: OrbsSettings {
+            refresh => { root.orbs-page(true); }
+            visit(url) => { root.returning-to-orbs = true; root.open-link(url); }
         }
         if root.settings-section == 9: AboutUpdatesSettings {
             preview: root.preview;
@@ -5060,7 +5106,9 @@ export component YapfastWindow inherits Window {
         clear-status => { root.clear-status(); }
         close-status => { root.close-status(); }
     }
+    if Scheduling.open: ScheduledDialog { }
     // Making a poll; see PollDialog.
+    if VoiceNotes.open: VoiceNoteDialog { width: parent.width; height: parent.height; }
     poll-motion := PopupMotion { open: root.poll-open; }
     if poll-motion.shown: PollDialog {
         motion: poll-motion.amount;

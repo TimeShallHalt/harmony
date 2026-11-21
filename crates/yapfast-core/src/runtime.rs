@@ -3,6 +3,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+pub use tokio::task::AbortHandle;
 use tokio::{
     runtime::{Builder, Runtime},
     task::{JoinError, JoinHandle},
@@ -52,6 +53,13 @@ impl BackgroundRuntime {
 /// Dropping a task handle cancels its Tokio work.
 pub struct BackgroundTask<T> {
     handle: JoinHandle<T>,
+}
+
+impl<T> BackgroundTask<T> {
+    /// Cancels the worker independently of the executor that awaits its result.
+    pub fn abort_handle(&self) -> AbortHandle {
+        self.handle.abort_handle()
+    }
 }
 
 impl<T> Future for BackgroundTask<T> {

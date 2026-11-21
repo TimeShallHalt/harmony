@@ -101,6 +101,17 @@ impl Encoder {
         Ok(encoder)
     }
 
+    /// Codec delay in samples at 48 kHz, for a correctly trimmed Ogg stream.
+    pub fn lookahead(&mut self) -> Result<u16> {
+        let mut samples = 0i32;
+        // SAFETY: OPUS_GET_LOOKAHEAD takes one pointer to an int.
+        let status = unsafe { opus_encoder_ctl(self.raw.as_ptr(), 4027, &mut samples as *mut i32) };
+        if status != 0 || !(0..=u16::MAX as i32).contains(&samples) {
+            bail!("Opus couldn't report its delay ({status})");
+        }
+        Ok(samples as u16)
+    }
+
     /// Encodes one frame of interleaved samples into `out`, returning the
     /// packet's length.
     pub fn encode_float(&mut self, pcm: &[f32], out: &mut [u8]) -> Result<usize> {

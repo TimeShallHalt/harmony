@@ -199,7 +199,7 @@ impl Application {
 
     /// What a message carries on the wire for text as typed in a room: links
     /// without tracking, mentions and custom emoji written as Discord has them.
-    fn outgoing_body(&self, room: &str, text: &str) -> String {
+    pub fn outgoing_body(&self, room: &str, text: &str) -> String {
         let text = if self.state.strip_tracking {
             crate::links::without_tracking(text)
         } else {

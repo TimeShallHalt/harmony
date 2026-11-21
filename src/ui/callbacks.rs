@@ -573,8 +573,11 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
             }
         },
     );
+    super::voice_notes::bind(window, adapter);
     super::games::bind(window, adapter);
     super::timezones::bind(window, adapter);
+    super::local_profile::bind(window, adapter);
+    super::orbs::bind(window, adapter);
     super::app_commands::bind(window, adapter);
     super::keybinds::bind(window, adapter);
     super::gifs::bind(window, adapter);
@@ -636,11 +639,13 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         .global::<EmojiFavorites>()
         .on_is_favorite(|key, _| EMOJI_FAVORITES.with_borrow(|set| set.contains(key.as_str())));
     super::polls::bind(window, adapter);
+    super::scheduled::bind(window, adapter);
     super::call_link::bind(window, adapter);
     super::server_settings::bind(window, adapter);
     super::channel_settings::bind(window, adapter);
     super::title_bar::bind(window, adapter);
     super::about::bind(window);
+    super::release_updates::bind(window, adapter);
     // A server tag opens its server's card beside it, showing what's known
     // at once, and asks Discord for the rest.
     window.global::<ServerTags>().on_open({

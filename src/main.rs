@@ -28,6 +28,8 @@ mod emoji_text;
 #[cfg(feature = "desktop")]
 mod graphics;
 #[cfg(feature = "desktop")]
+mod harmony_updates;
+#[cfg(feature = "desktop")]
 mod icon;
 #[cfg(feature = "desktop")]
 mod instance;
@@ -82,6 +84,10 @@ fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some(yapfast_core::stream_worker::ARGUMENT) {
         logging::init_to_stderr();
         return yapfast_core::stream_worker::run();
+    }
+    #[cfg(feature = "discord")]
+    if std::env::args().nth(1).as_deref() == Some(yapfast_core::recording::ARGUMENT) {
+        return yapfast_core::recording::run();
     }
     let mut arguments: Vec<_> = std::env::args().skip(1).collect();
     // First, so nothing a desktop handed over with the link is read as an option.

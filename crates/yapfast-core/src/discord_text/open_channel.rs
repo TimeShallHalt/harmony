@@ -830,6 +830,7 @@ impl OpenChannel {
                 }
                 let sending = yapfast_discord::api::Sending {
                     nonce: &nonce,
+                    enforce_nonce: false,
                     reply: reply.as_deref(),
                     ping_reply: !options.quiet_reply,
                     silent: options.silent,

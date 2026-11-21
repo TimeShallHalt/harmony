@@ -528,17 +528,20 @@ struct Video {
     _sound: Option<stream_audio::Capture>,
     /// When the stream last reported how it goes out, and the bytes it had
     /// sent then.
-    measured: (Instant, u64),
+    measured: (Instant, u64, u64),
 }
 
 impl Video {
     /// How the stream goes out, with the kbit/s sent since it last said.
-    fn sending(&mut self, fps: u32) -> StreamStats {
+    fn sending(&mut self) -> StreamStats {
         let sent = self.sender.sent();
-        let (since, before) = self.measured;
+        let (since, before, frames) = self.measured;
         let bits = sent.video_bytes.saturating_sub(before) * 8;
-        let milliseconds = since.elapsed().as_millis().max(1) as u64;
-        self.measured = (Instant::now(), sent.video_bytes);
+        let now = Instant::now();
+        let elapsed = now.duration_since(since);
+        let milliseconds = elapsed.as_millis().max(1) as u64;
+        let fps = measured_fps(sent.video_frames.saturating_sub(frames), elapsed);
+        self.measured = (now, sent.video_bytes, sent.video_frames);
         let (width, height) = self.encoder.size();
         StreamStats {
             engine: self.encoder.engine().to_owned(),
@@ -552,6 +555,10 @@ impl Video {
             resent: sent.resent,
         }
     }
+}
+
+fn measured_fps(frames: u64, elapsed: Duration) -> u32 {
+    (frames as f64 / elapsed.as_secs_f64().max(0.001)).round() as u32
 }
 
 /// The codecs only a GPU encodes, most wanted first, offered before H264
@@ -608,7 +615,7 @@ impl Sink {
                 sender,
                 encoder,
                 _sound: sound,
-                measured: (Instant::now(), 0),
+                measured: (Instant::now(), 0, 0),
             });
         }
         let Some(video) = self.video.as_ref() else {
@@ -763,7 +770,7 @@ impl Sink {
             && self.streaming
             && video.measured.0.elapsed() >= SENDING_EVERY
         {
-            report(Report::Sending(video.sending(self.fps)));
+            report(Report::Sending(video.sending()));
         }
         Ok(switch)
     }
@@ -1767,6 +1774,14 @@ impl Drop for Worker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn measured_fps_tracks_sent_frames_and_idle_intervals() {
+        assert_eq!(
+            super::measured_fps(18, std::time::Duration::from_millis(1200)),
+            15
+        );
+        assert_eq!(super::measured_fps(0, std::time::Duration::from_secs(1)), 0);
+    }
     use super::*;
 
     /// A worker that dies without a [`Report::Ended`] logs a warning with

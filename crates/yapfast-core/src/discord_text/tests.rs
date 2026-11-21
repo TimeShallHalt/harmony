@@ -43,6 +43,39 @@ fn unavailable_discord_fails_the_interaction_with_its_nonce() {
 }
 
 #[test]
+fn scheduled_commands_fail_visibly_without_authorized_service() {
+    let root = tempfile::tempdir().unwrap();
+    struct Clock;
+    impl crate::scheduled::Clock for Clock {
+        fn now_ms(&self) -> i64 {
+            1_000_000
+        }
+    }
+    let mut queue = crate::scheduled::Queue::open(root.path()).unwrap();
+    let id = queue
+        .schedule("123", "discord:10:11", "hi", 1_060_000, &[], &Clock)
+        .unwrap();
+    struct Due;
+    impl crate::scheduled::Clock for Due {
+        fn now_ms(&self) -> i64 {
+            1_060_000
+        }
+    }
+    let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+    queue
+        .dispatch_due("123", true, &Due, |payload| {
+            let command = Command::ScheduledSend(payload);
+            assert_eq!(command.route(), crate::chat::Route::Discord);
+            without(command, "offline fixture", &events);
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        matches!(received.try_recv(), Ok(Event::ScheduledResult { id: got, account, result: Err(e) }) if got == id && account == "123" && e == "offline fixture")
+    );
+}
+
+#[test]
 fn answers_discord_commands_while_discord_is_away() {
     let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
     let why = "Discord couldn't start: the credential store is locked";
@@ -903,6 +936,92 @@ async fn fake_discord() -> Discord {
     .expect("the fake Discord answers")
     .unwrap();
     discord
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testing/fake_discord.ts and YAPFAST_DISCORD_TEST_SERVER"]
+async fn scheduled_message_reaches_its_saved_channel_once() {
+    use crate::scheduled::{Clock, Queue, State, SystemClock};
+    struct At(i64);
+    impl Clock for At {
+        fn now_ms(&self) -> i64 {
+            self.0
+        }
+    }
+    let discord = fake_discord().await;
+    let owner = discord.snapshots().borrow().user_id.clone().unwrap();
+    let room = discord::room_id(FAKE_GUILD, FAKE_GENERAL);
+    let root = tempfile::tempdir().unwrap();
+    let mut queue = Queue::open_with(root.path(), crate::scheduled::fixtures::keys()).unwrap();
+    let now = SystemClock.now_ms();
+    let id = queue
+        .schedule(
+            &owner,
+            &room,
+            "Scheduled fixture",
+            now,
+            &[],
+            &At(now - 2000),
+        )
+        .unwrap();
+    let mut live = discord.live();
+    let (done, _) = tokio::sync::mpsc::unbounded_channel();
+    let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let mut channels = Channels::default();
+    assert_eq!(
+        queue
+            .dispatch_due(&owner, true, &SystemClock, |claim| {
+                command(
+                    Command::ScheduledSend(claim),
+                    Ok(&discord),
+                    &mut channels,
+                    &done,
+                    &events,
+                );
+                Ok(())
+            })
+            .unwrap(),
+        1
+    );
+    let result = tokio::time::timeout(Duration::from_secs(10), received.recv())
+        .await
+        .unwrap();
+    let Some(Event::ScheduledResult {
+        account,
+        id: received_id,
+        result,
+    }) = result
+    else {
+        panic!("expected a correlated scheduled-send result");
+    };
+    assert_eq!(
+        (account.as_str(), received_id.as_str()),
+        (owner.as_str(), id.as_str())
+    );
+    assert!(result.is_ok(), "{result:?}");
+    queue.complete(&account, &id, result).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Live::Created(message) = live.recv().await.unwrap()
+                && message.nonce.as_deref() == Some(id.as_str())
+            {
+                assert_eq!(message.channel_id, FAKE_GENERAL);
+                assert_eq!(message.content, "Scheduled fixture");
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    drop(queue);
+    let mut restored = Queue::open_with(root.path(), crate::scheduled::fixtures::keys()).unwrap();
+    assert_eq!(restored.items()[0].state, State::Sent);
+    assert_eq!(
+        restored
+            .dispatch_due(&owner, true, &SystemClock, |_| panic!("already sent"))
+            .unwrap(),
+        0
+    );
 }
 
 /// Applies finished work until `found` picks an event it led to.

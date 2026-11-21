@@ -21,6 +21,21 @@ pub fn command(
     done: &UnboundedSender<Done>,
     events: &UnboundedSender<Event>,
 ) {
+    if let Command::Discord(DiscordCommand::ReadOrbs(request)) = command {
+        let client = discord.ok().cloned();
+        let events = events.clone();
+        tokio::spawn(async move {
+            let report = match client {
+                Some(client) => client.orbs(&request).await,
+                None => Default::default(),
+            };
+            let _ = events.send(Event::Orbs {
+                request,
+                report: Arc::new(report),
+            });
+        });
+        return;
+    }
     // Active Chat owns the cancelable profile loader. If no Chat exists, do
     // not silently swallow these commands and strand the overlay in loading.
     let command = match command {
@@ -53,6 +68,42 @@ pub fn command(
     }
     if let Command::Aside(room) = command {
         aside(room, discord, channels, done, events);
+        return;
+    }
+    if let Command::ScheduledSend(send) = command {
+        super::scheduled::send(send, discord, channels, events);
+        return;
+    }
+    if let Command::SendVoiceNote {
+        room,
+        account,
+        request,
+        note,
+    } = command
+    {
+        let place = discord::parse_room(&room).map(|(_, channel)| channel.to_owned());
+        match (discord, place) {
+            (Ok(discord), Some(channel)) => {
+                let (discord, events) = (discord.clone(), events.clone());
+                tokio::spawn(async move {
+                    let result = discord.send_voice_note(&channel, &account, &note, &request).await
+                        .map_err(|error| format!("Voice-message send failed: {error:#}. If the connection was lost, it may have arrived; check before retrying."));
+                    let _ = events.send(Event::VoiceNoteSent { request, result });
+                });
+            }
+            (Err(why), _) => {
+                let _ = events.send(Event::VoiceNoteSent {
+                    request,
+                    result: Err(why.into()),
+                });
+            }
+            _ => {
+                let _ = events.send(Event::VoiceNoteSent {
+                    request,
+                    result: Err(NOT_DISCORD.into()),
+                });
+            }
+        }
         return;
     }
     if let Command::SendPoll { room, poll } = command {

@@ -154,7 +154,7 @@ fn open(
 /// The PulseAudio source behind a WebRTC device: its first entry is the
 /// default source, prefixed "default: ", and the rest are the sources that
 /// are not monitors, by description.
-fn source(microphone: Option<&str>) -> Result<Option<String>> {
+pub(super) fn source(microphone: Option<&str>) -> Result<Option<String>> {
     device(microphone, false)
         .map_err(|error| error.context("this microphone is no longer connected"))
 }

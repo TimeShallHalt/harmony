@@ -554,6 +554,23 @@ fn time_ago(at: u64) -> String {
     }
 }
 
+/// A history row shows the account's chosen local date/time format. A session
+/// length is only meaningful when the service provided both boundaries.
+fn history_time(entry: &yapfast_core::chat::RecentActivity) -> String {
+    let Some(at) = entry.at else {
+        return String::new();
+    };
+    let when = yapfast_core::clock::render_timestamps(&format!("<t:{}:f>", at / 1000));
+    let mut label = format!("{} · {when}", time_ago(at));
+    if let Some(ms) = entry.duration_ms {
+        label.push_str(&format!(
+            " · {} session",
+            yapfast_core::clock::lasted(0, ms / 1000)
+        ));
+    }
+    label
+}
+
 /// A profile effect's layers as the card plays them, in the order they lie.
 fn effect_layers(effect: &yapfast_core::chat::ProfileEffect) -> Vec<EffectLayer> {
     let millis = |time: u32| i32::try_from(time).unwrap_or(i32::MAX);
@@ -698,6 +715,7 @@ pub(super) fn profile_data(
                 })
                 .map(|art| art.url.as_str()),
         ),
+        local_decoration: false,
         name_font: legacy_style.map_or(0, |s| i32::try_from(s.font_id).unwrap_or(-1)),
         name_effect: legacy_style.map_or(0, |s| i32::try_from(s.effect_id).unwrap_or(-1)),
         name_colors: ModelRc::new(VecModel::from(legacy_style.map_or_else(Vec::new, |s| {
@@ -868,6 +886,7 @@ pub(super) fn profile_data(
         recent: ModelRc::new(VecModel::from(
             profile
                 .recent
+                .entries()
                 .iter()
                 .map(|entry| ProfileRecentRow {
                     title: entry.title.as_str().into(),
@@ -875,7 +894,7 @@ pub(super) fn profile_data(
                     url: entry.picture.as_deref().unwrap_or_default().into(),
                     initial: initial(&entry.title),
                     music: entry.music,
-                    when: entry.at.map(time_ago).unwrap_or_default().into(),
+                    when: history_time(entry).into(),
                 })
                 .collect::<Vec<_>>(),
         )),
@@ -915,7 +934,17 @@ pub(super) fn profile_data(
         bot: state.relation(&profile.id) == Relation::Bot,
         // Discord's answer to what they did lately has come, or there is
         // none to wait for.
-        recent_known: !discord || state.preview || profile.recent_came,
+        recent_known: !discord
+            || state.preview
+            || matches!(
+                profile.recent,
+                yapfast_core::chat::ActivityHistory::Loaded(_)
+                    | yapfast_core::chat::ActivityHistory::Unavailable
+            ),
+        recent_unavailable: matches!(
+            profile.recent,
+            yapfast_core::chat::ActivityHistory::Unavailable
+        ),
         // From the friend list; no one is their own friend.
         friends_since: if own {
             SharedString::default()

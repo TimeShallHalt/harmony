@@ -4,8 +4,8 @@ Harmony is Ren's personal Yapfast-based Discord client. Name chosen by Ren as th
 
 ## Identity
 
-Harmony 1.1.0 integrates Yapfast 0.4.1 while retaining the fork's Update 1–4 features.
-The source folder is `Harmony`; Windows builds produce `Harmony.exe`. Linux
+Harmony 1.3.0 adds device-local profile customization, measured streaming quality, Discord Quests and the Orbs Shop. It builds on Harmony 1.2.0 and Yapfast 0.4.1, including signed Windows updates, desktop Rich Presence, profile activity history, local message scheduling and voice recording.
+Windows builds produce `Harmony.exe`. Linux
 packages install `harmony`. Internal crate names and legacy credential-store keys
 remain stable compatibility identifiers, not product branding.
 

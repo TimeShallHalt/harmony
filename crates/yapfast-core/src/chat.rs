@@ -936,11 +936,8 @@ pub struct Profile {
     /// Their board's games and applications were asked after, and came.
     pub board_asked: bool,
     pub board_named: bool,
-    /// What they did lately, once asked for.
-    pub recent: Vec<RecentActivity>,
-    pub recent_asked: bool,
-    /// Discord's answer to it came, even an empty or failed one.
-    pub recent_came: bool,
+    /// The activity Discord made available to this viewer for this profile.
+    pub recent: ActivityHistory,
 }
 
 impl Profile {
@@ -992,6 +989,26 @@ impl From<&yapfast_discord::profile::FrameLayer> for ProfileFrameLayer {
     }
 }
 
+/// A request belongs to a single opened profile. A late reply cannot populate a
+/// different open of the same person's profile or an account that has signed out.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ActivityHistory {
+    #[default]
+    Unasked,
+    Loading(Arc<()>),
+    Loaded(Vec<RecentActivity>),
+    Unavailable,
+}
+
+impl ActivityHistory {
+    pub fn entries(&self) -> &[RecentActivity] {
+        match self {
+            Self::Loaded(entries) => entries,
+            _ => &[],
+        }
+    }
+}
+
 /// A past thing on someone's Activity tab.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecentActivity {
@@ -999,8 +1016,10 @@ pub struct RecentActivity {
     pub subtitle: String,
     pub picture: Option<String>,
     pub music: bool,
-    /// When it ended, in Unix milliseconds.
+    /// When it was last active, in Unix milliseconds.
     pub at: Option<u64>,
+    /// Only present if Discord supplied both session boundaries.
+    pub duration_ms: Option<u64>,
 }
 
 /// A widget on a Discord board.
@@ -2214,6 +2233,14 @@ pub struct SendOptions {
 /// which of them carries out each one.
 #[derive(Clone)]
 pub enum Command {
+    /// Exactly one user-reviewed voice note, with a stable nonce for retries.
+    #[cfg(feature = "discord")]
+    SendVoiceNote {
+        room: String,
+        account: String,
+        request: String,
+        note: Arc<yapfast_discord::voice_note::Note>,
+    },
     Voice(voice::Command),
     /// For the linked Discord account alone.
     Discord(DiscordCommand),
@@ -2236,6 +2263,9 @@ pub enum Command {
         options: SendOptions,
         files: Vec<OutgoingFile>,
     },
+    /// A durable local queue claim, through the existing authorized Discord
+    /// send service. Never interpreted as a server-side schedule.
+    ScheduledSend(crate::scheduled::Dispatch),
     Edit {
         room: String,
         item: String,
@@ -2836,6 +2866,8 @@ pub struct CommandRun {
 /// Commands only the linked Discord account carries out.
 #[derive(Clone)]
 pub enum DiscordCommand {
+    #[cfg(feature = "discord")]
+    ReadOrbs(Arc<str>),
     /// Only an identity-bound resource derived from the received profile.
     ViewProfileMedia {
         request: u64,
@@ -3359,9 +3391,10 @@ pub enum DiscordCommand {
         user: String,
         widgets: Vec<ProfileWidget>,
     },
-    /// What someone did lately, read-only; [`Event::ProfileRecent`] follows.
+    /// Ask for the activity visible to this viewer on this open of a profile.
     ProfileRecent {
         user: String,
+        request: Arc<()>,
     },
     /// This account's profile for its editor: in a Discord server, by its
     /// server id, or its main profile; [`Event::OwnProfile`] follows.
@@ -4129,6 +4162,7 @@ impl Command {
             Network::Matrix => Route::Matrix,
         };
         match self {
+            Command::ScheduledSend(_) => Route::Discord,
             Command::Voice(_) => Route::Voice,
             // Only Discord's videos and voice messages play for now.
             Command::Discord(_)
@@ -4136,6 +4170,8 @@ impl Command {
             | Command::PauseVoiceMessage
             | Command::TuneVoiceMessage(_)
             | Command::Aside(_) => Route::Discord,
+            #[cfg(feature = "discord")]
+            Command::SendVoiceNote { .. } => Route::Discord,
             Command::Open(_) | Command::CloseRoom | Command::FindPeople { .. } => Route::Every,
             Command::Send { room, .. }
             | Command::Edit { room, .. }
@@ -4189,6 +4225,11 @@ pub enum ForwardFailure {
 }
 
 pub enum Event {
+    #[cfg(feature = "discord")]
+    Orbs {
+        request: Arc<str>,
+        report: Arc<yapfast_discord::orbs::Overview>,
+    },
     /// A bot answered an interaction with a form, as Discord sent it, with
     /// the interaction's `nonce`.
     InteractionModal(serde_json::Value),
@@ -4229,6 +4270,11 @@ pub enum Event {
     AutocompleteChoices {
         nonce: String,
         choices: serde_json::Value,
+    },
+    #[cfg(feature = "discord")]
+    VoiceNoteSent {
+        request: String,
+        result: Result<(), String>,
     },
     /// The GIF picker's home, or why it couldn't load.
     GifCategories(Result<(Vec<GifCategory>, Option<Gif>), String>),
@@ -4323,10 +4369,10 @@ pub enum Event {
         user: String,
         widgets: Vec<ProfileWidget>,
     },
-    /// What [`DiscordCommand::ProfileRecent`] found; nothing if Discord didn't say.
+    /// A successful empty history is distinct from Discord being unavailable.
     ProfileRecent {
-        user: String,
-        recent: Vec<RecentActivity>,
+        request: Arc<()>,
+        recent: Result<Vec<RecentActivity>, ()>,
     },
     /// The profile Harmony kept of someone [`DiscordCommand::Profile`] asked
     /// for, to show until [`Event::Profile`] comes.
@@ -4809,6 +4855,12 @@ pub enum Event {
         members: Vec<ChatMember>,
         observations: HashMap<String, yapfast_discord::service::PresenceObservation>,
         observation: Option<yapfast_discord::service::PresenceObservation>,
+    },
+    /// Outcome of the owning account's persisted local send claim.
+    ScheduledResult {
+        id: String,
+        account: String,
+        result: Result<(), String>,
     },
     /// The send queue accepted or refused a message; delivery shows on its timeline item.
     SendResult {

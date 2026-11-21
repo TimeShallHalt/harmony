@@ -754,9 +754,7 @@ pub(super) fn chat_profile(
         wishlist: Default::default(),
         board_asked: false,
         board_named: false,
-        recent: Vec::new(),
-        recent_asked: false,
-        recent_came: false,
+        recent: Default::default(),
         handle: profile.username,
         id: profile.user_id,
         // What the member list knows; the profile doesn't say.

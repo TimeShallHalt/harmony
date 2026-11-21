@@ -34,8 +34,8 @@ def main():
     commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip():
         p.error('Commit the exact clean candidate before packaging')
-    version=tomllib.loads((ROOT/'Cargo.toml').read_text())['package']['version']
-    stamp=json.loads(args.stamp.read_text())
+    version=tomllib.loads((ROOT/'Cargo.toml').read_text(encoding='utf-8'))['package']['version']
+    stamp=json.loads(args.stamp.read_bytes())
     validate_stamp(stamp,commit,version)
     with args.exe.open('rb') as f:
         h=f.read(64)
@@ -44,7 +44,7 @@ def main():
         if not 64<=offset<=1024*1024: raise ValueError('Invalid PE header offset')
         f.seek(offset)
         if f.read(6)!=b'PE\0\0\x64\x86': raise ValueError('Expected AMD64 PE executable')
-    metadata=json.loads(args.metadata.read_text())
+    metadata=json.loads(args.metadata.read_bytes())
     app=next(x for x in metadata['packages'] if x['name']=='yapfast')
     if Path(app['manifest_path']).resolve()!=ROOT/'Cargo.toml' or app['version']!=version:
         raise ValueError('Metadata does not belong to this candidate')
@@ -67,9 +67,9 @@ def main():
         deps=dependency_notices(metadata,package,package/'licenses',args.skia_archive,args.skia_source,args.webrtc)
         (package/'THIRD-PARTY.json').write_text(json.dumps(deps,indent=2)+'\n',encoding='utf-8')
         (package/'SOURCE.txt').write_text(f'Harmony {version}, build {stamp["build_id"]}\nCommit: {commit}\nGPL-3.0-or-later.\nMatching source accompanies this package: {source.name}\nSource SHA-256: {digest(source)}\nUpstream: Yapfast 0.4.1, https://github.com/yapfast/yapfast\nDependency notices and licenses are included in licenses/.\n',encoding='utf-8')
-        (package/'README.txt').write_text('Harmony for Windows 10/11 x64\n\nExtract the whole ZIP, then run Harmony.exe.\nUpdater not included. No automatic installation, startup registration or launch by this package.\nDo not replace a running app: close it yourself when convenient before a manual update.\nExisting data folders are preserved. The default Windows folder is %LOCALAPPDATA%/Harmony/data; Credential Manager keeps its legacy service IDs for compatibility.\nIf an existing shortcut still targets yapfast.exe, manually retarget it to Harmony.exe while preserving its --data-dir arguments.\nNo credentials, sessions, account cache or user settings are included.\nDiscord does not authorize third-party personal-account clients; use carries account risk.\nGPL-3.0-or-later; see LICENSE.txt, SOURCE.txt and licenses/.\n',encoding='utf-8')
+        (package/'README.txt').write_text('Harmony for Windows 10/11 x64\n\nExtract the whole ZIP, then run Harmony.exe.\nFind releases in Settings > About. Windows Setup can be downloaded and verified in Harmony. Portable copies can keep using the ZIP or switch to Setup.\nDo not replace a running app: close it yourself when convenient before a manual update.\nExisting data folders are preserved. The default Windows folder is %LOCALAPPDATA%/Harmony/data; Credential Manager keeps its legacy service IDs for compatibility.\nIf an existing shortcut still targets yapfast.exe, manually retarget it to Harmony.exe while preserving its --data-dir arguments.\nNo credentials, sessions, account cache or user settings are included.\nDiscord does not authorize third-party personal-account clients; use carries account risk.\nGPL-3.0-or-later; see LICENSE.txt, SOURCE.txt and licenses/.\n',encoding='utf-8')
         build=dict(stamp,executable_sha256=digest(args.exe),source_archive_sha256=digest(source),
-                   updater_included=False,installation_performed=False,activation_performed=False)
+                   updater_included=True,installation_performed=False,activation_performed=False)
         (package/'BUILD.json').write_text(json.dumps(build,indent=2)+'\n',encoding='utf-8')
         zip_directory(package,archive)
     sums={x.name:digest(x) for x in (archive,source)}
