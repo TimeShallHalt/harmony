@@ -2233,6 +2233,14 @@ pub struct SendOptions {
 /// which of them carries out each one.
 #[derive(Clone)]
 pub enum Command {
+    /// Exactly one user-reviewed voice note, with a stable nonce for retries.
+    #[cfg(feature = "discord")]
+    SendVoiceNote {
+        room: String,
+        account: String,
+        request: String,
+        note: Arc<yapfast_discord::voice_note::Note>,
+    },
     Voice(voice::Command),
     /// For the linked Discord account alone.
     Discord(DiscordCommand),
@@ -4160,6 +4168,8 @@ impl Command {
             | Command::PauseVoiceMessage
             | Command::TuneVoiceMessage(_)
             | Command::Aside(_) => Route::Discord,
+            #[cfg(feature = "discord")]
+            Command::SendVoiceNote { .. } => Route::Discord,
             Command::Open(_) | Command::CloseRoom | Command::FindPeople { .. } => Route::Every,
             Command::Send { room, .. }
             | Command::Edit { room, .. }
@@ -4253,6 +4263,11 @@ pub enum Event {
     AutocompleteChoices {
         nonce: String,
         choices: serde_json::Value,
+    },
+    #[cfg(feature = "discord")]
+    VoiceNoteSent {
+        request: String,
+        result: Result<(), String>,
     },
     /// The GIF picker's home, or why it couldn't load.
     GifCategories(Result<(Vec<GifCategory>, Option<Gif>), String>),

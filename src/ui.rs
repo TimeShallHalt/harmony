@@ -2291,6 +2291,8 @@ struct Adapter {
     dialog: Option<slint::JoinHandle<()>>,
     /// Reads the microphone while the input menu shows its level.
     meter: Option<InputMeter>,
+    #[cfg(feature = "discord")]
+    voice_notes: voice_notes::Recorder,
     /// Films with the chosen camera while voice settings try it.
     camera_test: Option<(yapfast_core::camera::Camera, yapfast_core::picture::Feed)>,
     /// Films for a preview call with the camera on.
@@ -2622,6 +2624,8 @@ impl Adapter {
                 viewer_size: None,
                 dialog: None,
                 meter: None,
+                #[cfg(feature = "discord")]
+                voice_notes: voice_notes::Recorder::default(),
                 camera_test: None,
                 preview_camera: None,
                 frame_ids: vec![],

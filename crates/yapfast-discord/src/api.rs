@@ -625,6 +625,28 @@ impl Api {
             .await
     }
 
+    /// Discord accepts a voice message in one multipart Create Message request.
+    pub async fn send_voice_note(
+        &self,
+        channel: &str,
+        note: &crate::voice_note::Note,
+        nonce: &str,
+    ) -> Result<Value> {
+        let payload = note.message_body(nonce)?.to_string();
+        let (mime, body) = form(
+            &[("payload_json", &payload)],
+            "files[0]",
+            (crate::voice_note::FILENAME, "audio/ogg", note.data()),
+        );
+        let path = format!("/channels/{channel}/messages");
+        let request = self
+            .request(Method::POST, &path)
+            .header(header::CONTENT_TYPE, mime)
+            .body(body)
+            .timeout(self.stall);
+        self.json(request).await
+    }
+
     /// Posts a poll, a message with nothing else.
     pub async fn send_poll(&self, channel: &str, poll: &NewPoll, nonce: &str) -> Result<Value> {
         let mut body = message_body("", nonce);
@@ -1674,7 +1696,7 @@ impl Api {
         file: (&str, &str, &[u8]),
     ) -> Result<Value> {
         let path = format!("/guilds/{guild}/stickers");
-        let (content_type, body) = form(&fields, file);
+        let (content_type, body) = form(&fields, "file", file);
         self.json(
             self.request(Method::POST, &path)
                 .header(header::CONTENT_TYPE, content_type)
@@ -2679,7 +2701,7 @@ fn post_body(
 
 /// A `multipart/form-data` body of text `fields` and a file, given by its
 /// name, type and bytes, with its content type.
-fn form(fields: &[(&str, &str)], file: (&str, &str, &[u8])) -> (String, Vec<u8>) {
+fn form(fields: &[(&str, &str)], file_field: &str, file: (&str, &str, &[u8])) -> (String, Vec<u8>) {
     let boundary = format!("yapfast{:016x}", rand::random::<u64>());
     let mut body = Vec::with_capacity(file.2.len() + 512);
     for (name, value) in fields {
@@ -2694,7 +2716,7 @@ fn form(fields: &[(&str, &str)], file: (&str, &str, &[u8])) -> (String, Vec<u8>)
     let filename = filename.replace(['"', '\r', '\n'], "_");
     body.extend_from_slice(
         format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
         )
         .as_bytes(),
     );
@@ -2774,6 +2796,10 @@ fn discord_file(url: &str) -> bool {
         .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()));
     proxy || host == "cdn.discordapp.com" || host == "media.discordapp.net"
 }
+
+#[cfg(test)]
+#[path = "api/voice_note_tests.rs"]
+mod voice_note_tests;
 
 #[cfg(test)]
 mod tests {

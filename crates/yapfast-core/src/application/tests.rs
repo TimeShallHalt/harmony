@@ -1,4 +1,6 @@
 use super::{preview::preview_room, *};
+#[cfg(feature = "discord")]
+mod voice_notes;
 
 #[cfg(all(feature = "discord", feature = "test-fixtures"))]
 mod platform_ordering;

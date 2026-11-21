@@ -48,6 +48,10 @@ mod place_search;
 mod places;
 mod platforms;
 mod polls;
+#[cfg(feature = "discord")]
+mod voice_notes;
+#[cfg(feature = "discord")]
+pub use voice_notes::VoiceNoteDelivery;
 mod preview;
 mod profile_editor;
 mod profile_media;
@@ -492,6 +496,8 @@ pub struct AppState {
     pub interaction_failed: Option<(String, String)>,
     /// The choices of a bot's select menu, in a message or a form, open.
     pub select_menu: Option<SelectMenu>,
+    #[cfg(feature = "discord")]
+    pub voice_note_delivery: Option<VoiceNoteDelivery>,
     pub voice: voice::State,
     /// Discord is linked on this device and connected.
     pub discord_online: bool,
@@ -1667,6 +1673,13 @@ pub enum Action {
     StartDm(Contact),
     CloseNewDm,
     Send,
+    #[cfg(feature = "discord")]
+    SendVoiceNote {
+        room: String,
+        account: String,
+        request: String,
+        note: Arc<yapfast_discord::voice_note::Note>,
+    },
     Reply(String),
     /// Open this message of this account's for editing in place.
     Edit(String),
@@ -3527,6 +3540,13 @@ impl Application {
             Action::CancelSend(item) => {
                 self.queue_action(item, |room, item| Command::Cancel { room, item })
             }
+            #[cfg(feature = "discord")]
+            Action::SendVoiceNote {
+                room,
+                account,
+                request,
+                note,
+            } => self.send_voice_note(room, account, request, note),
             Action::Stage(paths) => {
                 self.stage(paths);
                 vec![]
@@ -4876,6 +4896,17 @@ impl Application {
             }
             // The desktop local queue owns its correlated completion record.
             Event::ScheduledResult { .. } => {}
+            #[cfg(feature = "discord")]
+            Event::VoiceNoteSent { request, result } => {
+                if let Some(delivery) = self
+                    .state
+                    .voice_note_delivery
+                    .as_mut()
+                    .filter(|delivery| delivery.request == request)
+                {
+                    delivery.result = Some(result);
+                }
+            }
             Event::SendResult { room, body, result } => {
                 if self.state.sending.as_ref() == Some(&room) {
                     self.state.sending = None;

@@ -1680,6 +1680,34 @@ impl Discord {
         message::parse(&value).ok_or_else(|| anyhow!("could not understand Discord's answer"))
     }
 
+    /// Send a reviewed recording only under the Discord account that recorded it.
+    pub async fn send_voice_note(
+        &self,
+        channel: &str,
+        account: &str,
+        note: &crate::voice_note::Note,
+        nonce: &str,
+    ) -> Result<()> {
+        {
+            let snapshot = self.snapshots.borrow();
+            anyhow::ensure!(
+                snapshot.status == Status::Online && snapshot.user_id.as_deref() == Some(account),
+                "Reconnect to the account that recorded this message."
+            );
+        }
+        let answer = self.api.send_voice_note(channel, note, nonce).await?;
+        let message = message::parse(&answer)
+            .ok_or_else(|| anyhow!("Discord returned an incomplete voice message."))?;
+        anyhow::ensure!(
+            message.author_id == account
+                && message.channel_id == channel
+                && message.nonce.as_deref() == Some(nonce)
+                && message.voice.is_some(),
+            "Discord did not confirm this voice message. Check the conversation before retrying."
+        );
+        Ok(())
+    }
+
     /// Uploads files for a message in `channel`, given as their names and
     /// contents, all at once as Discord's client does; if one fails, the
     /// others are thrown away.

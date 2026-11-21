@@ -16,21 +16,34 @@ use std::{sync::Arc, thread::JoinHandle};
 use anyhow::Result;
 
 #[cfg(target_os = "linux")]
+#[path = "audio_io/pulse.rs"]
 mod pulse;
 #[cfg(target_os = "linux")]
 use pulse as platform;
+#[cfg(target_os = "linux")]
+#[path = "audio_io/pinned_pulse.rs"]
+mod pinned_pulse;
+/// Strict local recording: Linux prevents server-side microphone moves;
+/// Windows' shared-mode stream stays pinned to the opened endpoint.
+#[cfg(target_os = "linux")]
+pub(crate) use pinned_pulse::PinnedInput as FixedInput;
+#[cfg(not(target_os = "linux"))]
+pub(crate) type FixedInput = Input<f32>;
 
 #[cfg(target_os = "windows")]
+#[path = "audio_io/wasapi.rs"]
 mod wasapi;
 #[cfg(target_os = "windows")]
 use wasapi as platform;
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[path = "audio_io/unsupported.rs"]
 mod unsupported;
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
 use unsupported as platform;
 
 #[cfg(feature = "discord")]
+#[path = "audio_io/lasting.rs"]
 mod lasting;
 #[cfg(feature = "discord")]
 pub use lasting::{LastingInput, LastingOutput};

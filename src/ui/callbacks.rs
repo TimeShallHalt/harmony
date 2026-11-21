@@ -573,6 +573,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
             }
         },
     );
+    super::voice_notes::bind(window, adapter);
     super::games::bind(window, adapter);
     super::timezones::bind(window, adapter);
     super::app_commands::bind(window, adapter);

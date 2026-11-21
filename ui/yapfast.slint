@@ -1,4 +1,6 @@
 import { AccountPopover } from "yapfast/account-popover.slint";
+import { VoiceNotes, VoiceNoteDialog } from "voice_notes.slint";
+export { VoiceNotes } from "voice_notes.slint";
 import { ClientStyle } from "yapfast/style.slint";
 import { WindowBar } from "yapfast/window-bar.slint";
 import { AboutUpdatesSettings } from "about_updates.slint";
@@ -1710,7 +1712,7 @@ export component YapfastWindow inherits Window {
         || root.channel-open || root.move-sync-open || root.leave-open || root.person-open
         || root.status-open || root.poll-open || Scheduling.open || root.new-dm-open || root.reactions-open
         || root.forward-open || root.leaving-link != "" || root.switch-prompt != ""
-        || root.confirm-delete != "" || root.incoming-open;
+        || root.confirm-delete != "" || root.incoming-open || VoiceNotes.open;
     // The channel has no composer here: a call, a forum, a message request, the
     // friends list, the friend requests or Browse Channels.
     property <bool> composer-missing: !root.room-selected || root.voice-panel || root.room-forum
@@ -2231,6 +2233,10 @@ export component YapfastWindow inherits Window {
                 MenuItem {
                     text: "Upload a File"; icon: @image-url("icons/file.svg"); disabled: !root.can-attach;
                     clicked => { if root.can-attach { plus-menu.close(); root.attach(); } }
+                }
+                if VoiceNotes.available: MenuItem {
+                    text: "Record Voice Message"; icon: @image-url("icons/mic.svg");
+                    clicked => { plus-menu.close(); VoiceNotes.request-open(); }
                 }
                 // Closing the menu takes these away, so they act first.
                 if root.can-start-threads: MenuItem {
@@ -3960,11 +3966,11 @@ export component YapfastWindow inherits Window {
                                             IconButton {
                                                 // Discord's is a plain 18px plus, not a circled one.
                                                 icon: ClientStyle.enabled ? @image-url("icons/plus.svg") : @image-url("icons/circle-plus.svg");
-                                                label: root.can-start-threads || root.can-create-polls || Scheduling.available ? "More options" : "Attach files";
+                                                label: root.can-start-threads || root.can-create-polls || Scheduling.available || VoiceNotes.available ? "More options" : "Attach files";
                                                 glyph: ClientStyle.enabled ? 27px : 22px;
-                                                enabled: root.can-attach || root.can-start-threads || root.can-create-polls || Scheduling.available;
+                                                enabled: root.can-attach || root.can-start-threads || root.can-create-polls || Scheduling.available || VoiceNotes.available;
                                                 clicked => {
-                                                    if root.can-start-threads || root.can-create-polls || Scheduling.available {
+                                                    if root.can-start-threads || root.can-create-polls || Scheduling.available || VoiceNotes.available {
                                                         root.menu-x = self.absolute-position.x;
                                                         root.menu-y = self.absolute-position.y;
                                                         plus-menu.show();
@@ -5076,6 +5082,7 @@ export component YapfastWindow inherits Window {
     }
     if Scheduling.open: ScheduledDialog { }
     // Making a poll; see PollDialog.
+    if VoiceNotes.open: VoiceNoteDialog { width: parent.width; height: parent.height; }
     poll-motion := PopupMotion { open: root.poll-open; }
     if poll-motion.shown: PollDialog {
         motion: poll-motion.amount;

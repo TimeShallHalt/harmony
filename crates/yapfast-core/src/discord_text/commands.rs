@@ -59,6 +59,38 @@ pub fn command(
         super::scheduled::send(send, discord, channels, events);
         return;
     }
+    if let Command::SendVoiceNote {
+        room,
+        account,
+        request,
+        note,
+    } = command
+    {
+        let place = discord::parse_room(&room).map(|(_, channel)| channel.to_owned());
+        match (discord, place) {
+            (Ok(discord), Some(channel)) => {
+                let (discord, events) = (discord.clone(), events.clone());
+                tokio::spawn(async move {
+                    let result = discord.send_voice_note(&channel, &account, &note, &request).await
+                        .map_err(|error| format!("Voice-message send failed: {error:#}. If the connection was lost, it may have arrived; check before retrying."));
+                    let _ = events.send(Event::VoiceNoteSent { request, result });
+                });
+            }
+            (Err(why), _) => {
+                let _ = events.send(Event::VoiceNoteSent {
+                    request,
+                    result: Err(why.into()),
+                });
+            }
+            _ => {
+                let _ = events.send(Event::VoiceNoteSent {
+                    request,
+                    result: Err(NOT_DISCORD.into()),
+                });
+            }
+        }
+        return;
+    }
     if let Command::SendPoll { room, poll } = command {
         send_poll(discord, room, poll, events);
         return;

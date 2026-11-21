@@ -421,6 +421,8 @@ impl Adapter {
         self.animations = emoji_animation::Animations::new();
         self.call_timer.detach();
         self.timezone_clock.stop();
+        #[cfg(feature = "discord")]
+        self.voice_notes.discard();
         self.meter = None;
         #[cfg(feature = "discord")]
         {

@@ -161,6 +161,15 @@ impl Application {
     /// Ends what dialogs wait for once no answer can come: sending a friend
     /// request, saving the custom status and fetching a profile fail.
     fn stop_waiting(&mut self) {
+        #[cfg(feature = "discord")]
+        if let Some(delivery) = self
+            .state
+            .voice_note_delivery
+            .as_mut()
+            .filter(|delivery| delivery.result.is_none())
+        {
+            delivery.result = Some(Err("The backend stopped before voice-message delivery was confirmed. It may have arrived; check before retrying.".into()));
+        }
         if let Some(dialog) = self
             .state
             .add_friend

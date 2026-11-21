@@ -4083,6 +4083,7 @@ impl Adapter {
     }
 
     pub(super) fn show_composer(&mut self, window: &YapfastWindow) {
+        self.show_voice_notes(window);
         self.mark_mentions();
         self.show_inline_edit(window);
         let state = &self.app.state;
@@ -4539,6 +4540,7 @@ impl Adapter {
     /// The call: the voice dock, sharing and watching a screen, a DM's call,
     /// ringing, and the devices.
     fn show_voice(&mut self, window: &YapfastWindow) {
+        self.show_voice_notes(window);
         self.ring();
         // The server of a call shows it on the rail, so the rail follows a
         // call that starts, ends or moves; other voice events leave it be.
