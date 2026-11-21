@@ -1,5 +1,7 @@
 use super::*;
 use crate::own_activity::merge;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::PermissionsExt;
 
 #[cfg(target_os = "linux")]
 struct Directory(PathBuf);

@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 #[cfg(target_os = "linux")]
-use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+use std::path::PathBuf;
 #[cfg(all(test, target_os = "linux"))]
 use tokio::net::UnixListener;
 use tokio::{
