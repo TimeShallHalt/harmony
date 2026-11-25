@@ -1,0 +1,256 @@
+import { ChatEmbed } from "mobile-embeds.slint";
+import { PollCard } from "mobile-polls.slint";
+import { MobileStyle } from "mobile-style.slint";
+import { Post, Media } from "mobile-types.slint";
+
+export component ChatIcon inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <length> glyph: 21px;
+    in property <color> tint: MobileStyle.secondary;
+    in property <color> fill: transparent;
+    in property <bool> enabled: true;
+    callback activated();
+    callback held();
+    in property <bool> hold-enabled;
+    property <bool> held-on-press;
+
+    width: 42px; height: 42px; border-radius: self.height / 2;
+    opacity: root.enabled ? 1 : 0.45;
+    background: hit.pressed && root.enabled ? MobileStyle.selected : root.fill;
+    accessible-role: button; accessible-label: root.label; accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.activated(); } }
+    Image {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        width: root.glyph; height: root.glyph; source: root.icon; colorize: root.tint;
+        image-fit: contain; accessible-role: none;
+    }
+    hit := TouchArea {
+        enabled: root.enabled;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down { root.held-on-press = false; }
+        }
+        clicked => { if !root.held-on-press { root.activated(); } }
+    }
+    Timer {
+        interval: 500ms;
+        running: root.hold-enabled && hit.pressed && !root.held-on-press && abs(hit.mouse-x - hit.pressed-x) < 9px && abs(hit.mouse-y - hit.pressed-y) < 9px;
+        triggered => { root.held-on-press = true; root.held(); }
+    }
+}
+
+export component ChatMenuRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> title;
+    in property <bool> destructive;
+    callback activated();
+    height: 46px;
+    background: hit.pressed ? MobileStyle.selected : transparent;
+    accessible-role: button; accessible-label: root.title; accessible-action-default => { root.activated(); }
+    Image {
+        x: 15px; y: (parent.height - self.height) / 2; width: 20px; height: 20px;
+        source: root.icon; colorize: root.destructive ? MobileStyle.danger : MobileStyle.secondary; image-fit: contain;
+    }
+    Text {
+        x: 49px; width: parent.width - self.x - 12px; text: root.title; color: root.destructive ? MobileStyle.danger : MobileStyle.text;
+        font-size: 15px; font-weight: 600; vertical-alignment: center; overflow: elide;
+    }
+    hit := TouchArea { clicked => { root.activated(); } }
+}
+
+export component ChatAvatar inherits Rectangle {
+    in property <image> picture; in property <string> initial;
+    in property <bool> own;
+    background: root.own ? #49549a : #355c63;
+    border-radius: min(self.width, self.height) / 2; clip: true;
+    if root.picture.width > 0: Image { x:0px; y:0px; width:parent.width; height:parent.height; source: root.picture; image-fit: cover; }
+    if root.picture.width == 0: Text {
+        text: root.initial; font-size: root.height * 0.39; color: white; font-weight: 700;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+}
+
+component ChatFile inherits Rectangle {
+    in property <Media> data; in property <length> available-width;
+    in property <bool> paired;
+    in property <bool> left-cell;
+    in property <bool> first-row;
+    in property <bool> last-row;
+    callback activated();
+    property <bool> visual: data.thumb.width > 0;
+    property <bool> movie: data.media-type == "video";
+    property <bool> covered: data.media-type == "spoiler";
+    property <bool> audio: data.media-type == "audio" || data.media-type == "voice";
+    width: data.media-type=="sticker" && root.visual ? min(160px,root.available-width) : root.paired ? (min(440px, root.available-width) - 4px) / 2 : min(296px, root.available-width);
+    height: root.paired ? max(76px, min(172px, self.width * 0.85)) : root.visual ? max(82px, min(240px, self.width * data.thumb.height / max(data.thumb.width,1))) : 54px;
+    border-top-left-radius: root.paired ? root.first-row && root.left-cell ? 16px : 2px : 8px;
+    border-top-right-radius: root.paired ? root.first-row && !root.left-cell ? 16px : 2px : 8px;
+    border-bottom-left-radius: root.paired ? root.last-row && root.left-cell ? 16px : 2px : 8px;
+    border-bottom-right-radius: root.paired ? root.last-row && !root.left-cell ? 16px : 2px : 8px;
+    clip: true;
+    background: MobileStyle.field; border-color: MobileStyle.line; border-width: root.visual ? 0px : 1px;
+    accessible-role: button; accessible-label: root.covered ? "Reveal spoiler attachment" : "Open " + data.name; accessible-action-default => { root.activated(); }
+    if root.visual: Image { x:0px; y:0px; width:parent.width; height:parent.height; source: root.data.thumb; image-fit: cover; }
+    if root.visual && root.movie: Rectangle {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        width: 44px; height: 44px; border-radius: 22px; background: #141418b5;
+        Image { x: 12px; y: 12px; width: 20px; height: 20px; source: @image-url("icons/play.svg"); colorize: white; }
+    }
+    if root.covered: Rectangle {
+        width: 84px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        border-radius: 14px; background: MobileStyle.canvas;
+        Text { text: "SPOILER"; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; color: MobileStyle.text; }
+    }
+    if !root.visual && !root.covered: HorizontalLayout {
+        padding-left: 12px; padding-right: 10px; spacing: 10px;
+        Image {
+            width: 22px; source: root.audio ? @image-url("icons/music.svg") : root.movie ? @image-url("icons/video.svg") : @image-url("icons/file.svg");
+            colorize: MobileStyle.accent; image-fit: contain;
+        }
+        Text { min-width: 0px; horizontal-stretch: 1; text: root.data.name; font-size: 14px; font-weight: 600; color: MobileStyle.text; overflow: elide; vertical-alignment: center; }
+        Image { width: 18px; source: root.audio || root.movie ? @image-url("icons/play.svg") : @image-url("icons/external-link.svg"); colorize: MobileStyle.muted; image-fit: contain; }
+    }
+    TouchArea { clicked => { root.activated(); } }
+}
+
+export component ChatPost inherits Rectangle {
+    in property <Post> post;
+    in property <bool> writable;
+    in property <bool> jump;
+    in property <bool> selected;
+    callback options();
+    callback reply();
+    callback react(string);
+    callback more-reactions();
+    callback vote-poll();
+    callback media(int);
+    callback inspect(string);
+    callback show-at(length);
+
+    property <bool> held;
+    property <bool> hint;
+    property <bool> highlighted;
+    property <length> body-top: date-row.height + (root.post.grouped ? 0px : 9px);
+    property <length> slide: hit.pressed && root.writable && !root.held && abs(hit.mouse-y - hit.pressed-y) < 20px ? clamp(hit.mouse-x - hit.pressed-x, -58px, 0px) : 0px;
+    height: root.body-top + max(root.post.grouped ? 0px : 40px, stack.preferred-height) + (root.post.grouped ? 1px : 2px);
+    background: root.selected || root.highlighted ? MobileStyle.selected : transparent;
+    animate background { duration: 160ms; }
+    accessible-role: button;
+    accessible-label: root.post.author + " " + root.post.time + ". " + root.post.body + ". Message actions";
+    accessible-action-default => { root.options(); }
+    function jump-here() {
+        if root.jump {
+            root.highlighted = true;
+            move-timer.running = true;
+            dim-timer.running = true;
+        }
+    }
+    init => { root.jump-here(); }
+    changed jump => { root.jump-here(); }
+    move-timer := Timer {
+        interval: 16ms; running: false;
+        triggered => { self.running = false; root.show-at(root.absolute-position.y); }
+    }
+    dim-timer := Timer { interval: 2000ms; running: false; triggered => { self.running = false; root.highlighted = false; } }
+
+    date-row := Rectangle {
+        x: 0px; y: 0px; width: root.width; height: root.post.date-label == "" ? 0px : 34px;
+        if root.post.date-label != "": HorizontalLayout {
+            padding-left: 14px; padding-right: 14px; spacing: 9px; cross-axis-alignment: center;
+            Rectangle { horizontal-stretch: 1; height: 1px; background: MobileStyle.line; }
+            Text { text: root.post.date-label; color: MobileStyle.muted; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; height: 1px; background: MobileStyle.line; }
+        }
+    }
+    if root.slide < -6px: Image {
+        x: parent.width - 35px; y: root.body-top + 4px; width: 21px; height: 21px;
+        source: @image-url("icons/reply.svg"); colorize: MobileStyle.accent; opacity: min(1, -root.slide / 42px);
+    }
+    hit := TouchArea {
+        x: 0px; width: root.width; y: root.body-top; height: parent.height - self.y;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down { root.held = false; }
+            if e.kind == PointerEventKind.up && !root.held && root.writable && self.pressed-x - self.mouse-x >= 44px && abs(self.mouse-y - self.pressed-y) < 20px {root.reply();}
+        }
+        clicked => {
+            if root.post.grouped && !root.held && abs(self.mouse-x - self.pressed-x) < 9px {
+                root.hint = true; hint-timer.running = true;
+            }
+        }
+        double-clicked => { if root.writable && !root.held && abs(self.mouse-x - self.pressed-x) < 9px { root.react("❤️"); } }
+        Timer {
+            interval: 480ms;
+            running: hit.pressed && !root.held && abs(hit.mouse-x - hit.pressed-x) < 9px && abs(hit.mouse-y - hit.pressed-y) < 9px;
+            triggered => { root.held = true; root.options(); }
+        }
+        hint-timer := Timer {interval: 1800ms; running:false; triggered => {self.running = false; root.hint = false;} }
+        if root.post.quote != "": Rectangle {
+            x: 31px + root.slide; y: 8px; width: 30px; height: 12px;
+            Rectangle { x: 0px; y: 0px; height: 2px; background: MobileStyle.muted; opacity: 0.55; }
+            Rectangle { x: 0px; y: 0px; width: 2px; background: MobileStyle.muted; opacity: 0.55; }
+        }
+        if !root.post.grouped: ChatAvatar {
+            x: 12px + root.slide; y: root.post.quote == "" ? 0px : 18px; width: 40px; height: 40px;
+            picture: root.post.picture; initial: root.post.initial; own: root.post.own;
+        }
+        stack := VerticalLayout {
+            x: 64px + root.slide; y: 0px; width: max(8px, parent.width - 64px - 12px);
+            height: self.preferred-height; spacing: 1px; alignment: start;
+            if root.post.quote != "": HorizontalLayout {
+                height: 19px; spacing: 5px; cross-axis-alignment: center;
+                if root.post.quote-picture.width > 0: ChatAvatar { width: 15px; height: 15px; picture: root.post.quote-picture; }
+                if root.post.quote-picture.width == 0: Image { width: 13px; source: @image-url("icons/reply.svg"); colorize: MobileStyle.muted; image-fit: contain; }
+                Text { min-width: 0px; horizontal-stretch: 1; text: root.post.quote; font-size: 12px; color: MobileStyle.secondary; overflow: elide; vertical-alignment: center; }
+            }
+            if !root.post.grouped: Rectangle {
+                height: 21px;
+                author := Text {
+                    x: 0px; y: 0px; height: parent.height; width: min(self.preferred-width, max(32px,parent.width - stamp.preferred-width - 42px));
+                    text: root.post.author; color: root.post.name-color == transparent ? MobileStyle.text : root.post.name-color;
+                    overflow: elide; font-size: 15px; font-weight: 700; vertical-alignment: center;
+                }
+                stamp := Text {
+                    x: author.width + 7px; y: 0px; height:parent.height; width: min(self.preferred-width,max(0px,parent.width - self.x - 28px));
+                    text: root.post.time; color: MobileStyle.muted; font-size: 11px; overflow: elide; vertical-alignment: center;
+                }
+                if root.post.pinned: Image {
+                    x: stamp.x + stamp.width + 4px; y: 5px; width: 11px; height: 11px; source: @image-url("icons/pin.svg"); colorize: MobileStyle.muted;
+                }
+            }
+            if root.post.body != "": StyledText {
+                min-width: 0px; text: root.post.rendered; default-font-size: 16px; default-color: MobileStyle.text;
+                link-color: #67b6fb; selectable: false; link-clicked(url) => { root.inspect(url); }
+            }
+            for embed in root.post.embeds: ChatEmbed {data:embed; inspect(url)=>{root.inspect(url);}}
+            if root.post.files.length > 0: FlexboxLayout {
+                padding-top: 7px; spacing: 4px; alignment: start;
+                for file[n] in root.post.files: ChatFile {
+                    available-width: stack.width; data: file; left-cell: Math.mod(n, 2) == 0;
+                    paired: file.thumb.width > 0 && (self.left-cell ? n + 1 < root.post.files.length && root.post.files[n + 1].thumb.width > 0 : root.post.files[n - 1].thumb.width > 0);
+                    first-row: n < 2; last-row: n >= root.post.files.length - 2;
+                    activated => { root.media(file.index); }
+                }
+            }
+            if root.post.poll.question != "": PollCard { data:root.post.poll; open-vote => {root.vote-poll();} }
+            if root.post.reactions.length > 0: FlexboxLayout {
+                padding-top: 7px; padding-bottom: 1px; spacing: 4px; alignment: start;
+                for reaction in root.post.reactions: Rectangle {
+                    width: max(42px, label.preferred-width + 17px); height: 28px; border-radius: 8px;
+                    background: reaction.mine ? MobileStyle.selected : MobileStyle.field;
+                    border-width: 1px; border-color: reaction.mine ? MobileStyle.accent : MobileStyle.line;
+                    accessible-role: button; accessible-label: "Reaction " + reaction.label; accessible-enabled: root.writable;
+                    accessible-action-default => { if root.writable { root.react(reaction.key); } }
+                    label := Text { text: reaction.label; color: MobileStyle.text; font-size: 14px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { enabled: root.writable; clicked => { root.react(reaction.key); } }
+                }
+                if root.writable: ChatIcon { width: 34px; height: 28px; border-radius: 8px; fill: MobileStyle.field; glyph: 16px; icon: @image-url("icons/smile-plus.svg"); label: "Add reaction"; activated => { root.more-reactions(); } }
+            }
+        }
+        if root.hint: ChatIcon {
+            x: parent.width - self.width + root.slide; y: root.post.quote == "" ? -5px : 11px;
+            width: 35px; height: 30px; glyph: 15px; tint: MobileStyle.muted;
+            icon: @image-url("icons/ellipsis.svg"); label: "Message actions for " + root.post.author;
+            activated => { root.options(); }
+        }
+    }
+}

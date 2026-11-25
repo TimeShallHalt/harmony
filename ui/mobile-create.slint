@@ -1,0 +1,147 @@
+import { MobileStyle, MobileIcon, MobileButton, Avatar } from "mobile-style.slint";
+import { ListView } from "scrollview.slint";
+
+export struct CreateFriend {
+    id: string, name: string, initial: string, detail: string, avatar: image, chosen: bool,
+}
+
+component FormField inherits Rectangle {
+    in-out property <string> value;
+    in property <string> prompt;
+    in property <bool> enabled: true;
+    callback edited(string);
+    callback enter();
+    height: 46px; border-radius: 12px; background: MobileStyle.field;
+    border-width: input.has-focus ? 1px : 0px; border-color: MobileStyle.accent;
+    if root.value=="" && input.preedit-text=="": Text {x:13px; y:0px; width:parent.width - 26px; height:parent.height; horizontal-alignment:left; text:root.prompt;
+        color:MobileStyle.muted; font-size:15px; vertical-alignment:center;}
+    input := TextInput { x:13px; y:0px; width:parent.width - 26px; horizontal-alignment:left; height:parent.height; text <=> root.value; single-line:true;
+        enabled:root.enabled; color:MobileStyle.text; font-size:15px; vertical-alignment:center; accessible-label:root.prompt;
+        edited => {root.edited(self.text);} accepted => {root.enter();} }
+}
+
+component EntryRow inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    callback choose();
+    height:68px; border-radius:14px; background:tap.pressed ? MobileStyle.selected : MobileStyle.raised;
+    accessible-role:button; accessible-label:label; accessible-action-default => {root.choose();}
+    HorizontalLayout { cross-axis-alignment: center;padding-left:12px; padding-right:13px; spacing:13px;
+        Rectangle {width:40px; height:40px; border-radius:13px; background:MobileStyle.field;
+            Image {x:9px; y:9px; width:22px; height:22px; source:root.icon; colorize:MobileStyle.accent-text;}}
+        Text {text:root.label; color:MobileStyle.text; font-size:16px; font-weight:650; horizontal-stretch:1; vertical-alignment:center; }
+        Image {width:18px; height:18px; source:@image-url("icons/chevron-right.svg"); colorize:MobileStyle.muted;}
+    }
+    tap := TouchArea {clicked => {root.choose();}}
+}
+
+component FriendChoice inherits Rectangle {
+    in property <CreateFriend> person;
+    in property <bool> enabled: true;
+    callback toggle();
+    height:61px; background:tap.pressed ? MobileStyle.raised : MobileStyle.canvas;
+    accessible-role: checkbox; accessible-label:person.name; accessible-checked:person.chosen; accessible-enabled:enabled;
+    accessible-action-default => {if root.enabled {root.toggle();}}
+    HorizontalLayout { cross-axis-alignment: center;padding-left:16px; padding-right:18px; spacing:12px;
+        Avatar {width:38px;height:38px;picture:root.person.avatar; initials:root.person.initial; tint:#5c638e;}
+        VerticalLayout {alignment:center; spacing:2px;
+            Text {text:root.person.name; color:MobileStyle.text; font-size:16px; font-weight:650; overflow:elide;}
+            if root.person.detail!="": Text {text:root.person.detail; color:MobileStyle.muted; font-size:13px; overflow:elide;}
+        }
+        Rectangle {width:22px;height:22px;border-radius:11px; background:root.person.chosen ? MobileStyle.accent : transparent;
+            border-width:root.person.chosen ? 0px : 2px; border-color: MobileStyle.muted;
+            if root.person.chosen: Image {x:3px; y:3px; width:16px; height:16px; source:@image-url("icons/check.svg"); colorize:#ffffff;}
+        }
+    }
+    tap := TouchArea {enabled:root.enabled; clicked => {root.toggle();}}
+}
+
+export component CreatePanel inherits Rectangle {
+    in property <string> mode;
+    in property <string> name;
+    in property <string> note;
+    in property <string> summary;
+    in property <int> selected;
+    in property <bool> busy;
+    in property <[CreateFriend]> friends;
+    callback command(string,string,string);
+    private property <string> entry;
+    private property <string> query;
+    background:MobileStyle.canvas;
+    TouchArea {}
+    blur := FocusScope {}
+    changed mode => {
+        root.entry = root.mode=="create" ? root.name : "";
+        root.query = "";
+    }
+    function submit() {
+        if !root.busy {
+            blur.focus();
+            root.command(root.mode=="invite" ? "review" : "submit",root.entry,"");
+        }
+    }
+    VerticalLayout {
+        Rectangle {height:60px; background:MobileStyle.panel;
+            HorizontalLayout { cross-axis-alignment: center;padding-left:4px; padding-right:16px; spacing:8px;
+                MobileIcon {label:"Back"; icon:@image-url("icons/chevron-left.svg"); activated => {blur.focus(); root.command("back","","");}}
+                Text {text:root.mode=="group" ? "New group" : root.mode=="create" ? "Create a server"
+                    : root.mode=="invite" ? "Join a server" : root.mode=="review" ? "Server invite" : "Add a server";
+                    color:MobileStyle.text; font-size:19px; font-weight:700; horizontal-stretch:1; vertical-alignment:center; }
+            }
+        }
+        Rectangle {height:1px; background:MobileStyle.line;}
+        if root.mode=="servers": Rectangle {vertical-stretch:1;
+            VerticalLayout {x:0px; y:0px; width:parent.width; height:self.preferred-height; padding:18px; spacing:10px;
+                EntryRow {label:"Create My Own"; icon:@image-url("icons/plus.svg"); choose=>{root.command("create","","");}}
+                EntryRow {label:"Join a Server"; icon:@image-url("icons/arrow-right.svg"); choose=>{root.command("invite","","");}}
+            }
+        }
+        if root.mode=="create" || root.mode=="invite": Rectangle {vertical-stretch:1;
+            VerticalLayout {x:0px; y:0px; width:parent.width; height:self.preferred-height; padding:18px; spacing:12px;
+                Text {text:root.mode=="invite" ? "Invite link" : "Server name"; color:MobileStyle.text; font-size:14px; font-weight:650; }
+                FormField {value <=> root.entry; enabled:!root.busy;
+                    prompt:root.mode=="invite" ? "https://discord.gg/invite-code" : "Server name"; enter=>{root.submit();}}
+            }
+        }
+        if root.mode=="review": Rectangle {vertical-stretch:1;
+            VerticalLayout {x:0px; y:0px; width:parent.width; height:self.preferred-height; padding-top:35px; padding-left:20px; padding-right:20px; spacing:12px;
+                Rectangle {height:66px;
+                    Rectangle {x:(parent.width - self.width)/2; width:64px; height:64px; border-radius:20px; background:MobileStyle.selected;
+                        Image {x:17px; y:17px; width:30px; height:30px; source:@image-url("icons/users.svg"); colorize:MobileStyle.accent-text;}
+                    }
+                }
+                Text {text:"You’ve been invited to join"; color:MobileStyle.muted; font-size:15px; horizontal-alignment:center;}
+                Text {text:root.name; color:MobileStyle.text; font-size:24px; font-weight:750; horizontal-alignment:center; wrap:word-wrap;}
+                if root.summary!="": Text {text:root.summary; color:MobileStyle.secondary; font-size:14px; horizontal-alignment:center; wrap:word-wrap;}
+            }
+        }
+        if root.mode=="group": VerticalLayout {spacing:6px;
+            Rectangle {height:116px;
+                VerticalLayout {padding-left:16px; padding-right:16px; padding-top:10px; spacing:8px;
+                    FormField {value <=> root.query; prompt:"Find friends"; enabled:!root.busy; edited(v)=>{root.command("filter",v,"");} enter=>{blur.focus();}}
+                    FormField {value <=> root.entry; prompt:"Group name (optional)"; enabled:!root.busy; enter=>{blur.focus();}}
+                }
+            }
+            Rectangle {height:32px;
+                Text {x:17px; width:parent.width - 34px; text:root.selected==0 ? "Select friends" : root.selected + " selected · " + root.summary;
+                    color:MobileStyle.secondary; font-size:13px; font-weight:650; vertical-alignment:center; overflow:elide;}
+            }
+            if root.friends.length>0: ListView { for friend in root.friends: FriendChoice {person:friend; enabled:!root.busy;
+                toggle=>{root.command("toggle",friend.id,"");}}}
+            if root.friends.length==0: Rectangle {vertical-stretch:1;
+                Text {text:root.query=="" ? "No friends to add." : "No matching friends."; color:MobileStyle.muted; font-size:15px; horizontal-alignment:center; vertical-alignment:center;}}
+        }
+        if root.note!="": Rectangle {height:message.preferred-height + 15px;
+            message := Text {x:18px; width:parent.width - 36px; height:self.preferred-height; text:root.note; color:MobileStyle.secondary; font-size:14px; wrap:word-wrap;}
+        }
+        if root.mode!="servers": Rectangle {height:62px; background:MobileStyle.panel;
+            MobileButton {x:16px; y:7px; width:parent.width - 32px; primary:true;
+                enabled: root.busy ? root.note=="Complete Discord’s verification in your browser." :
+                    root.mode=="review" || (root.mode=="group" ? root.selected>=2 : root.entry!="");
+                text: root.busy ? (root.note=="Complete Discord’s verification in your browser." ? "Open verification" : "Please wait…")
+                    : root.mode=="review" ? "Join Server" : root.mode=="invite" ? "Review invite" : root.mode=="group" ? "Create group" : "Create server";
+                activated => {if root.busy {root.command("verify","","");} else {root.submit();}}
+            }
+        }
+    }
+}

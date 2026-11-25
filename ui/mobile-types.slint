@@ -1,0 +1,18 @@
+import { EmbedCard } from "mobile-embeds.slint";
+import { MobilePoll } from "mobile-polls.slint";
+export { MobilePoll, PollChoice } from "mobile-polls.slint";
+export enum Page { welcome, linking, inbox, channels, chat, account, friends, profile, settings, notifications, quick-find, details, requests }
+export struct Place {
+    id:string, name:string, detail:string, mark:string, unread:bool, picture:image, relationship:int,
+    kind:string, presence:string, category:string, new-category:bool, count:int, tint:color
+}
+export struct Reaction { label:string, key:string, mine:bool }
+export struct Media { name:string, index:int, thumb:image, media-type:string }
+export struct Post {
+    poll:MobilePoll,
+    embeds:[EmbedCard],
+    id:string, author:string, initial:string, time:string, body:string, quote:string,
+    rendered:styled-text, picture:image, own:bool, editable:bool, reactions:[Reaction], files:[Media],
+    grouped:bool, date-label:string, pinned:bool, can-pin:bool, can-delete:bool,
+    name-color:color, quote-picture:image
+}

@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Package Harmony's Windows executable, build inputs and dependency notices as a
+portable ZIP. The GUI installer uses build-harmony-installer.py instead.
+
+The Discord flavour is the release; the full one, with Matrix, goes out as a
+separate preview. Both install as the same app, so one replaces the other."""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import tempfile
+import urllib.parse
+
+from release_package import ROOT, dependency_notices, digest, names_home, source_snapshot, zip_directory
+
+TARGET = "x86_64-pc-windows-msvc"
+
+
+# Cargo features, the suffix of file names and release tag, and the name the
+# installer shows, for each flavour scripts/build-windows builds.
+FLAVOURS = {
+    "discord": {"features": ["--no-default-features", "--features", "desktop,discord"], "suffix": "", "edition": None},
+    "full": {"features": ["--features", "matrix"], "suffix": "-full-preview", "edition": "full preview"},
+}
+
+
+def compile_installer(package, version, flavour, output):
+    """Retired Wine producer; the standalone Inno GUI has its own build script."""
+    raise SystemExit("The standalone Wine installer route is retired. Use --no-installer for the portable ZIP; "
+                     "the Inno GUI installer is built with scripts/build-harmony-installer.py.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--exe", type=Path, default=ROOT / "target" / TARGET / "release/Harmony.exe")
+    parser.add_argument("--flavour", choices=FLAVOURS, default="discord",
+                        help="the features the executable was built with (default: discord)")
+    parser.add_argument("--output", type=Path, help="default: target/dist/FLAVOUR")
+    parser.add_argument("--no-installer", action="store_true", help="make only the portable ZIP")
+    args = parser.parse_args()
+    if not args.no_installer:
+        parser.error("Use --no-installer for this portable-only producer. The standalone Wine installer "
+                     "is retired; scripts/build-harmony-installer.py builds the Inno GUI installer.")
+    flavour = FLAVOURS[args.flavour]
+    output = args.output or ROOT / "target/dist" / args.flavour
+    executable = args.exe.resolve()
+    newest_input = max(path.stat().st_mtime for path in
+                       [ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "build.rs",
+                        *list((ROOT / "src").rglob("*.rs")), *list((ROOT / "ui").rglob("*")),
+                        *list((ROOT / "packaging").rglob("*"))]
+                       # The installer's script doesn't go into the executable.
+                       if path.is_file() and path.suffix != ".iss")
+    if executable.stat().st_mtime < newest_input:
+        raise SystemExit("Windows executable predates the current UI; run scripts/build-windows first")
+    with executable.open("rb") as stream:
+        header = stream.read(64)
+        if header[:2] != b"MZ":
+            raise SystemExit("Expected a Windows executable")
+        stream.seek(struct.unpack_from("<I", header, 60)[0])
+        pe = stream.read(6)
+        if pe[:4] != b"PE\0\0" or struct.unpack_from("<H", pe, 4)[0] != 0x8664:
+            raise SystemExit("Expected an AMD64 Windows PE executable")
+    contents = executable.read_bytes()
+    if names_home(contents):
+        raise SystemExit(f"{executable} names {Path.home()}; build it with scripts/build-windows")
+    # Both flavours build to the same path; the Matrix SDK's source paths
+    # tell which one is there.
+    if (b"/matrix-rust-sdk-" in contents) != (args.flavour == "full"):
+        raise SystemExit(f"{executable} isn't the {args.flavour} flavour; run scripts/build-windows {args.flavour}")
+    del contents
+    # Only the packages this flavour's features build.
+    metadata = json.loads(subprocess.check_output(
+        ["cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", TARGET,
+         *flavour["features"]],
+        cwd=ROOT, timeout=30,
+    ))
+    version = next(package["version"] for package in metadata["packages"] if package["name"] == "yapfast")
+    output.mkdir(parents=True, exist_ok=True)
+    if any(output.iterdir()):
+        raise SystemExit("Output must be empty; never overwrite a release")
+    base = f"Harmony-{version}{flavour['suffix']}"
+    archive_path = output / f"{base}-windows-x64.zip"
+    source_path = output / f"{base}-source.zip"
+    with tempfile.TemporaryDirectory(prefix="harmony-windows-package-") as temporary:
+        temporary = Path(temporary)
+        rtc = source_snapshot(metadata, base, temporary, source_path)
+
+        package = temporary / f"{base}-windows-x64"
+        package.mkdir()
+        shutil.copy2(executable, package / "Harmony.exe")
+        shutil.copy2(ROOT / "LICENSE", package / "LICENSE.txt")
+        # Include corresponding source in optional installer/ZIP too. No remote
+        # upstream release can substitute for this fork's exact source.
+        (package / "corresponding-source").mkdir()
+        shutil.copy2(source_path, package / "corresponding-source" / source_path.name)
+        (package / "SOURCE.txt").write_text(
+            f"The source code of this build of Harmony {version}"
+            + (", with the exact source of\nthe libraries it includes under the AGPL," if rtc else "")
+            + " accompanies it:\n\n"
+            f"  corresponding-source/{source_path.name}, SHA-256 in BUILD.json\n\n"
+            "Based on Yapfast 0.4.1, https://github.com/yapfast/yapfast. The licenses folder\n"
+            "holds every dependency's own license and notices.\n",
+            encoding="utf-8", newline="\r\n",
+        )
+        if args.flavour == "discord":
+            first_steps = (
+                "3. Link your Discord account: Harmony shows a QR code, which Discord on\n"
+                "   your phone scans (Settings, Scan QR Code). Discord doesn't allow apps\n"
+                "   like Harmony on personal accounts; linking puts your account at some\n"
+                "   risk of being suspended.\n"
+                "4. Open a channel, or a voice channel to talk.\n\n"
+                "No account or saved session is included.\n"
+            )
+            secrets = "password or Discord token"
+        else:
+            first_steps = (
+                "3. Sign in with your Matrix account; the homeserver is editable.\n"
+                "   Or link Discord, which shows a QR code for Discord on your phone.\n"
+                "4. Open a room, or a voice channel to talk.\n\n"
+                "Passwords, recovery keys and saved sessions are not included.\n"
+            )
+            secrets = "password or recovery key"
+        edition = f" ({flavour['edition']})" if flavour["edition"] else ""
+        (package / "README.txt").write_text(
+            f"Harmony{edition} for 64-bit Windows 10/11\n\n"
+            "1. Extract the entire ZIP to a folder.\n"
+            "2. Double-click Harmony.exe.\n"
+            + first_steps +
+            "No Rust, Visual Studio, or separate app installation is required.\n"
+            "Harmony writes diagnostics in its data folder or to the console run-harmony.cmd opens.\n"
+            "Existing account and data storage may retain legacy Yapfast paths for compatibility.\n"
+            "Windows stores session secrets in Credential Manager and app data\n"
+            "under your Windows user profile. Keep the first verified session.\n\n"
+            "Voice: select a voice channel and Join voice; the gear chooses devices.\n"
+            "Use headphones for the first two-machine audio test.\n"
+            "If anything fails, record the error text, Windows version, GPU and\n"
+            f"audio device model. Never send your {secrets} in logs.\n\n"
+            "If Harmony closes immediately, run run-harmony.cmd to keep its error visible.\n\n"
+            "Harmony switches to software rendering if the GPU cannot start.\n"
+            "To choose it yourself, run run-harmony.cmd --renderer software.\n"
+            "To retry the GPU after a fallback, run run-harmony.cmd --renderer gpu.\n\n"
+            "Check Settings > About for verified Harmony updates.\n"
+            "Harmony is free software under the GNU General Public License, version 3\n"
+            "or later, in LICENSE.txt. Dependency notices and original licenses are\n"
+            "included; SOURCE.txt locates the matching source archive included here.\n",
+            encoding="utf-8",
+        )
+        (package / "run-harmony.cmd").write_text(
+            '@echo off\ncd /d "%~dp0"\nHarmony.exe %*\n'
+            'if errorlevel 1 (\n  echo Harmony exited with an error.\n  pause\n)\n',
+            encoding="utf-8", newline="\r\n",
+        )
+        skia_location = os.environ.get("SKIA_BINARIES_URL")
+        if not skia_location:
+            archives = list((ROOT / ".local/windows/skia-static-production/prepared").glob("*-static.tar.gz"))
+            if len(archives) != 1:
+                raise SystemExit("Prepare the pinned Windows Skia archive before packaging")
+            skia_location = archives[0].as_uri()
+        skia_url = urllib.parse.urlparse(skia_location)
+        if skia_url.scheme != "file":
+            raise SystemExit("Packaging requires the pinned local Skia archive")
+        skia_archive = Path(urllib.parse.unquote(skia_url.path))
+        dependencies = dependency_notices(metadata, package, package / "licenses", skia_archive,
+                                          Path(os.environ["YAPFAST_SKIA_WINDOWS_SOURCE"]),
+                                          Path(os.environ["LK_CUSTOM_WEBRTC"]))
+        (package / "THIRD-PARTY.json").write_text(json.dumps(dependencies, indent=2) + "\n", encoding="utf-8")
+        build = {
+            "application": "Harmony", "upstream": "Yapfast 0.4.1", "updater_included": True,
+            "version": version, "flavour": args.flavour, "target": TARGET,
+            "cargo_features": " ".join(flavour["features"]) or "default",
+            "rustc": subprocess.check_output(["rustc", "--version"], text=True, timeout=10).strip(),
+            "cargo_xwin": subprocess.check_output(["cargo", "xwin", "--version"], text=True, timeout=10).strip(),
+            "ui_framework": "Slint 1.19.0 before release, ac7d423f",
+            "renderer_default": "skia-opengl, falling back to skia-software",
+            "renderer_software": "skia-software",
+            "skia_version": "0.157.0",
+            "skia_source_revision": "6a8fe80eadfac737c12e64229a1b9530bc78f3d1",
+            "skia_source_archive_sha256": "8401d0de878582a03abc1029bb62330aea58cda89904ae6ab187302e6d48ba5d",
+            "skia_runtime": "MT_StaticRelease",
+            "skia_archive_prepared_sha256": digest(skia_archive),
+            "cargo_lock_sha256": digest(ROOT / "Cargo.lock"),
+            "executable_sha256": digest(executable),
+            "source_archive_sha256": digest(source_path),
+            "webrtc_tag": "webrtc-51ef663",
+            "webrtc_archive_sha256": "0a56a5c91b3b7b4222082b8a09388d16a802cde22d67295beb24c55700755b30",
+        }
+        if rtc:
+            build["homeserver_default"] = "https://matrix.org"
+        (package / "BUILD.json").write_text(json.dumps(build, indent=2) + "\n", encoding="utf-8")
+        zip_directory(package, archive_path)
+        installer_path = None if args.no_installer else compile_installer(package, version, args.flavour, output.resolve())
+    hashes = output / "SHA256SUMS.txt"
+    artifacts = [archive_path, source_path, *([installer_path] if installer_path else [])]
+    hashes.write_text("".join(f"{digest(path)}  {path.name}\n" for path in artifacts), encoding="utf-8")
+    print(f"Packaged {archive_path} ({archive_path.stat().st_size / 1024 / 1024:.1f} MiB)")
+    if installer_path:
+        print(f"Installer: {installer_path} ({installer_path.stat().st_size / 1024 / 1024:.1f} MiB)")
+    print(f"Source snapshot: {source_path}")
+    print(f"Checksums: {hashes}")
+
+
+if __name__ == "__main__":
+    main()

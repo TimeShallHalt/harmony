@@ -1,0 +1,6 @@
+# Original upstream notices and corresponding-source copies are hash-bound.
+# Preserve their bytes across Windows checkouts; do not apply core.autocrlf.
+packaging/licenses/** -text
+vendor/corresponding-source/** -text
+# The Linux desktop file is embedded verbatim and uses LF on every build host.
+packaging/linux/*.desktop text eol=lf

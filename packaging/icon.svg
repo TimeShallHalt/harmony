@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 100 100">
+  <title>Harmony</title>
+  <defs>
+    <linearGradient id="voice" x1="16" y1="84" x2="84" y2="16" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A79BFF"/>
+      <stop offset="0.5" stop-color="#A5C8F5"/>
+      <stop offset="1" stop-color="#79E5CE"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="96" height="96" rx="24" fill="#15192D"/>
+  <rect x="2.5" y="2.5" width="95" height="95" rx="23.5" fill="none" stroke="#424A70"/>
+  <g fill="none" stroke="url(#voice)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 27V73M72 27V73M28 60C46 60 54 40 72 40"/>
+  </g>
+</svg>

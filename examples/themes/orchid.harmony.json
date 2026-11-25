@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "name": "Orchid",
+  "base": "bonfire",
+  "dark": true,
+  "colors": {
+    "rail": "#14121b",
+    "sidebar": "#1b1724",
+    "chat": "#211c2b",
+    "panel": "#19151f",
+    "accent": "#c4a1f5",
+    "accent-hover": "#d5b9fc",
+    "on-accent": "#21182f",
+    "accent-soft": "#c4a1f526",
+    "mentioned": "#c4a1f51f",
+    "mentioned-hover": "#c4a1f529",
+    "link": "#c3b3ff"
+  },
+  "layout": {
+    "title-height": 36,
+    "title-inset": 12,
+    "rail-tile": 40,
+    "sidebar-width": 280,
+    "header-height": 50,
+    "account-height": 60,
+    "profile-width": 320,
+    "members-width": 250,
+    "composer-height": 56,
+    "composer-padding": 16,
+    "composer-gutter": 10,
+    "message-gap": 1,
+    "message-group-gap": 14,
+    "channel-row-height": 34
+  },
+  "typography": {
+    "font-family": "DM Sans",
+    "text-size": 16,
+    "title-text-size": 13
+  },
+  "motion": {
+    "transition-ms": 90,
+    "popup-ms": 80,
+    "reduced-motion": false
+  },
+  "logo": "logos/orchid.png"
+}

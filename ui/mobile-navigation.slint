@@ -1,0 +1,171 @@
+import { Page, Place } from "mobile-types.slint";
+import { MobileStyle, Avatar, MobileIcon, MobileButton } from "mobile-style.slint";
+import { ScrollView } from "scrollview.slint";
+
+component Badge inherits Rectangle {
+    in property <int> count;
+    height:18px; width:max(18px,label.preferred-width+8px); background:#d6404a; border-radius:9px;
+    label := Text { text:root.count>99 ? "99+" : root.count; font-size:11px; font-weight:750; color:white; horizontal-alignment:center; vertical-alignment:center; }
+}
+
+export component PersonRow inherits Rectangle {
+    in property <Place> place; in property <bool> manageable; callback activated(); callback options();
+    accessible-expandable: manageable;
+    accessible-action-expand => {if root.manageable {root.options();}}
+    height:64px; background:t.pressed ? MobileStyle.selected : transparent; border-radius:12px;
+    accessible-role:button; accessible-label:place.name + ", " + place.detail;
+    accessible-action-default => { root.activated(); }
+    HorizontalLayout { cross-axis-alignment:center; padding-left:10px; padding-right:10px; spacing:12px;
+        Avatar { width:42px; height:42px; picture:root.place.picture; initials:root.place.mark;
+            presence:root.place.presence; tint:root.place.tint; }
+        VerticalLayout { alignment:center; spacing:3px; horizontal-stretch:1; min-width:0px;
+            Text { text:root.place.name; color:root.place.unread ? MobileStyle.text : MobileStyle.secondary; font-weight:root.place.unread ? 750 : 620; font-size:16px; overflow:elide; }
+            if root.place.detail!="": Text { text:root.place.detail; color:MobileStyle.muted; font-size:13px; overflow:elide; }
+        }
+        if root.place.count>0: Badge { count:root.place.count; }
+        if root.place.unread && root.place.count==0: Rectangle { width:7px; height:7px; border-radius:4px; background:MobileStyle.text; }
+    }
+    Timer {interval:460ms; running:root.manageable && t.pressed && !t.opened && abs(t.mouse-x - t.pressed-x)<10px && abs(t.mouse-y - t.pressed-y)<10px;
+        triggered=>{t.opened=true; root.options();}}
+    t := TouchArea {in-out property <bool> opened;
+        pointer-event(e) => {if e.kind==PointerEventKind.down {self.opened=false;}}
+        clicked=>{if !self.opened {root.activated();}}
+    }
+}
+
+component ChannelRow inherits Rectangle {
+    in property <Place> place; in property <bool> selected; callback activated();
+    height:place.kind=="category" ? 43px : 40px; border-radius:8px;
+    background:selected || t.pressed ? MobileStyle.selected : transparent;
+    accessible-role:button; accessible-label:place.name; accessible-action-default => { root.activated(); }
+    HorizontalLayout { cross-axis-alignment:center; padding-left:10px; padding-right:8px; spacing:8px;
+        if root.place.kind!="category": Image { width:20px; height:20px; colorize:MobileStyle.muted;
+            source:root.place.kind=="voice" ? @image-url("icons/volume-2.svg") : root.place.kind=="forum" ? @image-url("icons/message-square-text.svg") : root.place.kind=="thread" ? @image-url("icons/thread.svg") : root.place.kind=="news" ? @image-url("icons/megaphone.svg") : root.place.kind=="locked" ? @image-url("icons/hash-lock.svg") : @image-url("icons/hash.svg"); }
+        Text { text:root.place.name; font-size:root.place.kind=="category" ? 12px : 16px;
+            font-weight:root.place.kind=="category" || root.place.unread || root.selected ? 700 : 550;
+            color:root.place.unread || root.selected ? MobileStyle.text : MobileStyle.muted; overflow:elide; vertical-alignment:center; }
+        if root.place.kind=="category": Image { width:12px; height:12px; source:root.place.mark=="closed" ? @image-url("icons/chevron-right.svg") : @image-url("icons/chevron-down.svg"); colorize:MobileStyle.muted; }
+        Rectangle { horizontal-stretch:1; }
+        if root.place.count>0: Badge { count:root.place.count; }
+        if root.place.unread && root.place.count==0: Rectangle { width:6px; height:6px; border-radius:3px; background:MobileStyle.text; }
+    }
+    t := TouchArea { clicked => { root.activated(); } }
+}
+
+component GuildIcon inherits Rectangle {
+    in property <Place> place; in property <bool> home; in property <bool> selected; callback activated();
+    height:56px; accessible-role:button; accessible-label:home ? "Direct messages" : place.name; accessible-action-default => { root.activated(); }
+    if selected || place.unread: Rectangle { width:4px; height:root.selected ? 31px : 8px; y:(parent.height - self.height)/2;
+        x:-1px; border-radius:3px; background:MobileStyle.text; }
+    avatar := Avatar { x:(parent.width - self.width)/2; y:5px; width:44px; height:44px; server:true;
+        tint:root.home ? (root.selected ? MobileStyle.accent : MobileStyle.raised) : root.place.tint; initials:root.home ? "" : root.place.mark; picture:root.place.picture; }
+    if root.home: Image { width:25px; height:25px; x:(parent.width - self.width)/2; y:14px;
+        source:@image-url("icons/message-circle.svg"); colorize:root.selected ? white : MobileStyle.secondary; }
+    if root.place.count>0: Badge { count:root.place.count; x:parent.width - self.width - 3px; y:35px; }
+    TouchArea { clicked => { root.activated(); } }
+}
+
+export component NavigationPane inherits Rectangle {
+    in property <Page> page; in property <[Place]> servers; in property <[Place]> places; in property <[Place]> activity;
+    in property <string> heading; in property <string> server-id; in property <string> selected-room;
+    in property <string> account-name; in property <string> account-mark; in property <string> presence;
+    in property <image> account-picture; in property <int> request-count; in property <int> alert-count; in property <bool> online;
+    in property <string> action-sheet; private property <Place> selected-conversation;
+    callback create(); callback navigate(string); callback choose(string); callback menu(string);
+    background:MobileStyle.inset;
+    rail := ScrollView { x:0px; y:0px; width:66px; height:parent.height - 74px;
+        VerticalLayout {x:0px; y:0px; width:rail.visible-width; height:self.preferred-height; alignment:start; padding-top:9px;
+            GuildIcon { home:true; selected:root.page==Page.inbox; activated => { root.navigate("dms"); } }
+            Rectangle { height:9px; Rectangle { x:(parent.width - self.width)/2; y:2px; width:25px; height:3px; border-radius:2px; background:MobileStyle.line; } }
+            for g in root.servers: GuildIcon { place:g; selected:root.page==Page.channels && g.id==root.server-id; activated => { root.navigate("guild/"+g.id); } }
+            Rectangle { height:55px;
+                MobileIcon {x:(parent.width - self.width)/2; y:5px; width:44px; height:44px; glyph:23px; fill:MobileStyle.raised; ink:MobileStyle.positive;
+                    icon:@image-url("icons/plus.svg"); label:"Add a server"; activated=>{root.create();} }
+            }
+        }
+    }
+    pane := Rectangle { x:rail.width; y:3px; width:parent.width - self.x; height:parent.height - self.y; border-top-left-radius:20px; background:MobileStyle.panel; clip:true;
+        VerticalLayout { padding-top:8px;
+            HorizontalLayout { cross-axis-alignment:center; height:50px; padding-left:16px; padding-right:8px; spacing:5px;
+                Text { text:root.page==Page.inbox ? "Messages" : root.heading; color:MobileStyle.text; font-size:22px; font-weight:750; vertical-alignment:center; overflow:elide; horizontal-stretch:1; }
+                if root.page==Page.channels: MobileIcon { icon:@image-url("icons/search.svg"); label:"Find a channel"; activated => { root.navigate("quick-find"); } }
+            }
+            if root.page==Page.inbox: HorizontalLayout { cross-axis-alignment:center; height:46px; padding-left:12px; padding-right:12px; spacing:8px;
+                MobileIcon { width:37px; height:36px; glyph:17px; fill:MobileStyle.raised; icon:@image-url("icons/search.svg"); label:"Search conversations"; activated => { root.navigate("quick-find"); } }
+                Rectangle { height:36px; horizontal-stretch:1; border-radius:18px; background:f.pressed ? MobileStyle.selected : MobileStyle.raised;
+                    accessible-role:button; accessible-label:"Add Friends"; accessible-action-default => {root.navigate("friends");}
+                    HorizontalLayout { cross-axis-alignment:center; alignment:center; spacing:5px; Image { width:15px; height:15px; source:@image-url("icons/user-plus.svg"); colorize:MobileStyle.text; }
+                        Text { text:"Add Friends"; font-weight:650; font-size:13px; color:MobileStyle.text; vertical-alignment:center; } }
+                    f := TouchArea { clicked => { root.navigate("friends"); } }
+                }
+                MobileIcon { width:37px; height:36px; glyph:16px; fill:MobileStyle.accent; ink:white; icon:@image-url("icons/square-pen.svg"); label:"New message"; activated => { root.navigate("compose"); } }
+            }
+            ScrollView { vertical-stretch:1;
+                VerticalLayout { alignment:start; padding-left:6px; padding-right:6px; padding-bottom:88px;
+                    if root.page==Page.inbox && root.activity.length>0: Rectangle { height:105px; clip:true;
+                        Flickable { x:5px; width:parent.width - 8px; content-width:games.preferred-width; content-height:self.height;
+                            games := HorizontalLayout { cross-axis-alignment:center; width:self.preferred-width; spacing:7px; alignment:start; padding-top:7px;
+                                for game in root.activity: Rectangle { width:133px; height:81px; border-radius:13px; background:MobileStyle.raised;
+                                    accessible-role:button; accessible-label:game.name+", "+game.detail; accessible-action-default => {root.choose(game.id);}
+                                    Avatar { x:10px; y:8px; width:25px; height:25px; picture:game.picture; initials:game.mark; tint:game.tint; ring:MobileStyle.raised; }
+                                    Image { x:parent.width - 30px; y:13px; width:15px; height:15px; source:@image-url("icons/gamepad.svg"); colorize:MobileStyle.muted; }
+                                    Text { x:10px; y:38px; width:parent.width - 20px; text:game.name; font-size:13px; font-weight:700; color:MobileStyle.text; overflow:elide; }
+                                    Text { x:10px; y:56px; width:parent.width - 20px; text:game.detail; font-size:12px; color:MobileStyle.muted; overflow:elide; }
+                                    TouchArea { clicked => { root.choose(game.id); } }
+                                }
+                            }
+                        }
+                    }
+                    if root.page==Page.inbox && root.request-count>0: Rectangle { height:40px; background:MobileStyle.raised; border-radius:10px;
+                        Text { x:10px; text:"Message requests ("+root.request-count+")"; color:MobileStyle.text; font-size:14px; vertical-alignment:center; }
+                        TouchArea { clicked => { root.navigate("requests"); } } }
+                    for row in root.places: Rectangle { height:root.page==Page.inbox ? 64px : row.kind=="category" ? 43px : 40px;
+                        if root.page==Page.inbox: PersonRow { place:row; manageable:true; activated => { root.choose(row.id); }
+                            options=>{root.selected-conversation=row;root.menu("inbox-read");} }
+                        if root.page==Page.channels: ChannelRow { place:row; selected:row.id==root.selected-room; activated => { root.choose(row.id); } }
+                    }
+                    if root.places.length==0: Text { text:root.online ? (root.page==Page.inbox ? "No direct messages yet" : "No visible channels") : "Connecting…"; height:72px; horizontal-alignment:center; vertical-alignment:center; color:MobileStyle.muted; font-size:14px; }
+                }
+            }
+        }
+    }
+    bar := Rectangle { x:9px; y:parent.height - self.height - 9px; width:parent.width - 18px; height:59px; border-radius:22px; background:MobileStyle.raised;
+        border-width:1px; border-color:MobileStyle.line; drop-shadow-color:#0005; drop-shadow-blur:10px; drop-shadow-offset-y:3px;
+        HorizontalLayout { cross-axis-alignment:center; padding-left:10px; padding-right:8px; spacing:10px;
+            Avatar { width:40px; height:40px; picture:root.account-picture; initials:root.account-mark; presence:root.presence; ring:MobileStyle.raised; }
+            VerticalLayout { alignment:center; spacing:1px; horizontal-stretch:1;
+                HorizontalLayout { cross-axis-alignment:center; spacing:4px; alignment:start;
+                    Text { text:root.account-name; font-size:15px; font-weight:720; color:MobileStyle.text; overflow:elide; }
+                    Image { width:12px; height:12px; source:@image-url("icons/chevron-right.svg"); colorize:MobileStyle.muted; } }
+                Text { text:root.presence=="dnd" ? "Do Not Disturb" : root.presence=="idle" ? "Idle" : root.presence=="invisible" ? "Invisible" : root.online ? "Online" : "Offline";
+                    font-size:12px; color:MobileStyle.muted; }
+            }
+            Rectangle { width:42px; height:42px; bell := MobileIcon { icon:@image-url("icons/bell.svg"); label:"Notifications"; fill:MobileStyle.field; activated => { root.navigate("alerts"); } }
+                if root.alert-count>0: Rectangle { x:27px; y:8px; height:8px; width:8px; border-radius:4px; background:#eb4451; } }
+        }
+        Timer { interval:500ms; running:bar-touch.pressed && !bar-touch.held && abs(bar-touch.mouse-x - bar-touch.pressed-x)<12px;
+            triggered=>{bar-touch.held=true; if bar-touch.pressed-x<56px {root.navigate("settings");}else{root.menu("status");}} }
+        bar-touch := TouchArea { x:0px; y:0px; height:parent.height; width:parent.width - 59px; in-out property <bool> held;
+            accessible-role:button; accessible-label:"Your profile"; accessible-action-default => {root.navigate("account");}
+            pointer-event(e) => { if e.kind==PointerEventKind.down {self.held=false;} }
+
+            clicked => { if !self.held { if self.mouse-x - self.pressed-x>40px {root.navigate("switch-area");} else if abs(self.mouse-x - self.pressed-x)<18px {root.navigate("account");} } }
+            moved => { if self.pressed && !self.held && self.mouse-x - self.pressed-x>45px {self.held=true; root.navigate("switch-area");} }
+        }
+    }
+    if root.action-sheet=="inbox-read" && root.page==Page.inbox: Rectangle {
+        background:#0008; TouchArea {clicked=>{root.menu("");}}
+        Rectangle {x:0px; y:parent.height - self.height; width:parent.width; height:154px; background:MobileStyle.raised;
+            border-top-left-radius:22px; border-top-right-radius:22px;
+            Rectangle {x:(parent.width - self.width)/2; y:9px; width:38px; height:4px; border-radius:2px; background:MobileStyle.muted;}
+            Text {x:18px; y:24px; width:parent.width - 36px; height:30px; text:root.selected-conversation.name; color:MobileStyle.text;
+                font-size:19px; font-weight:700; vertical-alignment:center; overflow:elide;}
+            MobileButton {x:14px; y:58px; width:parent.width - 28px; text:root.selected-conversation.unread ? "Mark as read" : "Mark as unread";
+                icon:@image-url("icons/inbox.svg"); activated=>{
+                    let dest = (root.selected-conversation.unread ? "inbox-read/" : "inbox-unread/") + root.selected-conversation.id;
+                    root.menu(""); root.navigate(dest);
+                }}
+            MobileButton {x:14px; y:106px; width:parent.width - 28px; compact:true; text:"Cancel"; activated=>{root.menu("");}}
+        }
+    }
+}

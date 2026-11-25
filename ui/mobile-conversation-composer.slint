@@ -1,0 +1,191 @@
+import { MobileStyle } from "mobile-style.slint";
+import { ScrollView } from "scrollview.slint";
+import { ChatIcon } from "mobile-conversation-row.slint";
+import { ChatInsertion, ChatMatch } from "mobile-conversation-emoji.slint";
+
+export component ChatComposer inherits Rectangle {
+    in property <bool> active: true;
+    in property <bool> direct;
+    in property <string> heading;
+    in-out property <string> draft;
+    in property <string> staged;
+    in property <string> context-note;
+    in property <bool> recording;
+    in property <bool> voice-ready;
+    in property <bool> sending;
+    in property <bool> preview;
+    in property <int> focus-count;
+    in property <[ChatMatch]> matches;
+    callback complete-input(string, int, int);
+
+    callback send();
+    callback edited(string, string);
+    callback show-plus();
+    callback show-emoji();
+    callback pick();
+    callback record();
+    callback review();
+    callback unstage();
+    callback clear-context();
+    pure callback insert(string, int, int, string) -> ChatInsertion;
+
+    property <int> anchor;
+    property <int> cursor;
+    property <bool> has-content: draft != "" || editor.preedit-text != "" || staged != "";
+    property <bool> media-available: !sending && !recording && !voice-ready && !context-note.starts-with("Editing");
+    property <length> bar-height: max(52px, min(120px, editor.preferred-height + 16px));
+    property <int> match-index;
+    height: root.active ? rows.preferred-height : 0px; visible: root.active;
+    background: MobileStyle.canvas;
+    changed focus-count => { if root.active { editor.focus(); } }
+    function save-caret() {
+        let composing = editor.preedit-text != "";
+        let anchor = editor.anchor-position-byte-offset;
+        let cursor = editor.cursor-position-byte-offset;
+        // Android commits preedit and advances the cursor on blur. A plain blur clears the selection.
+        neutral.focus();
+        root.complete-input("",0,0);
+        root.anchor = composing ? editor.anchor-position-byte-offset : anchor;
+        root.cursor = composing ? editor.cursor-position-byte-offset : cursor;
+    }
+    public function add-emoji(symbol: string) {
+        apply-insertion(root.insert(root.draft, root.anchor, root.cursor, symbol));
+    }
+    function apply-insertion(insertion: ChatInsertion) {
+        root.draft = insertion.text;
+        root.edited(insertion.text, insertion.text);
+        editor.focus();
+        editor.set-selection-offsets(insertion.caret, insertion.caret);
+        root.complete-input("",0,0);
+    }
+    function choose-match(item: ChatMatch) {
+        neutral.focus();
+        root.apply-insertion(root.insert(root.draft, item.start, item.end, item.value));
+    }
+    function visible-input() -> string {
+        if editor.preedit-text == "" { return editor.text; }
+        return root.insert(editor.text, editor.cursor-position-byte-offset, editor.cursor-position-byte-offset, editor.preedit-text).text;
+    }
+    function suggest() {
+        if !editor.has-focus { return; }
+        if editor.preedit-text != "" {
+            // Gboard can keep most of a name as preedit until the user selects it.
+            let composed = root.insert(root.draft, editor.cursor-position-byte-offset, editor.cursor-position-byte-offset, editor.preedit-text);
+            root.complete-input(composed.text, composed.caret, composed.caret);
+        } else {
+            root.complete-input(root.draft, editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+        }
+    }
+    public function commit-input() { neutral.focus(); root.complete-input("",0,0); }
+    changed matches => { root.match-index = 0; }
+    neutral := FocusScope {}
+
+    rows := VerticalLayout {
+        height: self.preferred-height; padding-left: 12px; padding-right: 12px; padding-top: 6px; padding-bottom: 8px; spacing: 4px;
+        if root.matches.length > 0: Rectangle {
+            height: min(root.matches.length, 3) * 38px; border-radius: 13px; background: MobileStyle.field; clip: true;
+            candidates := ScrollView {
+                vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off; mouse-drag-pan-enabled: true;
+                VerticalLayout { width: candidates.visible-width; height: self.preferred-height; alignment: start;
+                    for match[n] in root.matches: Rectangle {
+                        height: 38px; background: hit.pressed || (root.match-index == n && editor.has-focus) ? MobileStyle.raised : transparent;
+                        accessible-role: button; accessible-label: match.name + " " + match.detail;
+                        accessible-action-default => { root.choose-match(match); }
+                        HorizontalLayout { padding-left: 12px; padding-right: 12px; spacing: 8px;
+                            Image { width: 17px; source: match.kind == "channel" ? @image-url("icons/hash.svg") : match.kind == "emoji" ? @image-url("icons/smile.svg") : match.kind == "role" ? @image-url("icons/users.svg") : @image-url("icons/at-sign.svg"); colorize: MobileStyle.accent-text; image-fit: contain; }
+                            Text { min-width: 0px; horizontal-stretch: 1; text: match.name; color: MobileStyle.text; font-size: 14px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                            Text { text: match.detail; color: MobileStyle.muted; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                        }
+                        hit := TouchArea { clicked => { root.choose-match(match); } }
+                    }
+                }
+            }
+        }
+        if root.context-note != "": HorizontalLayout {
+            padding-left: 5px; height: 30px; spacing: 7px;
+            Image { width: 16px; source: root.context-note.starts-with("Editing") ? @image-url("icons/pencil.svg") : @image-url("icons/reply.svg"); colorize: MobileStyle.accent-text; image-fit: contain; }
+            Text { min-width: 0px; horizontal-stretch: 1; text: root.context-note; color: MobileStyle.secondary; font-weight: 600; font-size: 13px; vertical-alignment: center; overflow: elide; }
+            ChatIcon { width: 36px; height: 30px; glyph: 17px; icon: @image-url("icons/x.svg"); label: "Cancel reply or edit"; activated => { root.clear-context(); } }
+        }
+        if root.staged != "": Rectangle {
+            height: 40px; border-radius: 9px; background: MobileStyle.field;
+            HorizontalLayout {
+                padding-left: 11px; padding-right: 3px; spacing: 8px;
+                Image { width: 18px; source: root.voice-ready ? @image-url("icons/mic.svg") : @image-url("icons/file.svg"); colorize: MobileStyle.accent-text; image-fit: contain; }
+                Text { min-width: 0px; horizontal-stretch: 1; text: root.staged; color: MobileStyle.text; font-size: 13px; overflow: elide; vertical-alignment: center; }
+                if root.voice-ready: ChatIcon { width: 34px; height: 36px; glyph: 17px; icon: @image-url("icons/play.svg"); label: "Play voice message"; activated => { root.review(); } }
+                ChatIcon { width: 35px; height: 36px; glyph: 17px; icon: @image-url("icons/x.svg"); label: "Remove attachment"; enabled: !root.sending; activated => { root.unstage(); } }
+            }
+        }
+        bar := Rectangle {
+            height: root.bar-height; border-radius: 16px; background: MobileStyle.field;
+            border-color: MobileStyle.line; border-width: 0.65px;
+            HorizontalLayout {
+                padding-left: 2px; padding-right: 4px; spacing: 0px; cross-axis-alignment: center;
+                ChatIcon {
+                    width: 42px; height: 42px; glyph: 23px; icon: @image-url("icons/plus.svg"); label: "Add to message"; tint: MobileStyle.text;
+                    enabled: !root.sending && !root.recording; hold-enabled: root.media-available;
+                    activated => { root.save-caret(); root.show-plus(); }
+                    held => { root.save-caret(); root.pick(); }
+                }
+                entry := Rectangle {
+                    min-width: 25px; height: root.bar-height; horizontal-stretch: 1; clip: true;
+                    if root.recording || (root.draft == "" && editor.preedit-text == ""): Text {
+                        x: 2px; y: 0px; height: parent.height; width: parent.width - 2px; text: root.recording ? "Recording…" : "Message " + (root.direct ? "@" : "#") + root.heading;
+                        vertical-alignment: center; color: root.recording ? MobileStyle.danger : MobileStyle.muted; font-size: 15px; overflow: elide;
+                    }
+                    editor := TextInput {
+                        property <length> scroll-offset;
+                        x: 2px; y: (parent.height - self.height) / 2 + self.scroll-offset;
+                        width: max(1px, parent.width - 4px); height: max(parent.height - 8px, self.preferred-height);
+                        text <=> root.draft; color: MobileStyle.text; font-size: 16px; wrap: word-wrap; single-line: false; vertical-alignment: center;
+                        enabled: !root.sending && !root.recording && !root.voice-ready; accessible-label: "Message";
+                        edited => {
+                            root.edited(self.text, root.visible-input()); if self.text == "" { self.scroll-offset = 0px; }
+                            root.suggest();
+                        }
+                        changed preedit-text => {
+                            if self.has-focus { root.edited(self.text, root.visible-input()); }
+                            root.suggest();
+                        }
+                        key-pressed(event) => {
+                            if root.matches.length > 0 && !event.modifiers.control && (event.text == Key.Return || event.text == Key.Tab) {
+                                root.choose-match(root.matches[root.match-index]); return accept;
+                            }
+                            if root.matches.length > 0 && (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                                root.match-index = clamp(root.match-index + (event.text == Key.DownArrow ? 1 : -1), 0, root.matches.length - 1); return accept;
+                            }
+                            if event.modifiers.control && event.text == Key.Return && root.has-content && !root.sending {
+                                neutral.focus(); root.send(); return accept;
+                            }
+                            return reject;
+                        }
+                        cursor-position-changed(pos) => {
+                            root.suggest();
+                            if self.height > parent.height {
+                                if self.y + pos.y < 3px { self.scroll-offset += 3px - self.y - pos.y; }
+                                if self.y + pos.y + 20px > parent.height - 3px { self.scroll-offset += parent.height - 23px - self.y - pos.y; }
+                            } else { self.scroll-offset = 0px; }
+                        }
+                    }
+                }
+                if !root.recording && !root.voice-ready: ChatIcon {
+                    width: 34px; height: 40px; glyph: 21px; icon: @image-url("icons/smile.svg"); label: "Choose emoji";
+                    enabled: !root.sending; activated => { root.save-caret(); root.show-emoji(); }
+                }
+                Rectangle {
+                    width: 40px; height: root.bar-height;
+                    ChatIcon {
+                        x: 3px; y: (parent.height - self.height)/2; width: 34px; height: 34px; border-radius: 11px;
+                        icon: root.recording ? @image-url("icons/circle-stop.svg") : root.has-content ? @image-url("icons/send-horizontal.svg") : @image-url("icons/mic.svg");
+                        glyph: root.has-content ? 19px : 21px; tint: root.recording ? MobileStyle.danger : root.has-content ? white : MobileStyle.secondary;
+                        fill: root.has-content && !root.recording ? MobileStyle.accent : transparent;
+                        label: root.recording ? "Stop recording" : !root.has-content ? "Record a voice message" : root.context-note.starts-with("Editing") ? "Save edit" : "Send message";
+                        enabled: !root.sending && (root.has-content || root.recording || root.context-note == "");
+                        activated => { neutral.focus(); if root.recording || !root.has-content {root.record();} else {root.send();} }
+                    }
+                }
+            }
+        }
+    }
+}

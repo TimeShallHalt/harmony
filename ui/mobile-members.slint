@@ -1,0 +1,189 @@
+import { MobileStyle, MobileIcon, MobileButton, Avatar } from "mobile-style.slint";
+import { ListView, ScrollView } from "scrollview.slint";
+
+export struct DetailRow {
+    id: string, name: string, caption: string, body: string, section: string, extra: string,
+    initial: string, status: string, action: string, avatar: image,
+}
+
+component PersonIcon inherits Avatar {
+    in property <DetailRow> person;
+    initials: person.initial;
+    picture: person.avatar;
+    presence: person.status == "Online" || person.status == "Online on mobile" ? "online"
+        : person.status == "Idle" ? "idle" : person.status == "Do not disturb" ? "dnd"
+        : person.status == "Offline" ? "offline" : "";
+    tint: #555b84;
+}
+
+component BrowserTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback choose();
+    height: 34px; border-radius: 17px;
+    background: selected ? MobileStyle.selected : (touch.pressed ? MobileStyle.raised : transparent);
+    accessible-role: button; accessible-label: label; accessible-action-default => {root.choose();}
+    Text { text: root.label; color: root.selected ? MobileStyle.text : MobileStyle.secondary;
+        horizontal-alignment: center; vertical-alignment: center; font-size: 14px; font-weight: 650; }
+    touch := TouchArea { clicked => {root.choose();} }
+}
+
+component MemberItem inherits Rectangle {
+    in property <DetailRow> person;
+    callback inspect();
+    private property <length> heading: person.section == "" ? 0px : 35px;
+    height: 61px + heading;
+    if root.heading > 0px: Text { x: 16px; height: root.heading; width: parent.width - 32px;
+        text: root.person.section; color: MobileStyle.secondary; font-size: 13px; font-weight: 650; vertical-alignment: center; }
+    Rectangle { y: root.heading; height: parent.height - self.y;
+        background: touch.pressed ? MobileStyle.raised : MobileStyle.canvas;
+        accessible-role: button; accessible-label: root.person.name + ", profile";
+        accessible-action-default => {root.inspect();}
+        HorizontalLayout { cross-axis-alignment: center; padding-left: 16px; padding-right: 16px; spacing: 12px;
+            PersonIcon { width: 40px; height: 40px; person: root.person; ring: MobileStyle.canvas; }
+            VerticalLayout { alignment: center; spacing: 2px;
+                Text { text: root.person.name; color: MobileStyle.text; font-size: 16px; font-weight: 650; overflow: elide; }
+                if root.person.caption != "": Text { text: root.person.caption; color: MobileStyle.muted;
+                    font-size: 13px; overflow: elide; }
+            }
+            if root.person.extra != "": Text {color: MobileStyle.muted; font-size: 12px; text: root.person.extra; vertical-alignment: center; }
+            Image {width: 16px; height: 16px; source:@image-url("icons/chevron-right.svg"); colorize: MobileStyle.muted;}
+        }
+        touch := TouchArea {clicked => {root.inspect();}}
+    }
+}
+
+component ThreadItem inherits Rectangle {
+    in property <DetailRow> thread;
+    callback open();
+    callback membership();
+    height: root.thread.body == "" ? 88px : 111px;
+    background: hit.pressed ? MobileStyle.raised : MobileStyle.canvas;
+    accessible-role: button; accessible-label: "Open " + thread.name;
+    accessible-action-default => {root.open();}
+    hit := TouchArea {clicked => {root.open();}}
+    HorizontalLayout { cross-axis-alignment: center; padding-left: 16px; padding-right: 12px; spacing: 12px;
+        Rectangle { width: 42px; height: 42px; border-radius: 14px; background: MobileStyle.raised;
+            Image { x: 10px; y: 10px; width: 22px; height: 22px; source: @image-url("icons/thread.svg"); colorize: MobileStyle.secondary; }
+        }
+        VerticalLayout { alignment: center; spacing: 3px;
+            Text { text: root.thread.name; color: MobileStyle.text; font-size: 16px; font-weight: 650; overflow: elide; }
+            Text { text: root.thread.caption; color: MobileStyle.secondary; font-size: 13px; overflow: elide; }
+            if root.thread.body != "": Text { text: root.thread.body; color: MobileStyle.secondary; font-size: 13px; overflow: elide; }
+            Text { text: root.thread.extra; color: MobileStyle.muted; font-size: 11px; overflow: elide; }
+        }
+        if root.thread.action != "": MobileButton { width: 67px; compact: true; text: root.thread.action=="join" ? "Join" : "Leave";
+            primary: root.thread.action=="join"; activated => {root.membership();} }
+    }
+    Rectangle { height: 1px; y: parent.height - self.height; x: 70px; width: parent.width - self.x; background: MobileStyle.line; }
+}
+
+export component RoomDetailsPanel inherits Rectangle {
+    in property <string> mode;
+    in property <string> tab;
+    in property <string> title;
+    in property <string> note;
+    in property <bool> busy;
+    in property <bool> more;
+    in property <bool> retry;
+    in property <bool> parent-members;
+    in property <[DetailRow]> rows;
+    in property <DetailRow> card;
+    callback command(string,string,string);
+    private property <string> entry;
+    background: MobileStyle.canvas;
+    TouchArea {}
+    unfocus := FocusScope {}
+    function submit() {
+        unfocus.focus();
+        if root.mode=="threads" {root.command("search",root.entry,"");}
+    }
+    function pick-tab(tab: string) {
+        unfocus.focus();
+        root.entry = "";
+        root.command("tab",tab,"");
+    }
+    VerticalLayout {
+        Rectangle { height: 61px; background: MobileStyle.panel;
+            HorizontalLayout { cross-axis-alignment: center; padding-left: 4px; padding-right: 16px; spacing: 8px;
+                MobileIcon { icon: @image-url("icons/chevron-left.svg"); label: "Back"; activated => {root.command("back","","");} }
+                VerticalLayout { alignment: center; spacing: 1px;
+                    Text { text: root.mode=="threads" ? "Threads" : root.mode=="profile" ? "Profile" : root.parent-members ? "Channel members" : "Members";
+                        color: MobileStyle.text; font-size: 19px; font-weight: 700; overflow: elide; }
+                    if root.mode != "profile": Text { text: root.title; color: MobileStyle.muted; font-size: 12px; overflow: elide; }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: MobileStyle.line; }
+        if root.mode != "profile": Rectangle { height: 57px;
+            Rectangle { x: 14px; y: 9px; width: parent.width - 28px; height: 39px; border-radius: 20px; background: MobileStyle.field;
+                HorizontalLayout { cross-axis-alignment: center; padding-left: 13px; padding-right: 5px; spacing: 8px;
+                    Image {width: 17px; height: 17px; source: @image-url("icons/search.svg"); colorize: MobileStyle.muted;}
+                    Rectangle { horizontal-stretch: 1; height:parent.height;
+                        if root.entry == "" && lookup.preedit-text=="": Text {x:0px;y:0px;width:parent.width;height:parent.height;horizontal-alignment:left;
+                            text: root.mode=="members" ? "Find a member" : "Search threads";
+                            color: MobileStyle.muted; font-size: 15px; vertical-alignment: center;
+                        }
+                        lookup := TextInput { x:0px;y:0px;width:parent.width;height:parent.height; horizontal-alignment:left; text <=> root.entry; color: MobileStyle.text; font-size: 15px;
+                            single-line: true; vertical-alignment: center; accessible-label: root.mode=="members" ? "Find a member" : "Search threads";
+                            edited => {if root.mode=="members" {root.command("filter",root.entry,"");}}
+                            accepted => {root.submit();}
+                        }
+                    }
+                    if root.entry != "": MobileIcon { label: "Clear search"; icon: @image-url("icons/x.svg"); width:40px; height:40px; glyph:16px;
+                        activated => {root.entry=""; root.command(root.mode=="members" ? "filter" : "search","",""); lookup.focus();} }
+                    if root.mode=="threads" && root.entry != "": MobileIcon {label:"Search threads"; icon:@image-url("icons/arrow-right.svg"); width:40px; height:40px; glyph:17px; activated => {root.submit();} }
+                }
+            }
+        }
+        if root.mode=="threads": Rectangle { height: 46px;
+            HorizontalLayout { cross-axis-alignment: center; x: 14px; y: 3px; height:34px; spacing:5px; alignment: start;
+                BrowserTab { width: 72px; label:"Active"; selected:root.tab=="active"; choose => {root.pick-tab("active");} }
+                BrowserTab { width: 88px; label:"Archived"; selected:root.tab=="archived"; choose => {root.pick-tab("archived");} }
+                if root.tab=="search": BrowserTab {width:86px; label:"Results"; selected:true; choose => {root.submit();} }
+            }
+        }
+        if root.mode == "profile": ScrollView {
+            VerticalLayout { x:0px; y:0px; width:parent.width; height:self.preferred-height; alignment:start; padding-left:20px; padding-right: 20px; padding-top: 23px; padding-bottom: 18px; spacing: 12px;
+                PersonIcon { width: 76px; height: 76px; person: root.card; ring: MobileStyle.canvas; }
+                Text {text: root.card.name; color: MobileStyle.text; font-weight: 750; font-size: 24px; overflow: elide;}
+                if root.card.caption != "": Text {text: root.card.caption; color: MobileStyle.secondary; font-size: 15px; wrap: word-wrap;}
+                if root.card.status != "": Text {text: root.card.status; color: MobileStyle.muted; font-size: 13px;}
+                if root.card.action=="message": MobileButton {primary:true; text:"Message"; icon:@image-url("icons/message-circle.svg"); activated => {root.command("message",root.card.id,"");} }
+                if root.card.body != "": VerticalLayout {spacing:6px;
+                    Text {text:"About me"; color:MobileStyle.text; font-size:14px; font-weight:700;}
+                    Text {text:root.card.body; color:MobileStyle.secondary; font-size:15px; wrap:word-wrap;}
+                }
+                if root.card.extra != "" && root.card.extra != "APP": VerticalLayout {spacing:6px;
+                    Text {text:"Roles"; color:MobileStyle.text; font-size:14px; font-weight:700;}
+                    Text {text:root.card.extra; color:MobileStyle.secondary; font-size:14px; wrap:word-wrap;}
+                }
+            }
+        }
+        if root.mode!="profile" && root.rows.length > 0: ListView {
+            for item in root.rows: Rectangle {height: root.mode=="members" ? (item.section=="" ? 61px : 96px) : (item.body=="" ? 88px : 111px);
+                if root.mode=="members": MemberItem {person:item; inspect => {unfocus.focus(); root.command("profile",item.id,"");}}
+                if root.mode=="threads": ThreadItem {thread:item; open => {unfocus.focus(); root.command("open",item.id,"");}
+                    membership => {root.command(item.action,item.id,"");}}
+            }
+        }
+        if root.mode!="profile" && root.rows.length == 0: Rectangle {vertical-stretch:1;
+            VerticalLayout {alignment:center; spacing:13px; padding-left:32px; padding-right:32px;
+                Rectangle {height:46px;
+                    Image {x:(parent.width - self.width)/2; width:40px; height:40px;
+                        source:root.mode=="members" ? @image-url("icons/users.svg") : @image-url("icons/thread.svg"); colorize:MobileStyle.muted;}
+                }
+                Text {text: root.busy ? "Loading…" : root.note!="" ? root.note : root.tab=="search" ? "No matching threads." : root.tab=="archived" ? "No archived threads." : "No active threads.";
+                    color:MobileStyle.secondary; font-size:15px; horizontal-alignment:center; wrap:word-wrap;}
+            }
+        }
+        if (root.rows.length > 0 || root.mode=="profile") && (root.note!="" || root.busy): Text {
+            text: root.busy ? "Loading…" : root.note; color: MobileStyle.secondary; font-size: 13px;
+            horizontal-alignment: center; wrap: word-wrap;
+        }
+        if root.retry || root.more: Rectangle {height: 55px;
+            MobileButton {x:16px; y:5px; width:parent.width - 32px; enabled:!root.busy;
+                text:root.retry ? "Try again" : "Load more threads"; activated => {root.command(root.retry ? "retry" : "more","","");} }
+        }
+    }
+}

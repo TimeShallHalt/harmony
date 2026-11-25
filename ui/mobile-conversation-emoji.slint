@@ -1,0 +1,75 @@
+import { MobileStyle } from "mobile-style.slint";
+import { ScrollView } from "scrollview.slint";
+import { ChatIcon } from "mobile-conversation-row.slint";
+
+export struct ChatEmoji { symbol: string, key: string, name: string, picture: image, custom: bool }
+export struct ChatInsertion { text: string, caret: int }
+export struct ChatMatch { name: string, detail: string, value: string, kind: string, start: int, end: int }
+
+export component ChatEmojiPicker inherits Rectangle {
+    in property <bool> reaction;
+    in property <int> revision;
+    pure callback results(string, int, int) -> [ChatEmoji];
+    callback picked(string);
+    callback dismiss();
+    callback expression(string);
+    property <int> offset;
+    property <[ChatEmoji]> matches: root.results(search.text, root.offset, root.revision);
+    property <bool> next: root.matches.length >= 48 && root.results(search.text, root.offset + 48, root.revision).length > 0;
+
+    background: MobileStyle.panel;
+    VerticalLayout {
+        padding-left: 13px; padding-right: 13px; padding-bottom: 6px; spacing: 6px;
+        HorizontalLayout {
+            height: 38px; spacing: 8px;
+            if root.reaction: Text { horizontal-stretch: 1; text: "Add Reaction"; color: MobileStyle.text; font-size: 20px; font-weight: 700; vertical-alignment: center; }
+            if !root.reaction: HorizontalLayout {
+                spacing: 3px; alignment: start; horizontal-stretch: 1;
+                for item in [{key:"emoji",name:"Emoji"},{key:"gifs",name:"GIFs"},{key:"stickers",name:"Stickers"}]: Rectangle {
+                    width: label.preferred-width + 20px; height: 33px; border-radius: 11px;
+                    background: item.key == "emoji" || tab-hit.pressed ? MobileStyle.raised : transparent;
+                    accessible-role: button; accessible-label: item.name;
+                    accessible-action-default => { if item.key != "emoji" { root.expression(item.key); } }
+                    label := Text { text: item.name; color: item.key == "emoji" ? MobileStyle.text : MobileStyle.muted; font-size: 14px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    tab-hit := TouchArea { clicked => { if item.key != "emoji" { root.expression(item.key); } } }
+                }
+            }
+            ChatIcon { width: 36px; height: 36px; glyph: 18px; label: "Close emoji picker"; icon: @image-url("icons/x.svg"); activated => { root.dismiss(); } }
+        }
+        Rectangle {
+            height: 40px; border-radius: 12px; background: MobileStyle.field;
+            Image { x: 11px; y: 11px; width: 18px; height: 18px; source: @image-url("icons/search.svg"); colorize: MobileStyle.muted; }
+            if search.text == "" && search.preedit-text == "": Text { x: 38px; text: "Search emoji"; color: MobileStyle.muted; font-size: 15px; vertical-alignment: center; }
+            search := TextInput {
+                x: 38px; width: parent.width - 48px; single-line: true; font-size: 15px; vertical-alignment: center; color: MobileStyle.text; accessible-label: "Search emoji";
+                edited => { root.offset = 0; grid-scroll.content-y = 0px; }
+            }
+        }
+        Text {
+            height: 23px; text: search.text == "" ? "Emoji" : "Search results";
+            color: MobileStyle.secondary; font-size: 13px; font-weight: 700; vertical-alignment: center;
+        }
+        grid-scroll := ScrollView {
+            min-height: 25px; vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off; mouse-drag-pan-enabled: true;
+            if root.matches.length > 0: FlexboxLayout {
+                width: grid-scroll.visible-width; height: self.preferred-height; alignment: start; spacing: 0px;
+                for emoji in root.matches: Rectangle {
+                    width: grid-scroll.visible-width / max(1, floor(grid-scroll.visible-width / 44px)); height: 44px; border-radius: 8px;
+                    background: hit.pressed ? MobileStyle.selected : transparent;
+                    accessible-role: button; accessible-label: emoji.name; accessible-action-default => { root.picked(root.reaction ? emoji.key : emoji.symbol); }
+                    if emoji.picture.width > 0: Image { x: (parent.width - self.width)/2; y: 7px; width: 30px; height: 30px; source: emoji.picture; image-fit: contain; }
+                    if emoji.picture.width == 0: Text { text: emoji.custom ? ":" + emoji.name : emoji.symbol; color: MobileStyle.text; font-size: emoji.custom ? 11px : 25px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                    hit := TouchArea { clicked => { root.picked(root.reaction ? emoji.key : emoji.symbol); } }
+                }
+            }
+            if root.matches.length == 0: Text {
+                width: grid-scroll.visible-width; height: 48px; text: "No matching emoji"; color: MobileStyle.muted; font-size: 15px; vertical-alignment: center; horizontal-alignment: center;
+            }
+        }
+        if root.next || root.offset > 0: HorizontalLayout {
+            height: 34px; alignment: end; spacing: 4px;
+            ChatIcon { width: 44px; height: 34px; glyph: 18px; enabled: root.offset > 0; label: "Previous emoji"; icon: @image-url("icons/chevron-left.svg"); activated => { root.offset = max(0, root.offset - 48); grid-scroll.content-y = 0px; } }
+            ChatIcon { width: 44px; height: 34px; glyph: 18px; enabled: root.next; label: "More emoji"; icon: @image-url("icons/chevron-right.svg"); activated => { root.offset += 48; grid-scroll.content-y = 0px; } }
+        }
+    }
+}

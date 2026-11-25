@@ -1,0 +1,177 @@
+import { Theme, Tip, Middle } from "../theme.slint";
+import { ClientStyle } from "style.slint";
+
+// Keep the native window callbacks, including the existing close-to-tray policy.
+component CaptionButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> close;
+    in property <bool> focused;
+    callback clicked;
+    width: ClientStyle.caption-width;
+    property <bool> highlighted: pointer.has-hover || focus.has-focus;
+    background: self.highlighted ? (root.close ? Theme.danger : Theme.hover) : transparent;
+    animate background { duration: Theme.quick; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    forward-focus: focus;
+    Image {
+        source: root.icon;
+        width: ClientStyle.caption-icon-size; height: ClientStyle.caption-icon-size;
+        colorize: root.close && root.highlighted ? Theme.on-danger
+            : root.highlighted ? Theme.text : root.focused ? Theme.secondary : Theme.faint;
+    }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == "\n" || event.text == " " { root.clicked(); return accept; }
+            return reject;
+        }
+        pointer := TouchArea { clicked => { root.clicked(); } }
+    }
+}
+
+// A button in the bar's own row, before the window's: a 20px glyph on a 4px-rounded ground.
+component BarButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> active;
+    callback clicked;
+    width: 28px; height: 24px; border-radius: 4px;
+    background: !root.enabled ? transparent : root.active ? Theme.active : pointer.has-hover || focus.has-focus ? Theme.hover : transparent;
+    border-width: focus.has-focus ? 1px : 0px; border-color: Theme.accent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    forward-focus: focus;
+    Image {
+        source: root.icon; width: 16px; height: 16px;
+        colorize: !root.enabled ? Theme.faint : root.active || pointer.has-hover ? Theme.text : Theme.secondary;
+    }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == "\n" || event.text == " " { root.clicked(); return accept; }
+            return reject;
+        }
+        pointer := TouchArea {
+            enabled: root.enabled; mouse-cursor: MouseCursor.pointer;
+            // What the click opens may open under the tip.
+            clicked => { Tip.text = ""; root.clicked(); }
+            changed has-hover => {
+                if self.has-hover {
+                    Tip.text = root.label;
+                    Tip.side = 2;
+                    Tip.x = root.absolute-position.x + root.width / 2;
+                    Tip.y = root.absolute-position.y + root.height;
+                } else if Tip.text == root.label {
+                    Tip.text = "";
+                }
+            }
+        }
+    }
+}
+
+export component WindowBar inherits Rectangle {
+    in property <bool> can-go-back;
+    in property <bool> can-go-forward;
+    in property <bool> inbox-open;
+    callback go-back;
+    callback go-forward;
+    callback toggle-inbox;
+    callback open-help;
+    /// The account's screens show; the inbox and help are for them.
+    in property <bool> workspace;
+    in property <string> place;
+    in property <bool> focused;
+    in property <bool> maximized;
+    callback move-window;
+    callback minimize-window;
+    callback maximize-window;
+    callback close-window;
+    height: ClientStyle.title-height;
+    background: Theme.rail;
+    // Validated pack snapshots supply pixels, never a URL or executable vector.
+    if ClientStyle.title-logo.width > 0: Image {
+        x: ClientStyle.title-inset; y: 4px;
+        width: min(100px, ClientStyle.title-brand-width - ClientStyle.title-inset);
+        height: parent.height - 8px; image-fit: contain;
+        source: ClientStyle.title-logo;
+        accessible-role: image; accessible-label: "Theme logo";
+    }
+    if ClientStyle.title-logo.width == 0: Rectangle {
+        x: ClientStyle.title-inset; width: max(0px, ClientStyle.title-brand-width - ClientStyle.title-inset);
+        height: parent.height;
+        Image {
+            x: 0px; y: (parent.height - self.height) / 2;
+            width: 18px; height: 18px; image-fit: contain;
+            source: @image-url("../icons/logo.svg"); colorize: root.focused ? Theme.accent : Theme.muted;
+            accessible-role: none;
+        }
+        Text {
+            x: 26px; width: max(0px, parent.width - 26px); height: parent.height;
+            text: "Harmony"; font-size: ClientStyle.title-text-size; font-weight: 700;
+            color: root.focused ? Theme.text : Theme.muted;
+            vertical-alignment: center; overflow: elide;
+        }
+    }
+    Text {
+        x: ClientStyle.title-brand-width + (root.workspace ? 72px : 8px);
+        width: max(0px, parent.width - self.x - 3 * ClientStyle.caption-width - (root.workspace ? 80px : 8px)); height: parent.height;
+        text: root.place == "Harmony" ? "" : root.place;
+        font-size: ClientStyle.title-text-size; font-weight: 500;
+        color: root.focused ? Theme.secondary : Theme.faint;
+        horizontal-alignment: center; vertical-alignment: center; overflow: elide;
+    }
+    Rectangle {
+        y: parent.height - ClientStyle.title-rule; height: ClientStyle.title-rule;
+        background: Theme.outline;
+    }
+    // Noninteractive wordmark and location remain draggable, as does empty space.
+    property <bool> armed;
+    TouchArea {
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left {
+                if event.kind == PointerEventKind.down { root.armed = true; }
+                else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { root.armed = false; }
+            }
+        }
+        moved => {
+            if root.armed && (abs(self.mouse-x - self.pressed-x) > ClientStyle.title-drag-threshold || abs(self.mouse-y - self.pressed-y) > ClientStyle.title-drag-threshold) {
+                root.armed = false; root.move-window();
+            }
+        }
+        double-clicked => { root.maximize-window(); }
+    }
+    if root.workspace: HorizontalLayout {
+        x: ClientStyle.title-brand-width; width: 64px; height: parent.height;
+        alignment: start; spacing: 4px;
+        Middle { BarButton { icon: @image-url("../icons/arrow-left.svg"); label: "Back"; enabled: root.can-go-back; clicked => { root.go-back(); } } }
+        Middle { BarButton { icon: @image-url("../icons/arrow-right.svg"); label: "Forward"; enabled: root.can-go-forward; clicked => { root.go-forward(); } } }
+    }
+    HorizontalLayout {
+        alignment: end; spacing: 0px;
+        if root.workspace: Middle {
+            HorizontalLayout {
+                spacing: 4px; padding-right: 12px;
+                BarButton { icon: @image-url("../icons/inbox.svg"); label: "Inbox"; active: root.inbox-open; clicked => { root.toggle-inbox(); } }
+                BarButton { icon: @image-url("../icons/help-circle.svg"); label: "Help"; clicked => { root.open-help(); } }
+            }
+        }
+        CaptionButton {
+            icon: @image-url("../icons/minus.svg"); label: "Minimize"; focused: root.focused;
+            clicked => { root.minimize-window(); }
+        }
+        CaptionButton {
+            icon: root.maximized ? @image-url("../icons/restore.svg") : @image-url("../icons/square.svg");
+            label: root.maximized ? "Restore" : "Maximize"; focused: root.focused;
+            clicked => { root.maximize-window(); }
+        }
+        CaptionButton {
+            icon: @image-url("../icons/x.svg"); label: "Close"; close: true; focused: root.focused;
+            clicked => { root.close-window(); }
+        }
+    }
+}

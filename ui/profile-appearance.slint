@@ -1,0 +1,112 @@
+import { Theme } from "theme.slint";
+import { Motion, PictureStore } from "controls.slint";
+import { ClientStyle } from "yapfast/style.slint";
+// Unmodified OFL faces, pinned provenance and licenses in fonts/NOTICE-Profile-Fonts.json.
+import "fonts/Bangers-Regular.ttf";
+import "fonts/BioRhyme[wdth,wght].ttf";
+import "fonts/CherryBombOne-Regular.ttf";
+import "fonts/Chicle-Regular.ttf";
+import "fonts/MuseoModerno[wght].ttf";
+import "fonts/PixelifySans[wght].ttf";
+import "fonts/ZillaSlab-Regular.ttf";
+import "fonts/PlaypenSans[wght].ttf";
+import "fonts/Orbitron[wght].ttf";
+import "fonts/NewRocker-Regular.ttf";
+import "fonts/Kalam-Regular.ttf";
+
+/// Actual received font/effect IDs. Unsupported faces/effects are disclosed,
+/// never downloaded from user-controlled URLs or made to look like ownership.
+export component StyledProfileName inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size: 20px;
+    in property <int> font-weight: 700;
+    preferred-width: foreground.preferred-width;
+    preferred-height: foreground.preferred-height;
+    accessible-role: none;
+    in property <int> font-id;
+    in property <int> effect-id;
+    in property <[color]> colors;
+    out property <int> effect-mode: root.effect-id;
+    out property <length> halo-width: root.effect-id == 3 ? 5px : 0px;
+    out property <length> shadow-x: root.effect-id == 5 ? 2px : 0px;
+    out property <bool> moving: (root.effect-id == 7 || root.effect-id == 8) && root.colors.length > 0
+        && root.text != "" && root.visible && Motion.playing && !Theme.reduced-motion;
+    out property <int> phase: 0;
+    changed effect-id => { root.phase = 0; }
+    changed text => { root.phase = 0; }
+    property <float> wave: Math.sin(root.phase * 18deg);
+    out property <float> scale-x: root.effect-id == 8 && root.moving ? 1 + root.wave * 0.04 : 1;
+    out property <float> scale-y: root.effect-id == 8 && root.moving ? 1 - root.wave * 0.04 : 1;
+
+    property <float> shift: root.phase / 20;
+    property <float> p0: root.shift - 1;
+    property <float> p1: root.shift - 0.8;
+    property <float> p2: root.shift - 0.6;
+    property <float> p3: root.shift - 0.4;
+    property <float> p4: root.shift - 0.2;
+    property <float> p6: root.shift + 0.2;
+    property <float> p7: root.shift + 0.4;
+    property <float> p8: root.shift + 0.6;
+    property <float> p9: root.shift + 0.8;
+    property <float> p10: root.shift + 1;
+    property <color> first: root.colors.length > 0 ? root.colors[0] : Theme.text;
+    property <color> second: root.colors.length > 1 ? root.colors[1] : root.first;
+    property <color> third: root.colors.length > 2 ? root.colors[2] : root.first;
+    property <color> fourth: root.colors.length > 3 ? root.colors[3] : root.second;
+    property <color> fifth: root.colors.length > 4 ? root.colors[4] : root.third;
+    // Original bounded native approximations from public effect descriptions.
+    // No plugin code/shader/font download, per-glyph reflow, or idle global timer.
+    Timer {
+        running: root.moving; interval: 80ms;
+        triggered => { root.phase = Math.mod(root.phase + 1, 20); }
+    }
+    out property <string> fallback:
+        (root.font-id != 0 && root.font-id != 11 && root.font-family == ClientStyle.font-family ? "unavailable font; using app font. " : "")
+        + (root.effect-id == 8 ? "Original native Gummy: whole-name squash/stretch, not per-letter parity."
+            : root.effect-id >= 3 && root.effect-id <= 7 ? "Original native effect; not pixel-identical to Discord."
+            : root.effect-id > 8 && root.effect-id != 1001 && root.effect-id != 1002 ? "unsupported effect; showing static colors." : "");
+    in property <string> font-family: root.font-id == 1 ? "Bangers" : root.font-id == 2 ? "BioRhyme"
+        : root.font-id == 3 ? "Cherry Bomb One" : root.font-id == 4 ? "Chicle"
+        : root.font-id == 6 ? "MuseoModerno" : root.font-id == 8 ? "Pixelify Sans"
+        : root.font-id == 12 ? "Zilla Slab" : root.font-id == 13 ? "Playpen Sans"
+        : root.font-id == 14 ? "Orbitron" : root.font-id == 15 ? "New Rocker"
+        : root.font-id == 16 ? "Kalam" : ClientStyle.font-family;
+
+    in property <brush> ink: root.effect-id == 4 ? @linear-gradient(180deg, root.first.mix(#ffffff, 0.25), root.first.mix(#000000, 0.12))
+        : root.effect-id == 3 ? root.first.mix(#ffffff, 0.25)
+        : root.effect-id == 5 ? root.first.mix(#ffffff, 0.75)
+        : root.effect-id == 7 && root.colors.length > 1
+            ? @linear-gradient(90deg, root.first root.p0, root.second root.p1, root.third root.p2, root.fourth root.p3, root.fifth root.p4, root.first root.shift, root.second root.p6, root.third root.p7, root.fourth root.p8, root.fifth root.p9, root.first root.p10)
+        : root.effect-id == 8 && root.colors.length > 1
+            ? @linear-gradient(45deg, root.first 0%, root.first 25%, root.second 25%, root.second 50%, root.third 50%, root.third 75%, root.fourth 75%, root.fourth 100%)
+        : root.colors.length > 1 && (root.effect-id == 2 || root.effect-id == 6 || root.effect-id == 7 || root.effect-id == 8)
+        ? (root.colors.length >= 5
+            ? @linear-gradient(90deg, root.colors[0] 0%, root.colors[1] 25%, root.colors[2] 50%, root.colors[3] 75%, root.colors[4] 100%)
+            : root.colors.length == 4 ? @linear-gradient(90deg, root.colors[0] 0%, root.colors[1] 33%, root.colors[2] 67%, root.colors[3] 100%)
+            : root.colors.length == 3 ? @linear-gradient(90deg, root.colors[0] 0%, root.colors[1] 50%, root.colors[2] 100%)
+            : @linear-gradient(90deg, root.colors[0] 0%, root.colors[1] 100%))
+        : root.colors.length > 0 ? root.colors[0] : Theme.text;
+    if root.effect-id == 3: Text {
+        width: parent.width; height: parent.height;
+        text: root.text; font-family: root.font-family; font-size: root.font-size; font-weight: root.font-weight;
+        color: transparent; stroke: root.first.with-alpha(0.28); stroke-width: root.halo-width;
+        overflow: elide; accessible-role: none;
+    }
+    // Colored shadow is behind a second foreground glyph layer. Its bounded
+    // duplicate is neither an executable effect nor a second accessibility label.
+    if root.effect-id == 5: Text {
+        x: root.shadow-x; y: 2px; width: parent.width; height: parent.height;
+        text: root.text; font-family: root.font-family; font-size: root.font-size; font-weight: root.font-weight;
+        color: root.first; overflow: elide; accessible-role: none;
+    }
+    foreground := Text {
+        width: parent.width; height: parent.height;
+        text: root.text; font-family: root.font-family; font-size: root.font-size; font-weight: root.font-weight;
+        color: root.ink; overflow: elide;
+        stroke: root.effect-id == 4 ? #15151c : transparent;
+        stroke-width: root.effect-id == 4 ? 1.2px : 0px;
+        // Slint ignores transforms on a component root. Apply to the actual
+        // child glyph item; the runner fails ignored-property diagnostics.
+        transform-scale-x: root.scale-x; transform-scale-y: root.scale-y;
+    }
+}

@@ -1,0 +1,108 @@
+import { Page, Place } from "mobile-types.slint";
+import { MobileStyle, Avatar, MenuRow, MobileIcon, MobileButton } from "mobile-style.slint";
+import { PersonRow } from "mobile-navigation.slint";
+import { ScrollView } from "scrollview.slint";
+
+component Field inherits Rectangle {
+    in-out property <string> value; in property <string> label; in property <bool> multi; in property <bool> search;
+    callback change(string); callback submit();
+    height: multi ? 90px : 46px; background:MobileStyle.field; border-radius:13px;
+    if search: Image {x:12px; y:(parent.height - self.height)/2; width:18px; height:18px; source:@image-url("icons/search.svg"); colorize:MobileStyle.muted;}
+    if value=="" && entry.preedit-text=="": Text { x:root.search ? 39px : 13px; width:parent.width - self.x - 10px; text:root.label; color:MobileStyle.muted; vertical-alignment:center; font-size:15px; }
+    entry := TextInput { x:root.search ? 39px : 13px; width:parent.width - self.x - 10px; y:5px; height:parent.height - 10px;
+        text <=> root.value; color:MobileStyle.text; accessible-label:root.label; font-size:16px;
+        single-line:!root.multi; vertical-alignment:root.multi ? top : center; edited => {root.change(self.text);} accepted => {root.submit();} }
+}
+component Caption inherits Text { color:MobileStyle.muted; font-size:13px; font-weight:650; height:26px; vertical-alignment:center; }
+
+export component AccountPane inherits Rectangle {
+    in property <Page> page; in property <string> heading; in property <[Place]> places;
+    in property <string> account-name; in property <string> account-mark; in property <string> room-mark; in property <string> account-handle; in property <string> presence;
+    in property <image> account-picture; in property <string> room-name; in property <image> room-picture;
+    in property <image> banner; in property <bool> room-muted; in property <bool> can-threads; in property <bool> direct; in property <bool> preview; in property <string> topic; in property <string> appearance;
+    in-out property <string> query; in-out property <string> profile-name; in-out property <string> profile-pronouns; in-out property <string> profile-bio;
+    in-out property <bool> adding; in-out property <bool> confirm-unlink;
+    callback new-group(); callback navigate(string); callback back(); callback choose(string); callback friend(string,string);
+    callback search(string); callback save(string,string,string); callback menu(string); callback tool(string); callback detail(string);
+    background:MobileStyle.canvas;
+    VerticalLayout {
+        Rectangle { height:55px; background:MobileStyle.panel;
+            HorizontalLayout { cross-axis-alignment:center; padding-left:5px; padding-right:8px; spacing:7px;
+                MobileIcon { icon:@image-url("icons/arrow-left.svg"); label:"Back"; activated => {root.back();} }
+                Text { text:root.heading; font-size:19px; font-weight:720; color:MobileStyle.text; vertical-alignment:center; horizontal-stretch:1; overflow:elide; }
+                if root.page==Page.account: MobileIcon { icon:@image-url("icons/settings.svg"); label:"Settings"; activated => {root.navigate("settings");} }
+                if root.page==Page.notifications && root.places.length>0: MobileIcon {icon:@image-url("icons/check.svg"); label:"Clear notifications"; activated=>{root.navigate("clear-alerts");}}
+            }
+        }
+        ScrollView { vertical-stretch:1;
+            VerticalLayout { alignment:start; padding:14px; spacing:9px;
+                if root.page==Page.account || root.page==Page.details: Rectangle { height:171px; border-radius:19px; background:MobileStyle.raised; clip:true;
+                    Rectangle { x:0px; y:0px; width:parent.width; height:69px; background:@linear-gradient(104deg,#39396a 0%,#6859a5 52%,#8f698e 100%); }
+                    if root.page==Page.account && root.banner.width>0: Image {x:0px; y:0px; width:parent.width; height:69px; source:root.banner; image-fit:cover;}
+                    Rectangle { x:14px; y:37px; width:66px; height:66px; border-radius:33px; background:MobileStyle.raised;
+                        Avatar { x:4px; y:4px; width:58px; height:58px; picture:root.page==Page.account ? root.account-picture : root.room-picture;
+                            initials:root.page==Page.account ? root.account-mark : root.direct ? root.room-mark : "#"; presence:root.page==Page.account ? root.presence : ""; ring:MobileStyle.raised; } }
+                    Text { x:16px; y:108px; width:parent.width - 32px; text:root.page==Page.account ? root.account-name : root.room-name;
+                        color:MobileStyle.text; font-size:23px; font-weight:750; overflow:elide; }
+                    Text { x:16px; y:140px; width:parent.width - 32px; text:root.page==Page.account ? (root.preview ? "Local preview" : root.account-handle) : root.direct ? "Direct message" : "Server channel";
+                        color:MobileStyle.muted; font-size:13px; }
+                }
+                if root.page==Page.account: VerticalLayout { spacing:7px;
+                    if root.profile-pronouns!="": Text {text:root.profile-pronouns; color:MobileStyle.muted; font-size:14px;}
+                    if root.profile-bio!="": Text {text:root.profile-bio; color:MobileStyle.secondary; font-size:15px; wrap:word-wrap;}
+                    MobileButton { text:"Edit Profile"; icon:@image-url("icons/user-pen.svg"); activated => {root.navigate("profile");} }
+                    MenuRow { title:"Set Status"; icon:@image-url("icons/moon.svg"); hint:root.presence; activated => {root.menu("status");} }
+                    MenuRow { title:"Friends"; icon:@image-url("icons/users.svg"); activated => {root.navigate("friends");} }
+                    MenuRow { title:"Settings"; icon:@image-url("icons/settings.svg"); activated => {root.navigate("settings");} }
+                }
+                if root.page==Page.profile: VerticalLayout { spacing:8px;
+                    Caption {text:"Display name";} Field { label:"Display name"; value <=> root.profile-name; }
+                    Caption {text:"Pronouns";} Field { label:"Pronouns"; value <=> root.profile-pronouns; }
+                    Caption {text:"About me";} Field { label:"About me"; value <=> root.profile-bio; multi:true; }
+                    MobileButton { text:"Save changes"; primary:true; activated => {root.save(root.profile-name,root.profile-pronouns,root.profile-bio);} }
+                }
+                if root.page==Page.settings: VerticalLayout { spacing:5px;
+                    Caption {text:"Appearance";}
+                    for t in [{key:"light",name:"Light",color:#f2f3f5},{key:"ash",name:"Ash",color:#36393f},{key:"dark",name:"Dark",color:#202024},{key:"onyx",name:"Onyx",color:#000000}]: Rectangle {
+                        height:46px; border-radius:10px; background:root.appearance==t.key ? MobileStyle.selected : transparent;
+                        HorizontalLayout { cross-axis-alignment:center; padding-left:12px; padding-right:14px; spacing:12px;
+                            Rectangle {width:23px; height:23px; border-radius:12px; background:t.color; border-width:1px; border-color:MobileStyle.muted;}
+                            Text {text:t.name; color:MobileStyle.text; vertical-alignment:center; horizontal-stretch:1; font-size:15px;}
+                            if root.appearance==t.key: Image {width:19px;height:19px;source:@image-url("icons/check.svg");colorize:MobileStyle.accent-text;}
+                        }
+                        accessible-role:button; accessible-label:t.name+" appearance"; accessible-action-default=>{root.navigate("theme/"+t.key);} TouchArea {clicked=>{root.navigate("theme/"+t.key);}}
+                    }
+                    Caption {text:"Account";}
+                    MenuRow {title:"Edit Profile"; icon:@image-url("icons/user-pen.svg"); activated=>{root.navigate("profile");}}
+                    MenuRow {title:"Notification settings"; icon:@image-url("icons/bell.svg"); activated=>{root.navigate("notifications");}}
+                    MenuRow {title:root.preview ? "Leave preview" : "Log out"; danger:true; chevron:false; icon:@image-url("icons/log-out.svg"); activated=>{root.menu("logout");}}
+                }
+                if root.page==Page.details: VerticalLayout {spacing:4px;
+                    if root.topic!="": Text {text:root.topic; color:MobileStyle.secondary; wrap:word-wrap; font-size:15px;}
+                    MenuRow {title:"Search"; icon:@image-url("icons/search.svg"); activated=>{root.tool("search");}}
+                    MenuRow {title:"Pins"; icon:@image-url("icons/pin.svg"); activated=>{root.tool("pins");}}
+                    MenuRow {title:root.room-muted ? "Unmute conversation" : "Mute conversation"; icon:root.room-muted ? @image-url("icons/bell.svg") : @image-url("icons/bell-off.svg"); activated=>{root.navigate("toggle-mute");}}
+                    MenuRow {title:"Mark as unread"; icon:@image-url("icons/inbox.svg"); activated=>{root.navigate("mark-unread");}}
+                    MenuRow {title:"Members"; icon:@image-url("icons/users.svg"); activated=>{root.detail("members");}}
+                    if root.can-threads: MenuRow {title:"Threads"; icon:@image-url("icons/thread.svg"); activated=>{root.detail("threads");}}
+                }
+                if root.page==Page.quick-find || root.page==Page.friends || root.page==Page.requests || root.page==Page.notifications: VerticalLayout {spacing:6px;
+                    if root.page==Page.quick-find || root.page==Page.friends: Field { search:true; label:root.page==Page.friends ? "Search friends" : "Where would you like to go?"; value <=> root.query; change(x)=>{root.search(x);} }
+                    if root.page==Page.quick-find && root.heading=="New message": MenuRow {title:"New Group DM";icon:@image-url("icons/users.svg");activated=>{root.new-group();}}
+                    if root.page==Page.friends && !root.adding: MobileButton {text:"Add Friends"; primary:true; icon:@image-url("icons/user-plus.svg"); activated=>{root.adding=true;}}
+                    if root.adding: HorizontalLayout { cross-axis-alignment:center;spacing:6px; add := Field {horizontal-stretch:1; label:"Discord username"; submit=>{root.friend(self.value,"add");root.adding=false;} }
+                        MobileButton {text:"Send"; enabled:add.value!=""; activated=>{root.friend(add.value,"add");root.adding=false;}}}
+                    for p in root.places: VerticalLayout {
+                        PersonRow {place:p;activated=>{if p.relationship==0 {root.choose(p.id);}}}
+                        if p.relationship!=0: HorizontalLayout { cross-axis-alignment:center;padding-left:55px; spacing:6px;
+                            if p.relationship==1: MobileButton {text:"Accept"; compact:true; primary:true; activated=>{root.friend(p.id,"accept");}}
+                            MobileButton {text:p.relationship==1 ? "Ignore" : "Cancel request"; compact:true; activated=>{root.friend(p.id,"remove");}}
+                        }
+                    }
+                    if root.places.length==0: Text {height:90px; text:root.page==Page.notifications ? "You’re all caught up." : root.page==Page.requests ? "No message requests" : "No matches";
+                        color:MobileStyle.muted; vertical-alignment:center; horizontal-alignment:center; font-size:15px; }
+                }
+            }
+        }
+    }
+}

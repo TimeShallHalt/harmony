@@ -1,0 +1,132 @@
+import { MobileStyle, MobileIcon } from "mobile-style.slint";
+import { ScrollView } from "scrollview.slint";
+
+export struct ExpressionRow {
+    left-id: string, left-name: string, left-group: string, left-image: image, left-usable: bool,
+    right-id: string, right-name: string, right-group: string, right-image: image, right-usable: bool,
+}
+
+component ExpressionTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    in property <image> icon;
+    callback pick();
+    height: 38px; min-width: 88px; border-radius: 19px;
+    background: active || tap.pressed ? MobileStyle.selected : transparent;
+    accessible-role: button; accessible-label: label;
+    accessible-action-default => { root.pick(); }
+    HorizontalLayout { alignment: center; cross-axis-alignment: center; spacing: 6px;
+        Image { width: 18px; height: 18px; source: root.icon; colorize: root.active ? MobileStyle.text : MobileStyle.muted; image-fit: contain; }
+        Text { text: root.label; color: root.active ? MobileStyle.text : MobileStyle.secondary; font-size: 14px; font-weight: 680; vertical-alignment: center; }
+    }
+    tap := TouchArea { clicked => { root.pick(); } }
+}
+
+component ExpressionCard inherits Rectangle {
+    in property <string> name;
+    in property <string> group;
+    in property <image> thumbnail;
+    in property <bool> sticker;
+    in property <bool> usable;
+    callback pick();
+    border-radius: 10px; clip: true;
+    background: tap.pressed ? MobileStyle.selected : MobileStyle.raised;
+    accessible-role: button; accessible-label: root.name + (root.group == "" ? "" : ", " + root.group);
+    accessible-description: root.usable ? "" : "Unavailable in this conversation";
+    accessible-enabled: root.usable;
+    accessible-action-default => { if root.usable {root.pick();} }
+    Rectangle { y: 0px; height: parent.height - (root.sticker ? 40px : 24px); clip: true;
+        if root.thumbnail.width > 0: Image { width: parent.width; height: parent.height; source: root.thumbnail; image-fit: root.sticker ? contain : cover; }
+        if root.thumbnail.width == 0: Image { width: 35px; height: 35px; x: (parent.width - self.width)/2; y: (parent.height - self.height)/2;
+            source: root.sticker ? @image-url("icons/sticker.svg") : @image-url("icons/gif.svg"); colorize: MobileStyle.muted; }
+    }
+    if !root.usable: Rectangle { width: 26px; height: 26px; border-radius: 13px; x: parent.width - 32px; y: 6px; background: MobileStyle.inset;
+        Image { x: 6px; y: 6px; width: 14px; height: 14px; source: @image-url("icons/lock.svg"); colorize: MobileStyle.secondary; }
+    }
+    Text { x: 8px; width: parent.width - 16px; y: parent.height - (root.sticker ? 39px : 24px); height: 22px;
+        text: root.name; color: MobileStyle.text; font-size: 13px; font-weight: 650; vertical-alignment: center; overflow: elide; }
+    if root.sticker: Text { x: 8px; width: parent.width - 16px; y: parent.height - 18px; height: 15px;
+        text: root.group; color: MobileStyle.muted; font-size: 11px; overflow: elide; }
+    tap := TouchArea { enabled: root.usable; clicked => {root.pick();} }
+}
+
+export component ExpressionPanel inherits Rectangle {
+    in property <string> mode;
+    in property <string> query;
+    in property <string> note;
+    in property <bool> busy;
+    in property <bool> more;
+    in property <int> page;
+    in property <[ExpressionRow]> rows;
+    callback command(string, string);
+    private property <string> input;
+    private property <bool> sticker: mode == "stickers";
+    private property <bool> unavailable: note.starts-with("Link an account") || note.starts-with("Open a writable");
+    changed mode => {root.input = ""; }
+    background: #0006;
+    TouchArea { clicked => {root.command("close", "");} }
+    pane := Rectangle {
+        width: parent.width; height: min(parent.height, max(310px, parent.height * 0.78)); y: parent.height - self.height;
+        background: MobileStyle.panel; border-top-left-radius: 18px; border-top-right-radius: 18px; clip: true;
+        TouchArea {}
+        sink := FocusScope {}
+        VerticalLayout {
+            padding-left: 12px; padding-right: 12px; padding-bottom: 4px; spacing: 5px;
+            Rectangle { height: 14px;
+                Rectangle { x: (parent.width - self.width)/2; y: 6px; width: 34px; height: 4px; border-radius: 2px; background: MobileStyle.selected; }
+            }
+            HorizontalLayout { height: 44px; cross-axis-alignment: center; spacing: 3px;
+                ExpressionTab { label: "GIFs"; icon: @image-url("icons/gif.svg"); active: !root.sticker; pick => {sink.focus();root.command("gifs", "");} }
+                ExpressionTab { label: "Stickers"; icon: @image-url("icons/sticker.svg"); active: root.sticker; pick => {sink.focus();root.command("stickers", "");} }
+                Rectangle { horizontal-stretch: 1; }
+                MobileIcon { label: "Close expressions"; icon: @image-url("icons/x.svg"); activated => {root.command("close", "");} }
+            }
+            if !root.unavailable: Rectangle { height: 42px; border-radius: 21px; background: MobileStyle.field;
+                HorizontalLayout { cross-axis-alignment: center; padding-left: 12px; padding-right: 3px; spacing: 8px;
+                    Image { width: 17px; height: 17px; source: @image-url("icons/search.svg"); colorize: MobileStyle.muted; image-fit: contain; }
+                    Rectangle { horizontal-stretch: 1; height: 42px;
+                        if root.input == "" && search.preedit-text == "": Text { text: root.sticker ? "Search stickers" : "Search GIFs";
+                            color: MobileStyle.muted; font-size: 15px; vertical-alignment: center; }
+                        search := TextInput { width: parent.width; height: parent.height; text <=> root.input; color: MobileStyle.text; font-size: 15px; vertical-alignment: center; single-line: true;
+                            accessible-label: root.sticker ? "Search stickers" : "Search GIFs";
+                            edited => {root.command("search", self.text);}
+                            accepted => {root.command("search", self.text);sink.focus();}
+                        }
+                    }
+                    if root.input != "": MobileIcon { width: 40px; height: 40px; label: "Clear expression search"; icon: @image-url("icons/x.svg"); glyph: 15px;
+                        activated => {root.input = ""; root.command("search", "");search.focus();} }
+                }
+            }
+            if root.note != "" && root.rows.length > 0: Text { text: root.note; color: MobileStyle.secondary; font-size: 13px; wrap: word-wrap; max-lines: 2; overflow: elide; }
+            if root.rows.length > 0: Text { text: root.input != "" ? "Results" : root.sticker ? "Available stickers" : "Trending GIFs";
+                color: MobileStyle.secondary; font-size: 13px; font-weight: 650; height: 24px; vertical-alignment: center; }
+            if root.rows.length > 0: list := ScrollView {
+                property <string> scroll-key: root.mode + "/" + root.page + "/" + root.query;
+                changed scroll-key => { self.content-y = 0px; }
+                horizontal-scrollbar-policy: always-off;
+                mouse-drag-pan-enabled: true;
+                content-width: self.visible-width;
+                content-height: stack.preferred-height;
+                stack := VerticalLayout { width: list.visible-width; height: self.preferred-height; spacing: 5px;
+                    for row in root.rows: HorizontalLayout { height: root.sticker ? 123px : 118px; spacing: 5px;
+                        ExpressionCard { width: (list.visible-width - 5px)/2; name: row.left-name; group: row.left-group; thumbnail: row.left-image;
+                            sticker: root.sticker; usable: row.left-usable; pick => {sink.focus();root.command("pick", row.left-id);} }
+                        if row.right-id != "": ExpressionCard { width: (list.visible-width - 5px)/2; name: row.right-name; group: row.right-group; thumbnail: row.right-image;
+                            sticker: root.sticker; usable: row.right-usable; pick => {sink.focus();root.command("pick", row.right-id);} }
+                    }
+                }
+            }
+            if root.rows.length == 0: VerticalLayout { alignment: center; vertical-stretch: 1; spacing: 7px; padding-left: 18px; padding-right: 18px;
+                Image { height: 38px; source: root.sticker ? @image-url("icons/sticker.svg") : @image-url("icons/gif.svg"); colorize: MobileStyle.muted; image-fit: contain; }
+                Text { text: root.note != "" ? root.note : root.busy ? "Loading…" : root.sticker ? "No stickers found" : "No GIFs found";
+                    color: MobileStyle.text; font-weight: 620; font-size: 15px; wrap: word-wrap; horizontal-alignment: center; }
+            }
+            if root.note.starts-with("Couldn’t load"): ExpressionTab { height: 38px; label: "Retry"; icon: @image-url("icons/refresh-cw.svg"); pick => {root.command("retry", "");} }
+            if root.more || root.page > 0: HorizontalLayout { height: 44px; alignment: center; cross-axis-alignment: center; spacing: 12px;
+                MobileIcon { label: "Previous results"; icon: @image-url("icons/chevron-left.svg"); enabled: root.page > 0; activated => {root.command("previous", "");} }
+                Text { text: "Page " + (root.page + 1); color: MobileStyle.secondary; font-size: 13px; vertical-alignment: center; }
+                MobileIcon { label: "Next results"; icon: @image-url("icons/chevron-right.svg"); enabled: root.more; activated => {root.command("next", "");} }
+            }
+        }
+    }
+}

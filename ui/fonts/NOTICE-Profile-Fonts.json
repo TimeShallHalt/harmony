@@ -1,0 +1,138 @@
+{
+  "repository": "https://github.com/google/fonts",
+  "revision": "86aced91de05cd4f96a06838124cca45be337b2b",
+  "files": [
+    {
+      "file": "LICENSE-OFL-Profile-bangers.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/bangers/OFL.txt",
+      "bytes": 4479,
+      "sha256": "630dd5a307c0657b094d324e069b390edf90182fe5003639e06c02a0e5769af7"
+    },
+    {
+      "file": "Bangers-Regular.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/bangers/Bangers-Regular.ttf",
+      "bytes": 93148,
+      "sha256": "4160a7311de9342674cce9160cde9fcbb30f48190397d86ff1b70b455af65824"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-biorhyme.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/biorhyme/OFL.txt",
+      "bytes": 4489,
+      "sha256": "b14f883330579c3373e41c7c0acdfde91b2e812edfe1e6c5af91bd32a5fa7d13"
+    },
+    {
+      "file": "BioRhyme[wdth,wght].ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/biorhyme/BioRhyme%5Bwdth%2Cwght%5D.ttf",
+      "bytes": 188500,
+      "sha256": "3ef9bcf73838d59683b4144ddd4687bc9023340ee8e2bec33bc7b3cead65c9f7"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-cherrybombone.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/cherrybombone/OFL.txt",
+      "bytes": 4485,
+      "sha256": "0e04cbdaa14fc3e98b6ad1c9156b04d952cbdd0d31845766bae4cb543a71bcba"
+    },
+    {
+      "file": "CherryBombOne-Regular.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/cherrybombone/CherryBombOne-Regular.ttf",
+      "bytes": 214940,
+      "sha256": "9596c6793eb0335057d655b13751ce7ccb50ef0cd15cb52c58465fb62de2bb8f"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-chicle.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/chicle/OFL.txt",
+      "bytes": 4454,
+      "sha256": "f27cbf1055db7b9dd80bce5cd12b462f2d9ed7313d84dd8bfef1ddd2b61bdfc5"
+    },
+    {
+      "file": "Chicle-Regular.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/chicle/Chicle-Regular.ttf",
+      "bytes": 41032,
+      "sha256": "2c82494b86d3f03821284d60f2209a33218adde0dad7133ce3eb063b4363372b"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-museomoderno.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/museomoderno/OFL.txt",
+      "bytes": 4398,
+      "sha256": "a1da98a568fa3e62fbf76b7f4d735da7da0aa2ed055600937b15356bab5ff118"
+    },
+    {
+      "file": "MuseoModerno[wght].ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/museomoderno/MuseoModerno%5Bwght%5D.ttf",
+      "bytes": 188724,
+      "sha256": "d03b027cf5cf72d014c8a405a8ceb83ea1d5d8ae2c64a7f602b131d9973e3503"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-pixelifysans.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/pixelifysans/OFL.txt",
+      "bytes": 4488,
+      "sha256": "b66ba46f511a851ab09998b5a5a9fdbb102545a3864cb993095e1745996873a7"
+    },
+    {
+      "file": "PixelifySans[wght].ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/pixelifysans/PixelifySans%5Bwght%5D.ttf",
+      "bytes": 79160,
+      "sha256": "9ba86cd010a4de309d263ceff8e8044092c9db7efda869620cb9ff1c4389e8a5"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-zillaslab.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/zillaslab/OFL.txt",
+      "bytes": 4342,
+      "sha256": "240b385d3ec8c8d5c1d4af2bbba6ac72bac0309a80c1a8ff112c168643cc6811"
+    },
+    {
+      "file": "ZillaSlab-Regular.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/zillaslab/ZillaSlab-Regular.ttf",
+      "bytes": 270104,
+      "sha256": "41a4626844da9216b031308d4423045c765fe4231d99862d85d7d74509d37703"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-playpensans.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/playpensans/OFL.txt",
+      "bytes": 4399,
+      "sha256": "59440310cc2c539b53c835306f74ac8c01f1ece58bf4c65e556fca275b80a730"
+    },
+    {
+      "file": "PlaypenSans[wght].ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/playpensans/PlaypenSans%5Bwght%5D.ttf",
+      "bytes": 1567080,
+      "sha256": "e083f9da8be210e08ea982ab510894641aab37590e70620d6db73f8de881ec4a"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-orbitron.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/orbitron/OFL.txt",
+      "bytes": 4426,
+      "sha256": "ab609b0e110d622435ff337cdf233288556e011bbf9bd0550be98846c0630819"
+    },
+    {
+      "file": "Orbitron[wght].ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/orbitron/Orbitron%5Bwght%5D.ttf",
+      "bytes": 38576,
+      "sha256": "f42db2dd16e642258e35782916eceb1dcdbea06fb958d77ad71dc5963587e8fd"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-newrocker.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/newrocker/OFL.txt",
+      "bytes": 4656,
+      "sha256": "942d51cf079299e83e9dd7a9a37eb92260524e8d1d576b2f0b3f7ca207c53f8e"
+    },
+    {
+      "file": "NewRocker-Regular.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/newrocker/NewRocker-Regular.ttf",
+      "bytes": 173224,
+      "sha256": "28a499ce5b8bcf0652f8b2e25135183eaddf0c3c8c3e251259b075c71d1ef14c"
+    },
+    {
+      "file": "LICENSE-OFL-Profile-kalam.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/kalam/OFL.txt",
+      "bytes": 4373,
+      "sha256": "f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f"
+    },
+    {
+      "file": "Kalam-Regular.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/kalam/Kalam-Regular.ttf",
+      "bytes": 427360,
+      "sha256": "57cecb63d4608019371954274ae1d8c397764debd5b19d4a33c1efa4dc923c0b"
+    }
+  ]
+}

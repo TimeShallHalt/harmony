@@ -1,0 +1,466 @@
+# Harmony
+
+This checkout contains the independent Harmony Android app. Build the phone client with the Gradle wrapper in `android/`. Its Rust entry point, APK locations, emulator results and parity checklist are in the [Android guide](android/README.md).
+
+Harmony is a community fork of [Yapfast](https://github.com/yapfast/yapfast) by wiredtenshi and contributors, a native Rust/Slint Discord client. This source integrates upstream 0.4.1 with Harmony customization; it is not an official Yapfast release.
+
+<p align="center"><img src="packaging/icon.svg" width="96" height="96" alt="Harmony logo"></p>
+
+Windows builds are **`Harmony.exe`**. Linux packages install **`harmony`** (Cargo itself produces `Harmony`). The internal Cargo package/crate names remain `yapfast` for compatibility; they are not the product name. The Linux desktop ID is `io.github.TimeShallHalt.Harmony`.
+
+- [Customization overview](HARMONY.md)
+- [Native theme packs and authoring](docs/theme-packs.md)
+- [Build, update and verification notes](LOCAL-DEVELOPMENT.md)
+- [Feature backlog](replica/features.csv)
+
+This repository contains the source and development notes, not Discord credentials, account data, local toolchains or compiled application binaries. Upstream licenses and attribution are retained; see [LICENSE](LICENSE).
+
+**Development status:** native theme packs and bounded image/GIF zoom and pan are implemented. See the build notes for actual test results and platform-verification limits; an upstream feature description or performance number is not Harmony validation. The upstream GitHub Actions workflow is disabled in this fork to avoid automatically running upstream build/release jobs; the Windows and Linux workflow files remain for reference.
+
+**Settings → About** checks Harmony’s public GitHub releases. Windows x64 can verify a downloaded installer against Harmony’s signed update manifest and run it on the next full quit. Automatic checks and downloads are optional.
+
+Games can share Rich Presence through Discord’s local desktop RPC, and the **Activity** tab on a profile shows available history. In a Discord conversation, use the composer’s **+** menu to schedule a message or record and review a voice message. The local schedule sends while Harmony is running and connected to that account.
+
+---
+
+## Inherited upstream features and background
+
+The feature descriptions, screenshots, measurements and first-person background below are retained from upstream Yapfast 0.4.1, with credit to its authors. They describe inherited behavior, not independently verified Harmony performance or a promise that all upstream release services apply to this fork. Harmony's own installation and update instructions appear under [Get started](#get-started).
+
+<p align="center">
+  <img src="docs/images/yapfast.png" alt="Yapfast showing a group DM, with the server list on the left, the conversation in the middle and its members on the right"><br>
+  <sub>A test account on a fake Discord server. Nobody in there said any of this, or endorses Yapfast (sadly).</sub>
+</p>
+
+## Why?
+
+Discord's desktop app is a whole ass Chromium running Discord's website, and it
+sits at about 720 MB of RAM doing nothing (insane, I know right?!?). That
+annoyed me enough to write my own in Rust.
+
+Yapfast does the same job (doing nothing) in about 30 MB. There's no browser
+engine anywhere in it or near it: it talks to Discord's API itself and draws its
+own window with [Slint](https://slint.dev) and Skia, like a game would. Your
+servers, DMs, friends, voice and GIFs are all there, and if you know Discord,
+you already know where everything is.
+
+It opens fast af, too. I timed both, from clicking the icon to reading my
+messages: Discord took 8 seconds on my Windows PC, Yapfast took 0.22 seconds,
+because it shows the messages it saved last time and catches up while you read.
+
+## Measured against Discord
+
+<table>
+  <tr><th></th><th>Vesktop memory</th><th>Yapfast memory</th><th>Vesktop CPU</th><th>Yapfast CPU</th></tr>
+  <tr><td>Idle</td><td>724 MB</td><td>30 MB (−96%)</td><td>0.11%</td><td>0.015% (−86%)</td></tr>
+  <tr><td>Image-heavy channel</td><td>706 MB</td><td>41 MB (−94%)</td><td>0.17%</td><td>0.008% (−95%)</td></tr>
+  <tr><td>In a call</td><td>888 MB</td><td>44 MB (−95%)</td><td>0.46%</td><td>0.33% (−28%)</td></tr>
+  <tr><td>Sharing your screen¹</td><td>1,013 MB</td><td>113 MB (−89%)</td><td>2.15%</td><td>1.1% (−48%)</td></tr>
+  <tr><th></th><th colspan="2">Discord</th><th colspan="2">Yapfast</th></tr>
+  <tr><td>Opening the app²</td><td colspan="2" align="center">8 s</td><td colspan="2" align="center">0.22 s (36× faster)</td></tr>
+</table>
+
+<details>
+<summary><b>About these numbers</b></summary>
+
+<br>
+
+Vesktop is basically Discord's own app: the same Discord web app, in the same
+Electron, with Vencord on top. So its numbers stand in for Discord's. CPU counts
+the whole processor as 100%.
+
+¹ Sharing a 1920×1080 monitor at 30 frames a second, while in the call.
+Yapfast encodes on the graphics card when it has an encoder, here an NVIDIA
+RTX 3090 sending H264. Encoding on the processor with x264 instead, it takes
+2.5%, a little more than Vesktop.
+
+² From clicking the icon to reading your messages, against Discord's own app
+rather than Vesktop, timed on my Windows PC. Yapfast shows the messages it saved
+last time and catches up while you read.
+
+Memory and CPU measured on 25 October 2026, and screen sharing on 27 October,
+all on the same PC. The machine, what "memory" counts and how each scenario ran
+are in [the measurements](docs/measurements/README.md). Your numbers will depend
+on how many servers and DMs you have.
+
+</details>
+
+## Features
+
+### The GIF picker
+
+My favorite part :p Your favorites live on disk as 40 KB clips, so they're
+there the moment it opens, and you're done sitting there cringing while the
+GOATed GIF loads.
+
+<img src="docs/images/features/gif-picker.webp" alt="The GIF picker opening on its favorites over #general, and one of them sent to the channel.">
+
+### Voice, cameras and Go Live
+
+Voice channels and DM calls, with mute, deafen, a volume for each person,
+noise suppression, echo removal, and a voice gate you can tune, or
+push-to-talk on any key you like, held in any app. Go Live, watch other
+people's streams, turn on your camera and play the soundboard. The call
+stays up while you read other channels, busy voice channels say how long
+their call has gone on, and pointing at a Discord voice channel shows who is
+in it, who is live and whose camera is on.
+
+The noise suppression could be better, though. Know an open source one that
+does a better job? PLEASE tell me.
+
+<img src="docs/images/features/voice.webp" alt="A voice channel of seven people, two with their cameras on. One person's stream opens large, then the grid comes back.">
+
+### Forums and polls
+
+Browse a forum's posts as cards, with their tags, first message, top reaction
+and thumbnail, search them, post in them, and read one beside the forum. Vote
+in polls, watch the votes come in, make your own and end them early.
+
+<img src="docs/images/features/forum.webp" alt="A help forum's posts as cards; one opens beside the list with its replies, then closes.">
+
+<p align="center">
+  <img src="docs/images/features/poll.webp" width="640" alt="A movie night poll: an answer is picked and voted for, and the results fill in.">
+</p>
+
+### Themes
+
+Ten of them, Catppuccin and Tokyo Night among them, and Bonfire, which is
+Discord's own colors. Or make your own in the editor, and watch the window
+change as you type each color.
+
+<img src="docs/images/features/themes.webp" alt="The same channel in each of the ten built-in themes, one after another.">
+
+### Games on your profile
+
+The game you play, found among your running programs on Linux, Windows and
+macOS, Steam's and Wine's included, and the Rich Presence games send on Windows and Linux,
+with details, elapsed time, images and buttons.
+
+**Settings → Game activity** turns sharing on and off as Discord's own setting
+does, and names games Yapfast doesn't know. See
+[game detection](docs/discord/people.md#game-detection) and
+[Rich Presence](docs/discord/people.md#rich-presence).
+
+What your linked Spotify account plays shows as "Listening to Spotify" with only
+Yapfast open, from any player, as Discord's own "Display Spotify as your status"
+setting says. See [Spotify](docs/discord/people.md#listening-to-spotify).
+
+<p align="center">
+  <img src="docs/images/features/playing.webp" width="260" alt="A profile card saying Playing Deadlock, with the game's icon.">
+</p>
+
+### Running a server
+
+Server Settings with roles, emoji, stickers, bans, the audit log and the rest of
+the pages your roles let you use, and channel settings with their permissions.
+Make and edit channels and categories, invite people, hand out roles, change
+nicknames, time out, kick and ban. In voice, server mute, deafen and move people
+to another channel, from their menu or by dragging them there. Edit your server
+profile, and leave. Join a server by invite, from the + under your servers or a
+link in chat, and open a scheduled event from its link to mark yourself
+interested. Folders show up as they do in Discord.
+
+<p align="center">
+  <img src="docs/images/features/server-settings.webp" width="640" alt="Server Settings on a role's Display page: its name, a gold color picked, and its icon.">
+</p>
+
+### Everything else
+
+- **Servers, channels, DMs and group DMs**, all live, with member lists. Pin,
+  mute or close a DM from its menu, leave a group DM, and accept or ignore
+  message requests.
+- **Messages** you can send, reply to, edit, react to, pin, forward, mark
+  unread, copy a link to and attach files to, with Markdown, embeds, custom
+  emoji, stickers and spoilers. Voice messages play, with their speed and
+  volume. Bots' buttons, dropdown menus and forms work too, radio buttons,
+  checkboxes and file uploads included, and so do apps' slash commands: type
+  `/`, pick one and fill in its options, files and autocomplete included; an
+  app's answer says who used which command. Apps' message and user commands
+  are under Apps in a message's or a person's menu. Discord's own links to servers, channels, messages and profiles open in
+  Yapfast, including one handed to it by the desktop.
+- **Threads**: start one from a message, browse a channel's threads, join or
+  leave one, and read it beside its channel.
+- **Search** a whole server with Discord's filters, and browse a channel's pins.
+- **Profiles** as Discord draws them: badges, server tags, avatar decorations,
+  nameplates, name styles, profile effects and frames, and the full profile's
+  Board, Wishlist and recent activity. Edit Profile changes your own theme,
+  name style and server tag.
+- **Friends**: requests, adding by username, nicknames, notes, profile cards,
+  your status and custom status (custom emoji included). Block and ignore
+  people from their menu, block and unblock them from their profile, hide what
+  blocked people write, and unblock them from a list in Settings. Active Now
+  sits beside the friends list.
+- **Notifications** that follow your Discord settings, muting for channels,
+  categories and servers, and unread markers.
+- **Soft sounds** for joining, leaving, muting and messages, in six sets.
+
+### Not there yet
+
+- Activities.
+- Making and changing server folders.
+- A server's form for new members, such as its rules, when you join. Yapfast
+  sends you to Discord in your browser to fill it in.
+- Captchas, sort of. If Discord asks for one while you link or join a server,
+  Yapfast opens it in your browser, but I haven't hit one against real
+  Discord yet, so who knows..
+
+Use Discord in a browser for these until then; it has all of it, and you have a
+browser open anyway. [The Discord plan](docs/discord/README.md) has the rest, in the
+order I'm working on it.
+
+It's a beta, and it's what I use for Discord every day, so it had better
+be usable. Still, there are rough edges; when you hit one,
+[open an issue](https://github.com/yapfast/yapfast/issues) and I'll fix it, or
+come hang out on the [Yapfast Discord server](https://yapfast.com/discord-invite)
+and tell me there.
+
+### Not for you?
+
+- [Vesktop](https://vesktop.dev) if you want plugins. Yapfast has none yet
+  (they're coming, dw), and Vesktop ships with Vencord's.
+- [Ripcord](https://cancel.fm/ripcord/) if you want something even plainer.
+  It's native too, but closed source, and it does Slack on the side.
+
+## Will Discord ban me?
+
+> [!WARNING]
+> Probably not, but I can't promise it. Third-party clients, Yapfast included,
+> are against Discord's Terms of Service. In practice Discord rarely bans anyone
+> for using one; the accounts that get banned are almost always spamming or
+> running automation. Yapfast only does what you click, and keeps to the same
+> limits Discord's own app does.
+>
+> If losing your account would be a disaster, don't use any third-party client,
+> this one or another. And don't post screenshots of it in a server whose
+> moderators might ban you for it. Yapfast tells you all this again before it
+> shows the sign-in code.
+
+## Where your messages go
+
+Straight from your PC to Discord, or to your Matrix server. I don't run a
+Yapfast server, so nothing in between could keep a copy (I'd have to pay for
+servers just to snoop on your DMs, and no thanks :D).
+
+- You link your account by scanning a QR code with Discord's phone app, so
+  Yapfast never sees your password.
+- The login token stays in your system's credential store, and only ever goes
+  to Discord. Unlinking signs that session out and deletes it.
+- It sends no analytics or crash reports. Harmony's upstream update checks,
+  release downloads and automatic installation are disabled.
+- Pictures and GIFs load from wherever they're hosted, such as Discord or
+  Tenor.
+
+Don't want to take my word for it? Fair, the code's all right here.
+
+## Get started
+
+### Windows 10 and 11
+
+Use a locally verified Harmony build or package, not an upstream Yapfast download.
+Extract the entire `Harmony-…-windows-x64.zip` and run `Harmony.exe`. The optional
+offline per-user MSI defaults to `%LOCALAPPDATA%\Programs\Harmony`; see
+[the MSI instructions](packaging/windows-msi.md). The MSI does not launch the app,
+change shortcuts, enable startup or close running processes. Quit using the tray
+menu before a manual update. Unsigned artifacts may show **Unknown Publisher**;
+do not disable security controls.
+
+Preserve custom `--data-dir` arguments when manually retargeting a legacy
+`yapfast.exe` shortcut to `Harmony.exe`. Link Discord with the QR code shown by
+Harmony, using Discord's phone app under **Settings → Scan QR Code**. Third-party
+personal-account clients are not authorized by Discord and carry account risk.
+
+### Linux
+
+Linux packages use `harmony`, the Harmony icon, and desktop ID
+`io.github.TimeShallHalt.Harmony` on X11 and Wayland. Local AppImage output is
+`Harmony-…-x86_64.AppImage`; Arch output is `harmony-…-x86_64.pkg.tar.zst`.
+The AppImage uses the pinned upstream glibc baseline (2.39); this is not a
+claim of fresh Harmony platform verification. There is no zsync feed or updater.
+
+The [Arch source PKGBUILD](packaging/arch/PKGBUILD) consumes a verified local
+corresponding-source ZIP, not an upstream release tag. Set `HARMONY_SOURCE_ARCHIVE`,
+`HARMONY_SOURCE_ROOT` (the ZIP's top-level folder) and `HARMONY_SOURCE_SHA256` from
+the package producer. `scripts/package-arch` instead packages a local Harmony
+AppImage and retains its source/notices. To register a development executable
+explicitly, `scripts/install-desktop-entry target/release/Harmony` installs only
+the current user's launcher and icon; it does not launch the app.
+
+<details>
+<summary><b>With Nix</b></summary>
+
+<br>
+
+Build this local fork's Discord-only package instead of installing upstream:
+
+```sh
+nix build .#default
+```
+
+It compiles from source, so give it a few minutes. An older glibc and no Nix?
+Then [build it yourself](#build-it-yourself).
+
+</details>
+
+### Updates
+
+Updater not included in this build. No **Check for updates** or **Update and
+restart** action is provided. Obtain a verified local Harmony build and its
+matching source, quit the app yourself, and update manually. Upstream Yapfast
+release URLs and signing keys are not a Harmony update channel.
+
+### macOS
+
+Not yet, sorry :( I'd love to make one, but I don't own an Apple machine to
+test it on.
+
+<details>
+<summary><b>Nightly builds</b></summary>
+
+<br>
+
+This private fork does not publish nightly builds. Retained upstream workflow
+files are reference material and do not authorize downloads, uploads or releases.
+
+</details>
+
+## Other questions
+
+<details>
+<summary><b>What about Matrix?</b></summary>
+
+<br>
+
+Yapfast started as a [Matrix](https://matrix.org) client, and Matrix still
+works: encrypted rooms, Spaces as servers, and voice channels over MatrixRTC, in
+the same window as Discord. The release is Discord-only for now, so
+[build it yourself](#build-it-yourself) to get both.
+
+After that I'd like Telegram, Signal, WhatsApp, Instagram and Messenger in there
+too. No clue when, but hopefully at some point :p
+
+</details>
+
+<details>
+<summary><b>Why not Tauri?</b></summary>
+
+<br>
+
+Tauri apps run a website too; they just borrow your system's web view instead
+of shipping their own Chromium. The browser is the exact thing I wanted gone, so
+hell no.
+
+</details>
+
+<details>
+<summary><b>Why draw on the processor?</b></summary>
+
+<br>
+
+It already keeps a 180 Hz monitor fed, and it takes less memory. There's a GPU
+renderer too, behind **Render with the GPU** in Settings, if you'd rather use
+that.
+
+</details>
+
+<details>
+<summary><b>Can I use my Vencord plugins?</b></summary>
+
+<br>
+
+Nope. They need a JavaScript runtime, and Yapfast's insides look nothing like
+what they expect. Yapfast will get plugins of its own, though, and open source
+Vencord ones could be ported once it does.
+
+</details>
+
+<details>
+<summary><b>How is it different from Serein?</b></summary>
+
+<br>
+
+Serein draws with wgpu, which costs more memory before you've opened a single
+channel. Yapfast draws with Slint, on the processor by default (WAY lighter) or
+the GPU if you ask. It also does Matrix (from source, for now), DeepFilterNet
+noise suppression on top of RNNoise, voice gates, and the cached GIF picker.
+It's still missing a few things, like media channels and activities.
+
+</details>
+
+<details>
+<summary><b>Did you use AI to write it?</b></summary>
+
+<br>
+
+Yep. Opus 5.5 wrote most of the code, and 6.1 Sol and 6 Astra did adversarial
+review and helped with the nastiest bugs (networking protocols mixed with VP8 is
+a bit much for a side project :D). It wasn't one prompt and done, though. I've
+used it every day for weeks, profiled it with perf, read the code, and bent the
+UX to my muscle memory, so switching over hurts as little as it can.
+
+</details>
+
+## Build it yourself
+
+Harmony builds inside a pinned [Nix](https://nixos.org) environment, which
+brings the right Rust, Clang and native libraries. From the project folder:
+
+```sh
+# Try the UI without an account
+nix develop path:./nix --command cargo run --locked -- --preview
+
+# Run it for real, with Discord and Matrix
+nix develop path:./nix --command cargo run --locked
+
+# Discord only, like the release
+nix develop path:./nix --command cargo run --locked --no-default-features --features desktop,discord
+
+# Windows installer and ZIP, cross-built from Linux, into target/dist
+nix develop path:./nix#windows --command scripts/build-windows
+
+# Format, lint and test everything
+scripts/check --fast
+```
+
+### Without Nix
+
+On Linux, `cargo run --locked` works without Nix too, with rustup, which
+installs Rust 1.97.1 from `rust-toolchain.toml`, and the tools and libraries
+the Arch package builds with, in `packaging/arch/PKGBUILD`. Cargo downloads
+the same libwebrtc and Skia archives the Nix shell pins, except that the
+Nix shell renames one libjpeg table in Skia's (`nix/prepare-skia-native.py`).
+Without that, libwebrtc and Skia both define `jpeg_natural_order`, so
+`build.rs` links such a build with `--allow-multiple-definition`; the two
+tables are the same.
+
+| Read this | For |
+| --- | --- |
+| [Contributing](CONTRIBUTING.md) | What a pull request needs: checks, memory numbers, commit style |
+| [Development](docs/development.md) | Day-to-day work: the preview, local Matrix and LiveKit servers, voice tests |
+| [Architecture](docs/architecture.md) | How `yapfast-core` and the Slint client fit together |
+| [Building](docs/building.md) | Toolchain, Cargo features, checks, releases |
+| [Discord](docs/discord/README.md) | What's done, what's next, and the fake server the tests use |
+| [Voice](docs/voice.md) | Calls, devices and audio processing |
+| [Windows](docs/windows-beta.md) | Packaging, the installer and Windows checks |
+| [Measurements](docs/measurements/README.md) | How memory and CPU are measured |
+
+## License
+
+Harmony and its upstream Yapfast code are free software under the [GNU General Public License](LICENSE),
+version 3 or later. Builds with Matrix also include MatrixRTC libraries under
+the AGPL. Every release carries its dependencies' own licenses. Take it, I
+don't even care, baka.
+
+## Thanks
+
+Yapfast speaks to Discord the way its own apps do, as documented by
+[Discord Userdoccers](https://docs.discord.food), a community effort to
+document the user side of Discord's API. Thanks to everyone who writes it <3
+
+It stands on [Slint](https://slint.dev), [Skia](https://skia.org),
+[LiveKit](https://livekit.io) and WebRTC,
+[matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk) and
+[DeepFilterNet](https://github.com/Rikorose/DeepFilterNet). My patches to
+Slint live in [`vendor/`](vendor), with the rest of the code.
+
+<sub>Yapfast isn't affiliated with or endorsed by Discord Inc. Discord is a
+trademark of Discord Inc.</sub>

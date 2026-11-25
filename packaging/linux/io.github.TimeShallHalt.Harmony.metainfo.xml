@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Harmony fork identity. Upstream Yapfast remains credited, not impersonated. -->
+<component type="desktop-application">
+  <id>io.github.TimeShallHalt.Harmony</id>
+  <name>Harmony</name>
+  <summary>A native Discord client based on Yapfast</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.timeshallhalt">
+    <name>Harmony contributors</name>
+  </developer>
+  <description>
+    <p>
+      Harmony is a Rust and Slint desktop chat client based on Yapfast by
+      wiredtenshi and contributors, with Harmony themes and desktop integration.
+      It communicates directly with Discord without embedding a web browser.
+    </p>
+    <p>
+      Servers, direct messages, threads, forums, friends, voice, screen sharing
+      and GIFs use native controls. Third-party personal-account clients are
+      not authorized by Discord; using them carries account risk.
+    </p>
+    <p>
+      Check for Harmony releases in Settings → About. On Linux, install the
+      new version with your package manager or replace the AppImage.
+      Original licenses, attribution and corresponding source accompany packages.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.TimeShallHalt.Harmony.desktop</launchable>
+  <url type="homepage">https://github.com/TimeShallHalt/harmony</url>
+  <url type="vcs-browser">https://github.com/TimeShallHalt/harmony</url>
+  <categories>
+    <category>Network</category>
+    <category>InstantMessaging</category>
+  </categories>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+    <content_attribute id="social-audio">intense</content_attribute>
+    <content_attribute id="social-contacts">intense</content_attribute>
+  </content_rating>
+  <releases>
+    <release version="1.2.0" date="2026-11-21"/>
+  </releases>
+</component>

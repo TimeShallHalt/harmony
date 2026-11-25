@@ -1,0 +1,206 @@
+import { Theme } from "theme.slint";
+import { DiscordLinkPanel } from "discord.slint";
+import { ScrollView } from "scrollview.slint";
+export { EmbedCard } from "mobile-embeds.slint";
+import { Page, Place, Post } from "mobile-types.slint";
+export { Page, Place, Post, Reaction, Media, MobilePoll, PollChoice } from "mobile-types.slint";
+import { MobileStyle, MobileIcon, MobileButton, MenuRow, Avatar } from "mobile-style.slint";
+import { NavigationPane } from "mobile-navigation.slint";
+import { AccountPane } from "mobile-account.slint";
+import { MobileConversation, ChatEmoji, ChatInsertion, ChatMatch } from "mobile-conversation.slint";
+export { ChatEmoji, ChatInsertion, ChatMatch } from "mobile-conversation.slint";
+import { ToolsPanel, ToolHit } from "mobile-tools.slint";
+export { ToolHit } from "mobile-tools.slint";
+import { ExpressionPanel, ExpressionRow } from "mobile-expressions.slint";
+export { ExpressionRow } from "mobile-expressions.slint";
+import { CreatePanel, CreateFriend } from "mobile-create.slint";
+export { CreateFriend } from "mobile-create.slint";
+import { RoomDetailsPanel, DetailRow } from "mobile-members.slint";
+export { DetailRow } from "mobile-members.slint";
+
+export component MobileWindow inherits Window {
+    background:MobileStyle.inset; default-font-family:"Roboto";
+    in-out property <Page> page: Page.welcome;
+    in property <string> heading: "Harmony";
+    in property <string> presence; in-out property <string> profile-name; in-out property <string> profile-pronouns; in-out property <string> profile-bio;
+    callback presence-change(string); callback save-profile(string,string,string);
+    in property <image> account-picture; in-out property <bool> adding; in-out property <string> pending-url;
+    callback friend-action(string,string); callback web(string); callback inspect-link(string);
+    in property <string> account-name; in property <string> account-handle;
+    in property <bool> online; in property <bool> preview;
+    in property <string> notice; in property <int> phase; in property <image> qr; in property <string> scanned;
+    in property <[Place]> places; in property <int> section;
+    in property <[Post]> posts; in-out property <string> draft;
+    in property <bool> writable; in property <bool> sending; in property <bool> older;
+    in-out property <string> chosen; in property <string> context-note; in property <string> staged;
+    in property <bool> recording; in property <bool> voice-ready;
+    in property <int> tail; in property <bool> request-room;
+    in-out property <bool> confirm-unlink;
+    callback navigate(string); callback choose-place(string); callback back();
+    callback link(string); callback open-discord-qr(); callback challenge(); callback send(); callback change-draft(string, string);
+    callback action(string,string); callback react(string,string); callback media(string,int);
+    in property <bool> callable; in property <string> call-name; in property <bool> call-muted; in property <bool> sharing;
+    callback voice-action(string);
+    callback pick(); callback record(); callback review(); callback unstage(); callback clear-context();
+    callback more-history(); callback request-answer(bool);
+    in-out property <int> focus-count;
+    in property <bool> can-poll; in-out property <bool> poll-busy; in-out property <string> poll-error;
+    callback post-poll(string,[string],int,bool); callback vote-poll(string,[int]); callback end-poll(string);
+    in property <string> appearance:"dark";
+    function apply-appearance() {
+        MobileStyle.mode=root.appearance;
+        Theme.dark=root.appearance!="light";
+        Theme.rail=MobileStyle.inset; Theme.sidebar=MobileStyle.panel; Theme.panel=MobileStyle.panel;
+        Theme.chat=MobileStyle.canvas; Theme.raised=MobileStyle.raised; Theme.field=MobileStyle.field;
+        Theme.sunken=MobileStyle.inset; Theme.hover=MobileStyle.selected; Theme.active=MobileStyle.selected;
+        Theme.line=MobileStyle.line; Theme.outline=MobileStyle.line; Theme.outline-field=MobileStyle.line;
+        Theme.text=MobileStyle.text; Theme.secondary=MobileStyle.secondary; Theme.muted=MobileStyle.muted;
+        Theme.accent=MobileStyle.accent; Theme.on-accent=white; Theme.live=MobileStyle.positive; Theme.danger=MobileStyle.danger;
+    }
+    init=>{root.apply-appearance();} changed appearance=>{root.apply-appearance();}
+    in property <bool> room-muted; in property <image> profile-banner;
+    in property <string> room-name; in property <string> room-mark; in property <string> account-mark;
+    in property <image> room-picture; in property <string> topic; in property <bool> direct;
+    in property <[Place]> servers; in property <[Place]> activity; in property <string> server-id;
+    in property <int> request-count; in property <int> alert-count; in property <string> selected-room;
+    in-out property <string> filter-text; callback filter(string);
+    in-out property <string> sheet; callback pick-media();
+    in property <string> expression-mode; in property <string> expression-query; in property <string> expression-note;
+    in property <bool> expression-busy; in property <bool> expression-more; in property <int> expression-page; in property <[ExpressionRow]> expression-rows;
+    in property <string> create-mode; in property <string> create-name; in property <string> create-note; in property <string> create-summary;
+    in property <bool> create-busy; in property <int> create-selected; in property <[CreateFriend]> create-friends; callback create-command(string,string,string);
+    in property <[ChatMatch]> compose-matches; in property <int> emoji-revision; callback complete-input(string,int,int); callback expression(string,string);
+    pure callback emoji-results(string,int)->[ChatEmoji]; pure callback insert-emoji(string,int,int,string)->ChatInsertion;
+    in property <[ToolHit]> tool-hits; in property <string> tool-mode; in property <string> tool-note;
+    in property <string> tool-channel; in property <bool> tool-server; in property <bool> tool-busy;
+    in property <bool> tool-more; in property <bool> tool-past; in property <string> jump-target;
+    in property <string> detail-mode; in property <string> detail-tab; in property <string> detail-title; in property <string> detail-note;
+    in property <bool> detail-busy; in property <bool> detail-more; in property <bool> detail-retry; in property <bool> detail-parent; in property <bool> detail-can-threads;
+    in property <[DetailRow]> detail-rows; in property <DetailRow> detail-card;
+    callback tool-command(string,string,string); callback detail-command(string,string,string);
+    public function go-back() {
+        if root.pending-url!="" { root.pending-url=""; }
+        else if root.sheet!="" { root.sheet=""; root.chosen=""; }
+        else if root.chosen!="" {root.chosen="";}
+        else if root.adding {root.adding=false;} else {root.back();}
+    }
+    forward-focus:keys;
+    keys := FocusScope {
+        key-pressed(e) => {
+            if e.text==Key.Back || e.text==Key.Escape {root.go-back(); return accept;}
+            if e.modifiers.control && e.text=="\n" && root.page==Page.chat {keys.focus(); root.send(); return accept;}
+            return reject;
+        }
+        body := Rectangle { x:root.safe-area-insets.left; y:root.safe-area-insets.top;
+            width:root.width - root.safe-area-insets.left - root.safe-area-insets.right;
+            height:max(0px,min(root.height - root.safe-area-insets.bottom,root.virtual-keyboard-size.height>0px ? root.virtual-keyboard-position.y : root.height) - root.safe-area-insets.top);
+            background:MobileStyle.canvas;
+            VerticalLayout {
+                if root.call-name!="": Rectangle {height:47px; background:#204b3a;
+                    HorizontalLayout { cross-axis-alignment:center; padding-left:12px; padding-right:4px; spacing:3px;
+                        Text { text:root.call-name; color:#d8ffe2; font-weight:650; font-size:14px; vertical-alignment:center; overflow:elide; horizontal-stretch:1;}
+                        MobileIcon { icon:root.call-muted ? @image-url("icons/mic-off.svg") : @image-url("icons/mic.svg"); label:root.call-muted ? "Unmute" : "Mute"; ink:white; activated=>{root.voice-action("mute");}}
+                        MobileIcon { icon:@image-url("icons/screen-share.svg"); label:root.sharing ? "Stop sharing" : "Share screen"; ink:root.sharing ? #8affb4 : white; activated=>{root.voice-action("share");}}
+                        MobileIcon { icon:@image-url("icons/phone-off.svg"); label:"Disconnect"; ink:#ff9b9b; activated=>{root.voice-action("leave");}}
+                    }
+                }
+                if root.notice!="" && root.page!=Page.linking: Rectangle {height:note.preferred-height+14px; background:MobileStyle.raised;
+                    note := Text {x:12px; y:6px; width:parent.width - 24px; text:root.notice; color:MobileStyle.secondary; wrap:word-wrap; font-size:14px;} }
+                if root.page==Page.welcome: Rectangle {vertical-stretch:1; clip:true; background:#15151b;
+                    art := Rectangle {x:0px; y:0px; width:parent.width; height:parent.height*0.58; clip:true; Image { source:@image-url("media/preview/afterlight.webp"); image-fit:cover; }
+                        Rectangle {background:@linear-gradient(180deg, #15151b05 0%, #15151b00 50%, #15151b 100%);} }
+                    HorizontalLayout { cross-axis-alignment:center;x:22px; y:22px; height:34px; width:self.preferred-width; spacing:7px;
+                        Image {width:26px; height:26px; source:@image-url("icons/logo.svg"); colorize:white;}
+                        Text {text:"Harmony"; font-weight:750; color:white; font-size:21px; vertical-alignment:center;} }
+                    VerticalLayout {x:23px; width:parent.width - 46px; y:parent.height - self.height - 22px; height:self.preferred-height; spacing:11px;
+                        Text {text:"Welcome to Harmony"; color:#f5f5fa; font-size:34px; font-weight:800; wrap:word-wrap; }
+                        Text {text:"Your Discord servers, friends, and conversations."; color:#c7c7d0; font-size:16px; wrap:word-wrap;}
+                        Rectangle {height:5px;}
+                        MobileButton {text:"Link Discord"; primary:true; activated=>{root.navigate("link");}}
+                        MobileButton {text:"Explore local preview"; activated=>{root.navigate("preview");}}
+                    }
+                }
+                if root.page==Page.linking: VerticalLayout {vertical-stretch:1;
+                    HorizontalLayout { cross-axis-alignment:center;height:54px; padding-left:5px; MobileIcon {icon:@image-url("icons/arrow-left.svg"); label:"Back"; activated=>{root.go-back();}}
+                        Text {text:"Link Discord"; color:MobileStyle.text; font-weight:700; font-size:19px; vertical-alignment:center; horizontal-stretch:1;}}
+                    ScrollView { VerticalLayout {height:self.preferred-height; padding:16px; alignment:start;
+                        DiscordLinkPanel {on-phone:true; phase:root.phase; name:root.scanned; note:root.notice; code:root.qr; begin=>{root.link("");} open-discord=>{root.open-discord-qr();} link-token(t)=>{root.link(t);} reopen=>{root.challenge();} } } }
+                }
+                if root.page==Page.inbox || root.page==Page.channels: NavigationPane {vertical-stretch:1; action-sheet:root.sheet;
+                    page:root.page; servers:root.servers; places:root.places; activity:root.activity; heading:root.heading; server-id:root.server-id;
+                    selected-room:root.selected-room; account-name:root.account-name; account-mark:root.account-mark; presence:root.presence;
+                    account-picture:root.account-picture; request-count:root.request-count; alert-count:root.alert-count; online:root.online;
+                    create=>{root.create-command("server","","");} navigate(s)=>{root.navigate(s);} choose(s)=>{root.choose-place(s);} menu(s)=>{root.sheet=s;}
+                }
+                if root.page==Page.chat: VerticalLayout { vertical-stretch:1;
+                    Rectangle { height:53px; background:MobileStyle.canvas;
+                        HorizontalLayout { cross-axis-alignment:center;padding-left:3px; padding-right:5px; spacing:1px;
+                            MobileIcon {width:40px; icon:@image-url("icons/chevron-left.svg"); label:"Back to conversations"; glyph:25px; activated=>{root.go-back();}}
+                            Rectangle {horizontal-stretch:1; min-width:0px;
+                                HorizontalLayout { cross-axis-alignment:center;spacing:7px;
+                                    if root.direct: Avatar {width:30px; height:30px; initials:root.room-mark; picture:root.room-picture;}
+                                    if !root.direct: Image {width:23px; height:23px; source:@image-url("icons/hash.svg"); colorize:MobileStyle.muted;}
+                                    Text {text:root.heading; color:MobileStyle.text; font-size:18px; font-weight:720; overflow:elide; vertical-alignment:center;}
+                                    Image {width:14px; height:14px; source:@image-url("icons/chevron-right.svg"); colorize:MobileStyle.muted;}
+                                    Rectangle {horizontal-stretch:1;}
+                                }
+                                accessible-role:button; accessible-label:"Conversation details"; accessible-action-default=>{root.navigate("details");}
+                                TouchArea {clicked=>{root.navigate("details");}}
+                            }
+                            if root.callable && root.call-name=="": MobileIcon {width:39px;icon:@image-url("icons/phone.svg");label:"Start voice call";activated=>{root.voice-action("join");}}
+                            MobileIcon {width:40px; icon:@image-url("icons/search.svg"); label:"Search messages"; activated=>{root.tool-command("search","","");}}
+                        }
+                        Rectangle {y:parent.height - 1px; height:1px; background:MobileStyle.line;}
+                    }
+                    if root.tool-past: MobileButton {text:"Jump to present"; compact:true; primary:true; activated=>{root.tool-command("latest","","");}}
+                    chat := MobileConversation {vertical-stretch:1;
+                        heading:root.heading;direct:root.direct;room-picture:root.room-picture;posts:root.posts;
+                        draft <=> root.draft; chosen <=> root.chosen; pending-url <=> root.pending-url;sheet <=> root.sheet;
+                        preview:root.preview; writable:root.writable; sending:root.sending; older:root.older; voice-ready:root.voice-ready;
+                        recording:root.recording; request-room:root.request-room; context-note:root.context-note; staged:root.staged;
+                        tail:root.tail; focus-count:root.focus-count; jump-target:root.jump-target;
+                        send=>{keys.focus();root.send();} change-draft(text, visible-text)=>{root.change-draft(text, visible-text);} action(i,s)=>{root.action(i,s);}
+                        react(i,s)=>{root.react(i,s);} media(i,n)=>{root.media(i,n);} inspect-link(s)=>{root.inspect-link(s);} web(s)=>{root.web(s);}
+                        pick=>{root.pick();} pick-media=>{root.pick-media();} record=>{root.record();} review=>{root.review();} unstage=>{root.unstage();}
+                        clear-context=>{root.clear-context();} more-history=>{root.more-history();} request-answer(b)=>{root.request-answer(b);}
+                        can-poll:root.can-poll; poll-busy <=> root.poll-busy;poll-error <=> root.poll-error;
+                        post-poll(s,a,h,m)=>{root.post-poll(s,a,h,m);} vote-poll(id,a)=>{root.vote-poll(id,a);} end-poll(id)=>{root.end-poll(id);}
+                        compose-matches:root.compose-matches; emoji-revision:root.emoji-revision;
+                        complete-input(s,a,b)=>{root.complete-input(s,a,b);} expression(k,v)=>{root.expression(k,v);}
+                        emoji-results(q,n)=>{return root.emoji-results(q,n);} insert-emoji(s,a,b,v)=>{return root.insert-emoji(s,a,b,v);}
+                    }
+                }
+                if root.page!=Page.welcome && root.page!=Page.linking && root.page!=Page.inbox && root.page!=Page.channels && root.page!=Page.chat: AccountPane {
+                    vertical-stretch:1; page:root.page; heading:root.heading; places:root.places; account-name:root.account-name; account-handle:root.account-handle; account-mark:root.account-mark; room-mark:root.room-mark;
+                    presence:root.presence;account-picture:root.account-picture;room-name:root.room-name;room-picture:root.room-picture;direct:root.direct;preview:root.preview; topic:root.topic; room-muted:root.room-muted; banner:root.profile-banner; can-threads:root.detail-can-threads;
+                    appearance:root.appearance; query <=> root.filter-text; profile-name <=> root.profile-name; profile-pronouns <=> root.profile-pronouns; profile-bio <=> root.profile-bio;
+                    adding <=> root.adding;confirm-unlink <=> root.confirm-unlink; navigate(s)=>{root.navigate(s);} back=>{root.go-back();} choose(s)=>{root.choose-place(s);}
+                    new-group=>{root.create-command("group","","");} friend(u,a)=>{keys.focus();root.friend-action(u,a);} search(s)=>{root.filter(s);} save(a,b,c)=>{keys.focus();root.save-profile(a,b,c);}
+                    menu(s)=>{root.sheet=s;} tool(s)=>{root.navigate("chat-tool/"+s);} detail(s)=>{root.navigate("chat-detail/"+s);}
+                }
+            }
+            if root.page==Page.chat && root.tool-mode!="": ToolsPanel { mode:root.tool-mode; channel:root.tool-channel; note:root.tool-note;
+                can-search-server:root.tool-server; busy:root.tool-busy; more:root.tool-more; hits:root.tool-hits; command(a,b,c)=>{root.tool-command(a,b,c);} }
+            if root.expression-mode!="": ExpressionPanel { mode:root.expression-mode;query:root.expression-query;note:root.expression-note;
+                busy:root.expression-busy;more:root.expression-more;page:root.expression-page;rows:root.expression-rows;command(k,v)=>{root.expression(k,v);} }
+            if root.create-mode!="": CreatePanel { mode:root.create-mode;name:root.create-name;note:root.create-note;summary:root.create-summary;
+                busy:root.create-busy;selected:root.create-selected;friends:root.create-friends;command(a,b,c)=>{root.create-command(a,b,c);} }
+            if root.detail-mode!="": RoomDetailsPanel {mode:root.detail-mode; tab:root.detail-tab; title:root.detail-title; note:root.detail-note;
+                busy:root.detail-busy; more:root.detail-more; retry:root.detail-retry; parent-members:root.detail-parent; rows:root.detail-rows;
+                card:root.detail-card; command(a,b,c)=>{root.detail-command(a,b,c);} }
+            if root.sheet=="status" || root.sheet=="logout": Rectangle {background:#0008;
+                TouchArea {clicked=>{root.sheet="";}}
+                Rectangle {y:parent.height - self.height; height:card.preferred-height+18px; background:MobileStyle.raised; border-top-left-radius:22px; border-top-right-radius:22px;
+                    card := VerticalLayout {y:8px; height:self.preferred-height; padding-left:16px; padding-right:16px; spacing:4px;
+                        Rectangle {height:10px; Rectangle {x:(parent.width - self.width)/2; width:38px; height:4px; border-radius:2px; background:MobileStyle.muted;}}
+                        Text {text:root.sheet=="status" ? "Set Status" : root.preview ? "Leave local preview?" : "Log out of Harmony?"; height:40px; color:MobileStyle.text; font-weight:700; font-size:20px; vertical-alignment:center;}
+                        if root.sheet=="status": VerticalLayout {for s in [{key:"online",name:"Online"},{key:"idle",name:"Idle"},{key:"dnd",name:"Do Not Disturb"},{key:"invisible",name:"Invisible"}]: MenuRow {
+                            title:s.name; icon:root.presence==s.key ? @image-url("icons/check.svg") : @image-url("icons/user.svg"); chevron:false; activated=>{root.sheet="";root.presence-change(s.key);} }}
+                        if root.sheet=="logout": MobileButton {text:root.preview ? "Leave preview" : "Log out"; destructive:true; activated=>{root.sheet="";root.navigate("signout");}}
+                        MobileButton {text:"Cancel";activated=>{root.sheet="";}}
+                    }
+                }
+            }
+        }
+    }
+}

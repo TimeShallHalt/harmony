@@ -1,0 +1,34 @@
+[package]
+name = "harmony-android"
+version = "1.2.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+fixture = ["yapfast-discord/android-fixture"]
+discord = []
+default = ["discord"]
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+emojis = "0.9"
+serde_json.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+tokio.workspace = true
+tracing.workspace = true
+pulldown-cmark = { version = "0.13", default-features = false }
+yapfast-discord = { path = "../../crates/yapfast-discord" }
+slint = { version = "=1.19.0", default-features = false, features = ["std", "compat-1-18", "backend-android-activity-06"] }
+jni21 = { package = "jni", version = "0.21" }
+jni = "0.22"
+rustls-platform-verifier = "0.7.1"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+qrcode = { version = "0.14", default-features = false }
+
+[build-dependencies]
+slint-build = "=1.19.0"

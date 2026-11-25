@@ -1,0 +1,117 @@
+import { ComboBox } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { ActionButton } from "controls.slint";
+
+// One deliberately explicit recording/review surface; no timer starts capture.
+export global VoiceNotes {
+    in-out property <bool> open;
+    in-out property <bool> available;
+    in-out property <[string]> devices;
+    in-out property <int> selected-device: -1;
+    in-out property <string> destination;
+    in-out property <bool> can-record;
+    in-out property <bool> can-send;
+    in-out property <bool> recording;
+    in-out property <bool> stopping;
+    in-out property <bool> playing;
+    in-out property <bool> ready;
+    in-out property <bool> sending;
+    in-out property <string> status;
+    in-out property <string> problem;
+    in-out property <[int]> waveform;
+    callback update-state;
+    callback request-open;
+    callback start-recording;
+    callback stop-recording;
+    callback cancel;
+    callback play-review;
+    callback stop-review;
+    callback save-review;
+    callback send-review;
+}
+
+export component VoiceNoteDialog inherits Rectangle {
+    visible: VoiceNotes.open;
+    background: #00000099;
+    public function request-record() {
+        if VoiceNotes.open && VoiceNotes.can-record && VoiceNotes.selected-device >= 0 && !VoiceNotes.recording
+            && !VoiceNotes.stopping && !VoiceNotes.ready && !VoiceNotes.sending {
+            VoiceNotes.start-recording();
+        }
+    }
+    public function request-send() {
+        if VoiceNotes.open && VoiceNotes.ready && VoiceNotes.can-send && !VoiceNotes.recording
+            && !VoiceNotes.stopping && !VoiceNotes.sending && !VoiceNotes.playing {
+            VoiceNotes.send-review();
+        }
+    }
+    // Outside presses do not accidentally discard a recording. Cancel is explicit.
+    TouchArea { }
+    Rectangle {
+        x: (root.width - self.width) / 2; y: max(12px, (root.height - self.height) / 2);
+        width: min(540px, root.width - 32px); height: min(root.height - 24px, layout.preferred-height + 40px);
+        background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 12px;
+        accessible-role: groupbox; accessible-label: "Record voice message";
+        TouchArea { }
+        scope := FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if event.text == Key.Escape && !VoiceNotes.sending { VoiceNotes.cancel(); return accept; }
+                return reject;
+            }
+            layout := VerticalLayout {
+                padding: 20px; spacing: 12px;
+                Text { text: "Record voice message"; font-size: 20px; font-weight: 700; color: Theme.text; }
+                VerticalLayout {
+                    spacing: 12px;
+                    Text { text: "Send to " + VoiceNotes.destination; wrap: word-wrap; color: Theme.muted; font-size: 14px; }
+                    Text { text: "Microphone"; color: Theme.text; font-size: 13px; }
+                    ComboBox {
+                        model: VoiceNotes.devices; current-index <=> VoiceNotes.selected-device;
+                        enabled: !VoiceNotes.recording && !VoiceNotes.stopping && !VoiceNotes.ready && !VoiceNotes.sending;
+                    }
+                    Text {
+                        text: VoiceNotes.recording ? "Recording  ·  " + VoiceNotes.status : VoiceNotes.status;
+                        color: VoiceNotes.recording ? Theme.danger : Theme.text; wrap: word-wrap; font-size: 15px;
+                        accessible-label: self.text;
+                    }
+                    Text { text: "Record up to 20 minutes."; wrap: word-wrap; color: Theme.muted; font-size: 13px; }
+                    if VoiceNotes.ready: Rectangle {
+                        height: 44px; background: Theme.sunken; border-radius: 6px;
+                        HorizontalLayout {
+                            padding: 5px; spacing: 1px;
+                            for peak in VoiceNotes.waveform: Rectangle {
+                                vertical-stretch: 0; height: max(2px, peak / 255.0 * 34px);
+                                background: Theme.accent; border-radius: 1px;
+                            }
+                        }
+                    }
+                    if VoiceNotes.problem != "": Text { text: VoiceNotes.problem; wrap: word-wrap; color: Theme.danger; font-size: 14px; }
+                    if VoiceNotes.recording || VoiceNotes.stopping: ActionButton {
+                        text: VoiceNotes.stopping ? "Stopping microphone…" : "Stop and review";
+                        enabled: !VoiceNotes.stopping;
+                        clicked => { VoiceNotes.stop-recording(); }
+                    }
+                    if !VoiceNotes.recording && !VoiceNotes.stopping && !VoiceNotes.ready: ActionButton {
+                        text: "Start recording"; enabled: VoiceNotes.can-record && VoiceNotes.selected-device >= 0;
+                        clicked => { root.request-record(); }
+                    }
+                    if VoiceNotes.ready: HorizontalLayout {
+                        spacing: 8px;
+                        ActionButton { text: VoiceNotes.playing ? "Stop playback" : "Play review"; enabled: !VoiceNotes.sending && (VoiceNotes.can-record || VoiceNotes.playing); clicked => { if VoiceNotes.playing { VoiceNotes.stop-review(); } else { VoiceNotes.play-review(); } } }
+                        ActionButton { text: "Save Ogg audio…"; enabled: !VoiceNotes.sending; clicked => { VoiceNotes.save-review(); } }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    ActionButton { text: "Discard"; enabled: !VoiceNotes.sending; clicked => { VoiceNotes.cancel(); } }
+                    ActionButton {
+                        text: VoiceNotes.sending ? "Uploading voice message…" : "Send voice message";
+                        enabled: VoiceNotes.ready && VoiceNotes.can-send && !VoiceNotes.sending && !VoiceNotes.playing;
+                        primary: true; clicked => { root.request-send(); }
+                    }
+                }
+            }
+        }
+    }
+}

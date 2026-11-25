@@ -1,0 +1,135 @@
+import { MobileStyle, MobileIcon } from "mobile-style.slint";
+import { ScrollView } from "scrollview.slint";
+
+export struct PollChoice { id: int, label: string, votes: int, percent: int, mine: bool }
+export struct MobilePoll {
+    question: string, choices: [PollChoice], multiple: bool, counted: bool, voted: bool,
+    closed: bool, can-vote: bool, can-end: bool, total: int, ends: string, expires-in: int
+}
+
+component PollButton inherits Rectangle {
+    in property <string> title;
+    in property <bool> primary;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 40px; border-radius: 10px; opacity: root.enabled ? 1 : 0.5;
+    background: hit.pressed ? MobileStyle.selected : root.primary ? MobileStyle.accent : MobileStyle.field;
+    accessible-role: button; accessible-label: root.title; accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    Text { text: root.title; color: root.primary ? white : MobileStyle.text; font-size: 14px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+    hit := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component PollField inherits Rectangle {
+    in-out property <string> value;
+    in property <string> hint;
+    in property <bool> multiple-lines;
+    height: multiple-lines ? 60px : 42px; border-radius: 10px; background: MobileStyle.field;
+    if root.value == "" && field.preedit-text == "": Text { x: 11px; width: parent.width - 22px; text: root.hint; color: MobileStyle.muted; vertical-alignment: center; font-size: 15px; }
+    field := TextInput { x: 11px; y: 3px; width: parent.width - 22px; height: parent.height - 6px; text <=> root.value; font-size: 15px;
+        color: MobileStyle.text; single-line: !root.multiple-lines; vertical-alignment: center; wrap: word-wrap; accessible-label: root.hint; }
+}
+
+export component PollCard inherits Rectangle {
+    in property <MobilePoll> data;
+    callback open-vote();
+    property <bool> timed-out;
+    property <bool> ended: root.data.closed || root.timed-out;
+    property <bool> results: root.data.counted && (root.ended || root.data.voted);
+    height: content.preferred-height; border-width: 1px; border-color: MobileStyle.line; border-radius: 12px; background: MobileStyle.panel;
+    Timer { running: root.data.expires-in > 0 && !root.ended; interval: max(1, root.data.expires-in) * 1000ms; triggered => {root.timed-out = true;} }
+    content := VerticalLayout {
+        x:0px; y:0px; width: root.width; height: self.preferred-height; padding: 11px; spacing: 5px;
+        HorizontalLayout {height: 18px; spacing: 6px; alignment: start; cross-axis-alignment: center;
+            Image { width: 16px; height:16px; source: @image-url("icons/chart-bar.svg"); colorize: MobileStyle.accent-text; }
+            Text { text: root.ended ? "Poll ended" : "Poll"; color: MobileStyle.secondary; font-size: 12px; font-weight: 700; }
+        }
+        Text { text: root.data.question; color: MobileStyle.text; font-size: 17px; font-weight: 700; wrap: word-wrap; }
+        Text { text: root.results ? "Results" : root.data.multiple ? "Select one or more answers" : "Select one answer"; color: MobileStyle.muted; font-size: 12px; wrap: word-wrap; }
+        for choice in root.data.choices: Rectangle {
+            height: max(34px, label.preferred-height + 10px); border-radius: 8px; clip: true; background: MobileStyle.field;
+            if root.results && choice.percent > 0: Rectangle { x: 0px; y:0px; width: parent.width * choice.percent / 100; background: choice.mine ? MobileStyle.accent : MobileStyle.selected; opacity: choice.mine ? 0.42 : 1; }
+            if choice.mine: Image { x:7px; y:(parent.height - self.height)/2; width:14px; height:14px; source:@image-url("icons/check.svg"); colorize:MobileStyle.accent-text; }
+            label := Text { x:choice.mine ? 26px : 9px; y:0px; width:max(8px,parent.width - self.x - (root.results ? 49px : 8px)); height:parent.height;
+                text:choice.label; wrap:word-wrap; font-size:14px; color:MobileStyle.text; vertical-alignment:center; }
+            if root.results: Text { x:parent.width - 45px; width:38px; text:choice.percent + "%"; font-size:12px; font-weight:700; color:MobileStyle.secondary; vertical-alignment:center; horizontal-alignment:right; }
+            TouchArea { enabled:root.data.can-vote && !root.ended; clicked => { root.open-vote(); } }
+        }
+        if root.data.counted: Text { text: root.data.total + (root.data.total == 1 ? " vote" : " votes"); color:MobileStyle.secondary; font-size:12px; }
+        if root.data.ends != "": Text { text: (root.ended ? "Ended " : "Ends ") + root.data.ends; color:MobileStyle.muted; font-size:12px; wrap:word-wrap; }
+        if root.data.can-vote && !root.ended: PollButton { title: root.data.voted ? "Change Vote" : "Vote"; primary: !root.data.voted; clicked => {root.open-vote();} }
+    }
+}
+
+export component PollDialog inherits Rectangle {
+    in property <string> mode;
+    in property <MobilePoll> data;
+    in property <bool> busy;
+    in property <string> error;
+    callback dismiss();
+    callback post(string, [string], int, bool);
+    callback vote([int]);
+    callback end-now();
+    property <string> question;
+    property <[string]> answers: ["","","","","","","","","",""];
+    property <int> count: 2;
+    property <int> hours: 24;
+    property <bool> multi;
+    property <[int]> selected: [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+    neutral := FocusScope {}
+    function submit() {
+        neutral.focus();
+        if root.busy {return;}
+        if root.mode == "poll-create" { root.post(root.question, root.answers, root.hours, root.multi); }
+        else if root.mode == "poll-end" { root.end-now(); }
+        else if root.mode == "poll-vote" { root.vote(root.selected); }
+    }
+    background: MobileStyle.panel;
+    VerticalLayout {
+        padding-left:14px; padding-right:14px; padding-bottom:10px; spacing:8px;
+        HorizontalLayout { height:42px; cross-axis-alignment:center; spacing:6px;
+            Text {min-width:0px; horizontal-stretch:1; text:root.mode == "poll-create" ? "Create a Poll" : root.mode == "poll-end" ? "End this poll?" : "Vote"; color:MobileStyle.text; font-size:21px; font-weight:700; }
+            MobileIcon { width:40px; height:40px; glyph:19px; label:"Close poll"; icon:@image-url("icons/x.svg"); activated => { root.dismiss(); } }
+        }
+        scroll := ScrollView { min-height:10px; vertical-scrollbar-policy:always-off; horizontal-scrollbar-policy:always-off; mouse-drag-pan-enabled:true;
+            VerticalLayout { x:0px; y:0px; width:scroll.visible-width; height:self.preferred-height; spacing:7px;
+                if root.mode == "poll-create": VerticalLayout { spacing:6px;
+                    Text {text:"Question"; color:MobileStyle.secondary; font-size:13px; font-weight:700;}
+                    PollField {value <=> root.question; hint:"What would you like to ask?"; multiple-lines:true;}
+                    Text {text:"Answers"; color:MobileStyle.secondary; font-size:13px; font-weight:700;}
+                    for idx in root.count: PollField {
+                        hint:"Answer " + (idx + 1); value:root.answers[idx];
+                        changed value => { if root.answers[idx] != self.value {root.answers[idx] = self.value;} }
+                    }
+                    if root.count < 10: PollButton {title:"Add another answer"; clicked => {root.count += 1;} }
+                    if root.count > 2: PollButton {title:"Remove last answer"; clicked => {root.answers[root.count - 1] = ""; root.count -= 1;} }
+                    Text {text:"Duration"; color:MobileStyle.secondary; font-size:13px; font-weight:700;}
+                    FlexboxLayout {spacing:4px; alignment:start;
+                        for opt in [{name:"1h",hours:1},{name:"4h",hours:4},{name:"8h",hours:8},{name:"24h",hours:24},{name:"3d",hours:72},{name:"1w",hours:168},{name:"2w",hours:336}]: PollButton {
+                            width:42px; height:35px; primary:root.hours == opt.hours; title:opt.name; clicked => {root.hours = opt.hours;}
+                        }
+                    }
+                    PollButton { title:root.multi ? "✓  Allow multiple answers" : "Allow multiple answers"; primary:root.multi; clicked => {root.multi = !root.multi;} }
+                }
+                if root.mode == "poll-end": Text {text:"Voting on this poll will close for everyone and the final results will be shown."; color:MobileStyle.secondary; font-size:15px; wrap:word-wrap;}
+                if root.mode == "poll-vote": VerticalLayout {spacing:6px;
+                    Text {text:root.data.question; color:MobileStyle.text; font-size:17px; font-weight:700; wrap:word-wrap;}
+                    Text {text:root.data.multiple ? "Select one or more answers" : "Select one answer"; color:MobileStyle.muted; font-size:13px;}
+                    for choice[index] in root.data.choices: PollButton {
+                        primary: root.selected[index] > 0 || (root.selected[index] < 0 && choice.mine);
+                        title: (self.primary ? "✓  " : "") + choice.label;
+                        init => { if root.selected[index] < 0 {root.selected[index] = choice.mine ? choice.id : 0;} }
+                        clicked => {
+                            let toggle = !self.primary;
+                            if !root.data.multiple {root.selected = [0,0,0,0,0,0,0,0,0,0];}
+                            root.selected[index] = toggle ? choice.id : 0;
+                        }
+                    }
+                    if root.data.voted: PollButton {title:"Remove my vote"; clicked => {root.selected = [0,0,0,0,0,0,0,0,0,0]; root.submit();} }
+                }
+            }
+        }
+        if root.error != "": Text {text:root.error; color:MobileStyle.danger; font-size:13px; wrap:word-wrap;}
+        PollButton {title:root.busy ? "Submitting…" : root.mode == "poll-create" ? "Post Poll" : root.mode == "poll-end" ? "End Poll" : "Submit Vote"; primary:true; enabled: !root.busy; clicked => {root.submit();} }
+    }
+}

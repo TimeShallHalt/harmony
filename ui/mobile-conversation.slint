@@ -1,0 +1,319 @@
+import { ScrollView } from "scrollview.slint";
+import { MobileStyle } from "mobile-style.slint";
+import { Post } from "mobile-types.slint";
+import { ChatAvatar, ChatIcon, ChatMenuRow, ChatPost } from "mobile-conversation-row.slint";
+import { ChatComposer } from "mobile-conversation-composer.slint";
+import { PollDialog } from "mobile-polls.slint";
+import { ChatEmojiPicker, ChatEmoji, ChatInsertion, ChatMatch } from "mobile-conversation-emoji.slint";
+export { ChatEmoji, ChatInsertion, ChatMatch } from "mobile-conversation-emoji.slint";
+
+component ChatButton inherits Rectangle {
+    in property <string> title;
+    in property <bool> primary;
+    callback activated();
+    height: 42px; border-radius: 12px; background: hit.pressed ? MobileStyle.selected : root.primary ? MobileStyle.accent : MobileStyle.field;
+    accessible-role: button; accessible-label: root.title; accessible-action-default => { root.activated(); }
+    Text {
+        text: root.title; color: root.primary ? white : MobileStyle.text; font-size: 14px; font-weight: 700;
+        horizontal-alignment: center; vertical-alignment: center; overflow: elide;
+    }
+    hit := TouchArea { clicked => { root.activated(); } }
+}
+
+export component MobileConversation inherits Rectangle {
+    in property <[Post]> posts;
+    in property <string> heading;
+    in property <bool> direct;
+    in property <image> room-picture;
+    in-out property <string> draft;
+    in-out property <string> chosen;
+    in-out property <string> sheet;
+    in-out property <string> pending-url;
+    in property <bool> preview;
+    in property <bool> writable;
+    in property <bool> sending;
+    in property <bool> older;
+    in property <bool> voice-ready;
+    in property <bool> recording;
+    in property <bool> request-room;
+    in property <string> context-note;
+    in property <string> staged;
+    in property <string> jump-target;
+    in property <int> tail;
+    in property <int> focus-count;
+    in property <[ChatMatch]> compose-matches;
+    in property <int> emoji-revision;
+    in property <bool> can-poll;
+    in-out property <bool> poll-busy;
+    in-out property <string> poll-error;
+    callback post-poll(string,[string],int,bool);
+    callback vote-poll(string,[int]);
+    callback end-poll(string);
+
+    callback send();
+    callback change-draft(string, string);
+    callback action(string, string);
+    callback react(string, string);
+    callback media(string, int);
+    callback inspect-link(string);
+    callback web(string);
+    callback pick();
+    callback pick-media();
+    callback record();
+    callback review();
+    callback unstage();
+    callback clear-context();
+    callback more-history();
+    callback request-answer(bool);
+    callback expression(string,string);
+    callback complete-input(string,int,int);
+    pure callback emoji-results(string, int) -> [ChatEmoji];
+    pure callback insert-emoji(string, int, int, string) -> ChatInsertion;
+
+    property <Post> selected;
+    property <int> poll-index;
+    property <string> mode: root.pending-url != "" ? "link" : root.sheet;
+    property <bool> poll-dialog: root.mode == "poll-create" || root.mode == "poll-vote" || root.mode == "poll-end";
+    property <bool> own-sheet: root.poll-dialog || root.mode == "message" || root.mode == "confirm-delete" || root.mode == "emoji" || root.mode == "reaction" || root.mode == "link" || root.mode == "attach";
+    property <string> consumed-jump;
+    property <bool> can-record: !root.sending && !root.recording && root.staged == "" && root.draft == "" && root.context-note == "";
+    property <bool> can-pick: !root.sending && !root.recording && !root.voice-ready && !root.context-note.starts-with("Editing");
+    background: MobileStyle.canvas; clip: true;
+
+    changed jump-target => { root.consumed-jump = ""; }
+    changed heading => { history.follow = true; history.end(); }
+    changed tail => { if history.follow { history.end(); } }
+    public function commit-input() { composer.commit-input(); }
+    function close() {
+        if root.pending-url != "" { root.pending-url = ""; }
+        else { root.sheet = ""; root.chosen = ""; }
+    }
+    function open-post(data: Post, kind: string) {
+        composer.commit-input();
+        root.selected = data;
+        root.chosen = data.id;
+        root.sheet = kind;
+    }
+    function perform(kind: string) {
+        let id = root.chosen;
+        root.close();
+        if id != "" { root.action(id, kind); }
+    }
+    function react-with(value: string) {
+        let id = root.chosen;
+        root.close();
+        if id != "" { root.react(id, value); }
+    }
+    function reveal(screen-y: length, id: string) {
+        if root.jump-target == id && id != root.consumed-jump {
+            root.consumed-jump = id;
+            history.follow = false;
+            history.content-y = clamp(history.content-y + history.absolute-position.y + history.visible-height * 0.28 - screen-y,
+                -max(0px, history.content-height - history.visible-height), 0px);
+        }
+    }
+
+    VerticalLayout {
+        Rectangle {
+            min-height: 10px; vertical-stretch: 1;
+            history := ScrollView {
+                property <bool> follow: true;
+                property <length> older-height;
+                function end() { self.content-y = -max(0px, self.content-height - self.visible-height); }
+                min-height: 0px; vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off; mouse-drag-pan-enabled: true;
+                content-width: self.visible-width; content-height: max(self.visible-height, entries.height);
+                scrolled => { self.follow = self.content-height - self.visible-height + self.content-y < 44px; }
+                changed content-height => {
+                    if self.older-height > 0px && self.content-height > self.older-height {
+                        self.content-y -= self.content-height - self.older-height;
+                        self.older-height = 0px;
+                    } else if self.follow { self.end(); }
+                }
+                changed visible-height => { if self.follow { self.end(); } }
+                entries := VerticalLayout {
+                    y: max(0px, history.visible-height - self.height); width: history.visible-width; height: self.preferred-height;
+                    padding-bottom: 10px; alignment: start;
+                    if root.older: Rectangle {
+                        height: 48px;
+                        ChatButton { x: (parent.width - self.width) / 2; y: 5px; width: 152px; height: 34px; title: "Earlier messages"; activated => {
+                            history.follow = false; history.older-height = history.content-height; root.more-history();
+                        } }
+                    }
+                    if !root.older: VerticalLayout {
+                        padding-left: 16px; padding-right: 16px; padding-top: 19px; padding-bottom: 12px; spacing: 6px;
+                        if root.direct: ChatAvatar {
+                            width: 66px; height: 66px; picture: root.room-picture; initial: "@";
+                        }
+                        if !root.direct: Rectangle {
+                            width: 60px; height: 60px; border-radius: 30px; background: MobileStyle.raised;
+                            Image { x: 13px; y: 13px; width: 34px; height: 34px; source: @image-url("icons/hash.svg"); colorize: MobileStyle.text; }
+                        }
+                        Text {
+                            text: root.direct ? root.heading : "Welcome to #" + root.heading + "!";
+                            color: MobileStyle.text; font-size: 24px; font-weight: 700; wrap: word-wrap;
+                        }
+                        Text {
+                            text: root.direct ? "This is the beginning of your conversation with " + root.heading + "." : "This is the start of the #" + root.heading + " channel.";
+                            color: MobileStyle.secondary; font-size: 14px; wrap: word-wrap;
+                        }
+                    }
+                    for post[n] in root.posts: ChatPost {
+                        property <bool> showing-poll: root.poll-dialog && root.chosen == post.id;
+                        changed showing-poll => {if self.showing-poll {root.poll-index = n;}}
+                        init => {if self.showing-poll {root.poll-index = n;}}
+                        post: post; writable: root.writable && !root.request-room;
+                        jump: root.jump-target != "" && root.jump-target == post.id && root.consumed-jump != post.id;
+                        selected: root.chosen == post.id && root.sheet != ""; show-at(screen-y) => { root.reveal(screen-y, post.id); }
+                        options => { root.open-post(post, "message"); }
+                        more-reactions => { root.open-post(post, "reaction"); }
+                        vote-poll => {root.poll-index = n; root.poll-error = ""; root.open-post(post,"poll-vote");}
+                        reply => { root.action(post.id, "reply"); }
+                        react(value) => { root.react(post.id, value); }
+                        media(index) => { root.media(post.id, index); }
+                        inspect(url) => { root.inspect-link(url); }
+                    }
+                }
+            }
+            if !history.follow && history.content-height - history.visible-height + history.content-y > 114px: ChatIcon {
+                x: parent.width - self.width - 12px; y: parent.height - self.height - 5px; width: 38px; height: 38px;
+                fill: MobileStyle.raised; tint: MobileStyle.text; glyph: 19px; icon: @image-url("icons/chevron-down.svg"); label: "Jump to latest message";
+                activated => { history.follow = true; history.end(); }
+            }
+        }
+        if root.request-room: VerticalLayout {
+            padding: 12px; spacing: 6px;
+            Text { text: "Message request"; color: MobileStyle.text; font-size: 16px; font-weight: 700; horizontal-alignment: center; }
+            HorizontalLayout { spacing: 8px;
+                ChatButton { title: "Ignore"; activated => { root.request-answer(false); } }
+                ChatButton { title: "Accept"; primary: true; activated => { root.request-answer(true); } }
+            }
+        }
+        if !root.request-room && !root.writable: Text {
+            height: 48px; text: "Read-only channel"; color: MobileStyle.muted; font-size: 14px; vertical-alignment: center; horizontal-alignment: center;
+        }
+        composer := ChatComposer {
+            active: root.writable && !root.request-room; heading: root.heading; direct: root.direct; draft <=> root.draft;
+            staged: root.staged; context-note: root.context-note; voice-ready: root.voice-ready; recording: root.recording;
+            sending: root.sending; preview: root.preview; focus-count: root.focus-count;
+            matches: root.compose-matches; complete-input(text, anchor, caret) => { root.complete-input(text, anchor, caret); }
+            send => { history.follow = true; root.send(); }
+            edited(text, visible-text) => { root.change-draft(text, visible-text); }
+            show-plus => { root.sheet = "attach"; }
+            show-emoji => { root.sheet = "emoji"; }
+            pick => { root.pick-media(); }
+            insert(text, anchor, caret, symbol) => { return root.insert-emoji(text, anchor, caret, symbol); }
+            record => { root.record(); }
+            review => { root.review(); }
+            unstage => { root.unstage(); }
+            clear-context => { root.clear-context(); }
+        }
+    }
+
+    if root.own-sheet: Rectangle {
+        background: root.mode == "attach" ? #08080b45 : #08080b88;
+        TouchArea { clicked => { root.close(); } }
+    }
+    if root.mode == "attach": Rectangle {
+        x: 10px; y: max(0px, root.height - composer.height - self.height); width: min(parent.width - 20px, 244px);
+        height: quick.preferred-height + 12px; background: MobileStyle.raised; border-radius: 16px;
+        border-width: 1px; border-color: MobileStyle.line;
+        TouchArea {}
+        quick := VerticalLayout {
+            x: 4px; y: 6px; width: parent.width - 8px; height: self.preferred-height;
+            if root.can-pick: ChatMenuRow { icon: @image-url("icons/image.svg"); title: "Photos and videos"; activated => { root.close(); root.pick-media(); } }
+            if root.can-pick: ChatMenuRow { icon: @image-url("icons/file.svg"); title: "Files"; activated => { root.close(); root.pick(); } }
+            if root.can-poll: ChatMenuRow { icon: @image-url("icons/chart-bar.svg"); title: "Poll"; activated => { root.poll-error = ""; root.sheet = "poll-create"; } }
+            if !root.voice-ready: ChatMenuRow { icon: @image-url("icons/smile.svg"); title: "Emoji"; activated => { root.sheet = "emoji"; } }
+            if root.can-record: ChatMenuRow { icon: @image-url("icons/mic.svg"); title: "Voice message"; activated => { root.close(); root.record(); } }
+            if root.voice-ready && !root.can-pick: ChatMenuRow { icon: @image-url("icons/play.svg"); title: "Play voice message"; activated => { root.close(); root.review(); } }
+        }
+    }
+    if root.own-sheet && root.mode != "attach": Rectangle {
+        y: parent.height - self.height;
+        height: min(parent.height - 4px, root.mode == "poll-end" ? 233px : root.poll-dialog ? 550px : root.mode == "emoji" || root.mode == "reaction" ? 365px : actions.preferred-height + 30px);
+        background: MobileStyle.panel; border-top-left-radius: 20px; border-top-right-radius: 20px; clip: true;
+        TouchArea {}
+        Rectangle { x: (parent.width - self.width) / 2; y: 8px; width: 36px; height: 4px; border-radius: 2px; background: MobileStyle.muted; opacity: 0.55; }
+        if root.poll-dialog: PollDialog {
+            x:0px; y:19px; height:parent.height - self.y; mode:root.mode; busy:root.poll-busy; error:root.poll-error;
+            data:root.posts.length > root.poll-index && root.posts[root.poll-index].id == root.chosen ? root.posts[root.poll-index].poll : root.selected.poll;
+            dismiss => {root.close();}
+            post(q,answers,hours,multi) => {root.post-poll(q,answers,hours,multi);}
+            vote(answers) => {root.vote-poll(root.chosen,answers);}
+            end-now => {root.end-poll(root.chosen);}
+        }
+        if root.mode == "emoji" || root.mode == "reaction": ChatEmojiPicker {
+            y: 20px; height: parent.height - self.y; reaction: root.mode == "reaction";
+            revision: root.emoji-revision;
+            results(query, offset, revision) => { return root.emoji-results(query, offset); }
+            expression(tab) => { root.close(); root.expression(tab, ""); }
+            dismiss => { root.close(); }
+            picked(symbol) => {
+                if root.mode == "reaction" { root.react-with(symbol); }
+                else { root.close(); composer.add-emoji(symbol); }
+            }
+        }
+        action-scroll := ScrollView {
+            y: 19px; height: max(1px, parent.height - self.y - 5px);
+            visible: !root.poll-dialog && root.mode != "emoji" && root.mode != "reaction";
+            vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off; mouse-drag-pan-enabled: true;
+            actions := VerticalLayout {
+                width: action-scroll.visible-width; height: self.preferred-height;
+                padding-left: 13px; padding-right: 13px; padding-bottom: 6px; spacing: 8px; alignment: start;
+                if root.mode == "message" || root.mode == "confirm-delete": HorizontalLayout {
+                    height: 52px; spacing: 9px; padding-left: 4px; padding-right: 4px;
+                    ChatAvatar { width: 35px; height: 35px; picture: root.selected.picture; initial: root.selected.initial; own: root.selected.own; }
+                    VerticalLayout { alignment: center;
+                        Text { text: root.selected.author; color: MobileStyle.text; font-size: 15px; font-weight: 700; overflow: elide; }
+                        Text {
+                            text: root.selected.body != "" ? root.selected.body : root.selected.files.length > 0 ? root.selected.files[0].name : "Message";
+                            color: MobileStyle.muted; font-size: 13px; overflow: elide;
+                        }
+                    }
+                }
+                if root.mode == "message" && root.writable && !root.request-room: Rectangle {
+                    height: 50px; border-radius: 14px; background: MobileStyle.field;
+                    HorizontalLayout { padding-left: 4px; padding-right: 4px; alignment: space-around;
+                        for item in [{symbol:"👍",name:"Thumbs up"}, {symbol:"❤️",name:"Heart"}, {symbol:"😂",name:"Laugh"}, {symbol:"🎉",name:"Celebrate"}]: Rectangle {
+                            width: 43px; height: 46px; border-radius: 10px; background: hit.pressed ? MobileStyle.selected : transparent;
+                            accessible-role: button; accessible-label: "React with " + item.name; accessible-action-default => { root.react-with(item.symbol); }
+                            Text { text: item.symbol; color: MobileStyle.text; font-size: 24px; horizontal-alignment: center; vertical-alignment: center; }
+                            hit := TouchArea { clicked => { root.react-with(item.symbol); } }
+                        }
+                        ChatIcon { width: 43px; height: 43px; glyph: 23px; icon: @image-url("icons/smile-plus.svg"); label: "More reactions"; activated => { root.sheet = "reaction"; } }
+                    }
+                }
+                if root.mode == "message": Rectangle {
+                    height: menu.preferred-height; border-radius: 13px; clip: true; background: MobileStyle.field;
+                    menu := VerticalLayout {
+                        if root.writable && !root.request-room: ChatMenuRow { icon: @image-url("icons/reply.svg"); title: "Reply"; activated => { root.perform("reply"); } }
+                        if root.selected.editable && root.writable: ChatMenuRow { icon: @image-url("icons/pencil.svg"); title: "Edit Message"; activated => { root.perform("edit"); } }
+                        if root.selected.body != "": ChatMenuRow { icon: @image-url("icons/copy.svg"); title: "Copy Text"; activated => { root.perform("copy"); } }
+                        for file in root.selected.files: ChatMenuRow { icon: @image-url("icons/file.svg"); title: "Open " + file.name; activated => {
+                            let id = root.chosen; root.close(); root.media(id, file.index);
+                        } }
+                        if root.selected.can-pin: ChatMenuRow { icon: root.selected.pinned ? @image-url("icons/pin-off.svg") : @image-url("icons/pin.svg"); title: root.selected.pinned ? "Unpin Message" : "Pin Message"; activated => { root.perform(root.selected.pinned ? "unpin" : "pin"); } }
+                        if root.selected.poll.can-end: ChatMenuRow { icon: @image-url("icons/chart-bar.svg"); title:"End Poll"; activated => {root.poll-error = ""; root.sheet = "poll-end";} }
+                        if root.selected.can-delete: ChatMenuRow { icon: @image-url("icons/trash-2.svg"); title: "Delete Message"; destructive: true; activated => { root.sheet = "confirm-delete"; } }
+                    }
+                }
+                if root.mode == "confirm-delete": VerticalLayout {
+                    spacing: 7px;
+                    Text { text: "Delete this message?"; color: MobileStyle.text; font-size: 20px; font-weight: 700; }
+                    Text { text: "It will be removed for everyone in this conversation."; color: MobileStyle.secondary; font-size: 14px; wrap: word-wrap; }
+                    ChatMenuRow { title: "Delete Message"; icon: @image-url("icons/trash-2.svg"); destructive: true; activated => { root.perform("delete"); } }
+                    ChatButton { title: "Cancel"; activated => { root.sheet = "message"; } }
+                }
+                if root.mode == "link": VerticalLayout {
+                    spacing: 10px; padding-top: 7px;
+                    Text { text: "Open this link?"; color: MobileStyle.text; font-size: 20px; font-weight: 700; }
+                    Text { text: root.pending-url; color: MobileStyle.secondary; font-size: 14px; wrap: char-wrap; max-lines: 4; overflow: elide; }
+                    HorizontalLayout {
+                        spacing: 8px; ChatButton { title: "Cancel"; activated => { root.close(); } }
+                        ChatButton { title: "Open in browser"; primary: true; activated => { let url = root.pending-url; root.close(); root.web(url); } }
+                    }
+                }
+            }
+        }
+    }
+}

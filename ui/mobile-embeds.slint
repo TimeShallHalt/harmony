@@ -1,0 +1,18 @@
+import { MobileStyle } from "mobile-style.slint";
+
+export struct EmbedCard { source:string, title:string, url:string, content:styled-text, has-content:bool, footer:string, accent:color }
+
+export component ChatEmbed inherits Rectangle {
+    in property <EmbedCard> data; callback inspect(string);
+    height:box.preferred-height; background:MobileStyle.field; border-radius:8px; clip:true;
+    Rectangle {x:0px; y:0px; width:4px; background:root.data.accent;}
+    box := VerticalLayout {height:self.preferred-height; padding-left:14px; padding-right:10px; padding-top:9px; padding-bottom:9px; spacing:5px;
+        if root.data.source!="": Text {text:root.data.source; font-size:12px; color:MobileStyle.secondary; font-weight:600; overflow:elide;}
+        if root.data.title!="": Rectangle {height:caption.preferred-height;
+            caption := Text {width:parent.width; text:root.data.title; font-size:15px; font-weight:700; color:root.data.url!="" ? #69baf8 : MobileStyle.text; wrap:word-wrap;}
+            if root.data.url!="": TouchArea {accessible-role:button; accessible-label:root.data.title; accessible-action-default=>{root.inspect(root.data.url);} clicked=>{root.inspect(root.data.url);}}
+        }
+        if root.data.has-content: StyledText {min-width:0px; text:root.data.content; default-font-size:14px; default-color:MobileStyle.secondary; link-color:#69baf8; link-clicked(url)=>{root.inspect(url);}}
+        if root.data.footer!="": Text {text:root.data.footer; font-size:11px; color:MobileStyle.muted; wrap:word-wrap;}
+    }
+}

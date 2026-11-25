@@ -1,0 +1,89 @@
+export global MobileStyle {
+    in-out property <string> mode: "dark";
+    private property <bool> light: mode == "light";
+    private property <bool> ash: mode == "ash";
+    private property <bool> onyx: mode == "onyx";
+    out property <color> canvas: light ? #ffffff : ash ? #313338 : onyx ? #000000 : #1c1c20;
+    out property <color> panel: light ? #f0f1f3 : ash ? #2b2d31 : onyx ? #101012 : #19191d;
+    out property <color> inset: light ? #e8e9ed : ash ? #232428 : onyx ? #000000 : #111113;
+    out property <color> raised: light ? #e2e4e8 : ash ? #383a40 : onyx ? #1b1b1e : #29292f;
+    out property <color> field: light ? #edeef0 : ash ? #383a40 : onyx ? #18181b : #27272c;
+    out property <color> selected: light ? #dcdde3 : ash ? #404249 : onyx ? #222226 : #303036;
+    out property <color> line: light ? #d7d8df : ash ? #45474c : onyx ? #29292e : #34343a;
+    out property <color> text: light ? #19191d : #f3f3f6;
+    out property <color> secondary: light ? #45454e : #c9c9d0;
+    out property <color> muted: light ? #5f606c : #a2a3b0;
+    out property <color> accent: light ? #4c54cd : #5865f2;
+    out property <color> accent-text: light ? #414bbf : #adb4ff;
+    out property <color> positive: light ? #167c47 : #43b77a;
+    out property <color> danger: light ? #b92d45 : #f07982;
+}
+
+export component MobileIcon inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <color> ink: MobileStyle.secondary;
+    in property <color> fill: transparent;
+    in property <length> glyph: 21px;
+    in property <bool> enabled: true;
+    callback activated();
+    accessible-role: button; accessible-label: label; accessible-enabled: enabled;
+    accessible-action-default => { if self.enabled { self.activated(); } }
+    width:44px; height:44px;
+    border-radius: self.height / 2; opacity: self.enabled ? 1 : 0.45;
+    background: pointer.pressed ? MobileStyle.selected : fill;
+    Image { width: root.glyph; height: root.glyph; x: (parent.width - self.width)/2; y: (parent.height - self.height)/2;
+        source: root.icon; colorize: root.ink; image-fit: contain; }
+    pointer := TouchArea { enabled: root.enabled; clicked => { root.activated(); } }
+}
+export component MobileButton inherits Rectangle {
+    in property <string> text; in property <image> icon;
+    in property <bool> primary; in property <bool> destructive; in property <bool> enabled: true;
+    in property <bool> compact;
+    callback activated();
+    accessible-role: button; accessible-label: text; accessible-enabled: enabled;
+    accessible-action-default => { if self.enabled {self.activated();} }
+    height: compact ? 36px : 46px; min-width: 40px; border-radius: 13px;
+    background: pointer.pressed ? MobileStyle.selected : primary ? MobileStyle.accent : MobileStyle.raised;
+    opacity: enabled ? 1 : 0.45;
+    HorizontalLayout { cross-axis-alignment:center; alignment: center; spacing: 6px; padding-left: 9px; padding-right: 9px;
+        if root.icon.width > 0: Image { width: 16px; height: 16px; source: root.icon; colorize: root.primary ? #fff : MobileStyle.text; }
+        Text { text: root.text; color: root.primary ? #fff : root.destructive ? MobileStyle.danger : MobileStyle.text;
+            font-size: root.compact ? 13px : 15px; font-weight: 650; vertical-alignment: center; overflow: elide; }
+    }
+    pointer := TouchArea { enabled: root.enabled; clicked => { root.activated(); } }
+}
+export component Avatar inherits Rectangle {
+    in property <image> picture; in property <string> initials; in property <string> presence;
+    in property <bool> server; in property <color> tint: #555fbc;
+    in property <color> ring: MobileStyle.panel;
+    min-width: 26px; min-height: 26px; preferred-width: 40px; preferred-height: 40px;
+    inner := Rectangle { width: root.width; height: root.height; background: root.tint; clip: true;
+        border-radius: root.server ? root.width * 0.29 : root.width / 2;
+        if root.picture.width > 0: Image { x:0px; y:0px; width:parent.width; height:parent.height; source: root.picture; image-fit: cover; }
+        if root.picture.width == 0: Text { text: root.initials; horizontal-alignment: center; vertical-alignment: center;
+            color: #fff; font-weight: 750; font-size: max(12px, root.width * 0.39); }
+    }
+    if root.presence != "": Rectangle { width: max(11px,root.width * 0.3); height: self.width;
+        x: parent.width - self.width + 1px; y: parent.height - self.height + 1px; border-radius: self.width/2;
+        border-width: 2px; border-color: root.ring;
+        background: root.presence == "online" ? #43b581 : root.presence == "idle" ? #f4b449 : root.presence == "dnd" ? #ed565a : #85868e;
+        if root.presence == "dnd": Rectangle { width: parent.width*0.42; height: 2px; background: root.ring; border-radius: 1px;
+            x:(parent.width - self.width)/2; y:(parent.height - self.height)/2; }
+        if root.presence == "offline" || root.presence == "invisible": Rectangle { width: parent.width*0.36; height:self.width; border-radius:self.width/2;
+            background: root.ring; x:(parent.width - self.width)/2; y:(parent.height - self.height)/2; }
+    }
+}
+export component MenuRow inherits Rectangle {
+    in property <string> title; in property <string> hint; in property <image> icon; in property <bool> danger;
+    in property <bool> chevron:true; callback activated();
+    height: 52px; background: tap.pressed ? MobileStyle.selected : transparent;
+    accessible-role: button; accessible-label: title; accessible-action-default => { root.activated(); }
+    HorizontalLayout { cross-axis-alignment:center; padding-left: 14px; padding-right: 14px; spacing: 12px;
+        if root.icon.width>0: Image { width: 21px; height: 21px; source: root.icon; colorize: root.danger ? MobileStyle.danger : MobileStyle.secondary; }
+        Text { text: root.title; font-size: 15px; font-weight: 550; color: root.danger ? MobileStyle.danger : MobileStyle.text; vertical-alignment:center; horizontal-stretch:1; overflow:elide; }
+        if root.hint != "": Text { text: root.hint; font-size: 13px; color: MobileStyle.muted; vertical-alignment:center; }
+        if root.chevron: Image { width: 16px; height:16px; source: @image-url("icons/chevron-right.svg"); colorize:MobileStyle.muted; }
+    }
+    tap := TouchArea { clicked => { root.activated(); } }
+}
