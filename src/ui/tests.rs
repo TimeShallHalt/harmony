@@ -11743,11 +11743,13 @@ fn a_profiles_more_menu_blocks_from_the_profile() {
             .map(|row| row.text.to_string())
             .collect()
     };
-    // The profile's More button opens the person's own menu.
+    // The profile's More button includes the person menu and the profile import.
     window.invoke_prepare_menu("profile-more:4".into(), true);
     let from_profile = texts(&window);
     window.invoke_prepare_menu("4".into(), true);
-    assert_eq!(from_profile, texts(&window));
+    let mut expected = texts(&window);
+    expected.push("Import Harmony appearance…".into());
+    assert_eq!(from_profile, expected);
     assert!(from_profile.iter().any(|text| text == "Block"));
     // Alice's own profile offers no Block.
     window.invoke_prepare_menu("profile-more:1".into(), true);

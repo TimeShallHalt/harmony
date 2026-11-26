@@ -120,6 +120,11 @@ def main():
     base = f"Harmony-{version}"
     image = output / f"{base}-x86_64.AppImage"
     source_path = output / f"{base}-source.zip"
+    build = {}
+    if parts is not None:
+        build = json.loads((parts / "build.json").read_text())
+        if build.get("update_information"):
+            raise SystemExit("Harmony AppImages must not contain upstream update information")
     with tempfile.TemporaryDirectory(prefix="harmony-linux-package-") as temporary:
         temporary = Path(temporary)
         rtc = source_snapshot(metadata, base, temporary, source_path)
@@ -131,9 +136,6 @@ def main():
             commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
             build = native_appdir(appdir, args.exe, runtime, native_stamp(args.stamp, version, commit))
         else:
-            build = json.loads((parts / "build.json").read_text())
-            if build.get("update_information"):
-                raise SystemExit("Harmony AppImages must not contain upstream update information")
             shutil.copytree(parts / "AppDir", appdir, symlinks=True)
         for directory in [appdir, *(path for path in appdir.rglob("*") if path.is_dir() and not path.is_symlink())]:
             directory.chmod(0o755)
