@@ -642,5 +642,113 @@
       "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
       "url": "https://raw.githubusercontent.com/livekit/rust-sdks/a4f41cdcae5214986ab4ac5a8cb8507e5cc7ee6e/LICENSE"
     }
+  ],
+  "rten-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-base-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-gemm-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-onnx-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-parallel-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-shape-inference-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-simd-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-tensor-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
+  ],
+  "rten-vecmath-0.28.0": [
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-APACHE.txt"
+    },
+    {
+      "path": "licenses/upstream-5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18.txt",
+      "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
+      "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
+    }
   ]
 }
