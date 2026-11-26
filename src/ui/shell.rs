@@ -176,6 +176,7 @@ impl Shell {
     pub(super) fn close(&self) {
         let to_tray = {
             let adapter = self.adapter.borrow();
+            adapter.updates.user_interacted();
             adapter.layout.close_to_tray.unwrap_or(true)
                 && adapter.tray.as_ref().is_some_and(Tray::available)
         };

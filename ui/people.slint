@@ -1210,6 +1210,7 @@ export component BadgeRows inherits VerticalLayout {
 }
 
 export component ProfileCard inherits Rectangle {
+    in-out property <string> message-draft;
     in property <ProfileData> data;
     in property <bool> large;
     /// The card as the left column of the full profile: large, but narrow,
@@ -1462,6 +1463,7 @@ export component ProfileCard inherits Rectangle {
                             if root.data.handle != "" || root.data.tag != "": HorizontalLayout {
                                 spacing: 6px; alignment: start;
                                 if root.data.handle != "": TextInput {
+                                    min-width: 0px; horizontal-stretch: 1;
                                     text: root.data.handle + (root.data.pronouns != "" ? " \u{2022} " + root.data.pronouns : "");
                                     color: root.ink; font-size: 14px; font-weight: 400; vertical-alignment: center;
                                     read-only: true; single-line: true;
@@ -1751,6 +1753,7 @@ export component ProfileCard inherits Rectangle {
                                 return reject;
                             }
                             message-field := TextField {
+                                text <=> root.message-draft;
                                 placeholder: root.data.message-hint; label: root.data.message-hint;
                                 placeholder-color: root.ink2; trailing-icon: @image-url("icons/smile.svg");
                                 text-size: 14px; border-radius: 8px; fill: !root.themed ? Theme.text.transparentize(0.92) : root.light ? #ffffff3d : #ffffff1f; ink: root.ink; trailing-tint: root.ink2;

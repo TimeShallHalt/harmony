@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import time
 import uuid
 import winreg
 import zipfile
@@ -22,7 +23,13 @@ def fake_release(folder, version, build):
         '[assembly: AssemblyProduct("Harmony")]\n'
         f'[assembly: AssemblyInformationalVersion("{version}")]\n'
         f'[assembly: AssemblyFileVersion("{version}.0")]\n'
-        'class Stub { static void Main() { System.Threading.Thread.Sleep(120000); } }\n', encoding='utf-8')
+        'class Stub { static void Main(string[] args) {\n'
+        '  if (args.Length == 2 && args[0] == "--data-dir") {\n'
+        '    System.IO.File.WriteAllText(System.IO.Path.Combine(args[1], "reopened.txt"), args[1]);\n'
+        '    return;\n'
+        '  }\n'
+        '  System.Threading.Thread.Sleep(120000);\n'
+        '} }\n', encoding='utf-8')
     program = folder / 'Harmony.exe'
     csc = Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     subprocess.run([str(csc), '/nologo', '/target:winexe', '/out:' + str(program), str(source)], check=True)
@@ -71,11 +78,13 @@ def main():
         return subprocess.check_output(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
             "$ErrorActionPreference='Stop'; $f=$env:HARMONY_FIXTURE_ROOT; Add-Type -Path $env:HARMONY_LINK_SOURCE; " + code],
             env=run_env, encoding='utf-8', errors='replace', creationflags=subprocess.CREATE_NO_WINDOW).strip()
-    def setup(label, repair=False, success=True):
+    def setup(label, repair=False, success=True, reopen=None):
         log = fixture / (label + '.log')
         command = [installer, '/CURRENTUSER', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DIR=' + str(target), '/LOG=' + str(log)]
         if repair:
             command.append('/REPAIR')
+        if reopen is not None:
+            command.extend(['/HARMONYINSTALLED=' + str(target), '/HARMONYREOPEN=' + str(reopen)])
         result = subprocess.run(command, timeout=90)
         assert (result.returncode == 0) == success, (label, result.returncode, log.read_text(encoding='utf-8-sig',errors='replace')[-2800:])
         return log.read_text(encoding='utf-8-sig', errors='replace')
@@ -149,9 +158,16 @@ Link 'common-shortcuts\Harmony.lnk' (Join-Path $f 'program\Harmony.exe') ''
     info = json.loads((fixture / 'bundle/BUILD.json').read_text())
     info['build_id'] = 1
     (old / 'BUILD.json').write_text(json.dumps(info))
-    assert 'removed=1' in setup('normal-update')
+    data_dir = fixture / 'Original profile 日本'
+    data_dir.mkdir()
+    assert 'removed=1' in setup('normal-update', reopen=data_dir)
     assert not (old / 'Harmony.exe').exists() and registration() == target
-    print('PASS normal update consolidated an older deployment', flush=True)
+    reopened = data_dir / 'reopened.txt'
+    deadline = time.monotonic() + 15
+    while not reopened.is_file() and time.monotonic() < deadline:
+        time.sleep(.1)
+    assert Path(reopened.read_text(encoding='utf-8')) == data_dir
+    print('PASS normal update consolidated an older deployment and reopened the requested profile', flush=True)
     # Version 1.10.0 must outrank 1.2.0, even when only the older release is registered.
     newer_manifest = fake_release(fixture / 'future', '1.10.0', 10)
     future = legacy(newer_manifest.parent, '1.10.0', 10)

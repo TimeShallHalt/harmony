@@ -144,6 +144,7 @@ fn has_work(a: &Adapter) -> bool {
         || a.dialog.is_some()
         || a.window.upgrade().is_some_and(|window| {
             window.get_timezone_editor_open()
+                || window.get_profile_draft_pending()
                 || window.global::<Scheduling>().get_open()
                 || window.global::<VoiceNotes>().get_open()
         })
