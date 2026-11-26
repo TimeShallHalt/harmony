@@ -12,22 +12,19 @@
 let
   id = "io.github.TimeShallHalt.Harmony";
   native = import ./native.nix { inherit pkgs; };
+  policy = builtins.fromJSON (builtins.readFile ../packaging/linux/appimage-policy.json);
   # The newest glibc and libstdc++ the binary may ask for: Ubuntu 24.04's and
   # Fedora 40's. Nix builds against a newer glibc, so a nixpkgs update can
   # raise what the binary asks for, and this fails the build when it does.
-  glibcFloor = "2.39";
-  libstdcxxFloor = "3.4.33";
+  glibcFloor = policy.glibc_floor;
+  libstdcxxFloor = policy.libstdcxx_floor;
   # Libraries every desktop distribution installs, so the binary may link them.
-  hostLibraries = [
-    "ld-linux-x86-64.so.2" "libc.so.6" "libm.so.6" "libgcc_s.so.1" "libstdc++.so.6"
-    "libglib-2.0.so.0" "libgobject-2.0.so.0" "libgio-2.0.so.0"
-    "libpulse.so.0" "libpulse-simple.so.0" "libfontconfig.so.1" "libfreetype.so.6"
-  ];
+  hostLibraries = policy.host_libraries;
   # The official runtime, statically linked: it needs FUSE 3's fusermount3
   # but not libfuse, and runs with --appimage-extract-and-run without either.
   runtime = pkgs.fetchurl {
-    url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
-    sha256 = "0396xi3km1yd0z4329lbjxmv82ddc40gd0x8hca0ylcj7i28pjig";
+    url = policy.runtime_url;
+    sha256 = policy.runtime_sha256;
   };
   # Harmony has no upstream update channel or AppImageUpdate feed.
   updateInformation = "";

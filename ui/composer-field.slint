@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { ContextMenu, MenuRow } from "controls.slint";
+import { CharacterCounter, ContextMenu, MenuRow, TextCounts } from "controls.slint";
 import { CommandOptionPill, CommandPills } from "app_commands.slint";
 
 // The message composer. Text wraps and the field grows to about ten lines, then
@@ -66,6 +66,9 @@ export component Composer inherits Rectangle {
     property <length> overhang: 4px;
     property <length> line: root.text-size * 1.5;
     property <bool> commanding: root.command-name != "";
+    in property <int> counter-limit: TextCounts.message-limit;
+    property <bool> show-count: !root.commanding && root.text != "";
+    property <length> counter-space: root.show-count ? min(root.width / 2, count-display.preferred-width + 10px) : 0px;
     // The command's pills, over the text, in as many rows as they take.
     property <length> pills: root.commanding ? pill-rows.preferred-height + 6px : 0px;
     property <CommandOptionPill> focused-pill: root.command-options[root.command-focus];
@@ -160,6 +163,7 @@ export component Composer inherits Rectangle {
             }
         }
         flick := Flickable {
+            x: 0px; width: parent.width - root.counter-space;
             content-height: input.height + 2 * root.overhang;
             // Mouse presses go to the field, or with the right button past it.
             mouse-drag-pan-enabled: false;
@@ -188,6 +192,12 @@ export component Composer inherits Rectangle {
                 }
             }
         }
+    }
+    count-display := CharacterCounter {
+        x: root.width - root.counter-space - 6px; width: root.counter-space;
+        y: root.height - root.pad - 19px + 2px; height: 19px;
+        visible: root.show-count; overflow: elide;
+        content: root.text; maximum: root.counter-limit;
     }
     // Above the pointer, as the composer sits at the window's foot, unless
     // the window's top is too near.

@@ -12,11 +12,12 @@
 //! closing its input, ends the job. Frames go to the UI through [`crate::frames`].
 
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader, Write},
     path::PathBuf,
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, LazyLock, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
         mpsc as channel,
     },
@@ -25,7 +26,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch as settings_watch};
 use yapfast_discord::{
     congestion,
     rtp::Codec,
@@ -61,6 +62,31 @@ pub const PREVIEW_HEIGHT: u32 = 720;
 /// scaled down to it.
 pub const WATCH_WIDTH: u32 = 1920;
 pub const WATCH_HEIGHT: u32 = 1080;
+
+static SHARPNESS: LazyLock<RwLock<HashMap<String, u8>>> = LazyLock::new(Default::default);
+static SHARPNESS_CHANGED: LazyLock<settings_watch::Sender<u64>> =
+    LazyLock::new(|| settings_watch::channel(0).0);
+
+pub fn stream_sharpness(user: &str) -> u8 {
+    SHARPNESS.read().unwrap().get(user).copied().unwrap_or(0)
+}
+
+pub fn set_stream_sharpness(user: &str, amount: u8) {
+    let amount = amount.min(100);
+    {
+        let mut settings = SHARPNESS.write().unwrap();
+        if amount == 0 {
+            settings.remove(user);
+        } else {
+            settings.insert(user.to_owned(), amount);
+        }
+    }
+    SHARPNESS_CHANGED.send_modify(|version| *version += 1);
+}
+
+pub(crate) fn sharpness_changes() -> settings_watch::Receiver<u64> {
+    SHARPNESS_CHANGED.subscribe()
+}
 /// The largest preview Discord shows of a stream, and how often its client
 /// sends a new one.
 const THUMBNAIL_WIDTH: u32 = 512;
@@ -83,6 +109,9 @@ pub enum Job {
         width: u32,
         height: u32,
         fps: u32,
+        /// User's adaptive encoder cap, or zero for automatic.
+        #[serde(default)]
+        bitrate_kbps: u32,
         /// How hard the encoder works on each frame.
         #[serde(default)]
         effort: Effort,
@@ -294,6 +323,8 @@ pub enum Control {
     Hear(bool),
     /// Play a watched stream's or a video's sound this loud.
     Volume(f32),
+    /// Locally sharpen decoded frames as they are displayed.
+    Sharpness(u8),
     /// Play the video, from the start once it has ended.
     Play,
     Pause,
@@ -414,6 +445,7 @@ fn serve(mut input: Box<dyn BufRead + Send>, report: &mut dyn FnMut(Report)) {
             width,
             height,
             fps,
+            bitrate_kbps,
             effort,
             hardware,
         } => {
@@ -425,6 +457,7 @@ fn serve(mut input: Box<dyn BufRead + Send>, report: &mut dyn FnMut(Report)) {
                 sound: source != Source::TestPattern,
                 video: None,
                 fps,
+                bitrate_kbps,
                 effort,
                 hardware,
                 started: Instant::now(),
@@ -508,6 +541,7 @@ struct Sink {
     sound: bool,
     video: Option<Video>,
     fps: u32,
+    bitrate_kbps: u32,
     effort: Effort,
     hardware: bool,
     started: Instant,
@@ -601,7 +635,9 @@ impl Sink {
         }
         if let Some(server) = self.server.take() {
             let (offers, encoder) = self.offers(width, height)?;
-            let sender = StreamSender::start(server, width, height, self.fps, offers)?;
+            let sender = StreamSender::start_with_bitrate_cap(
+                server, width, height, self.fps, offers, self.bitrate_kbps,
+            )?;
             let sound = if self.sound {
                 stream_audio::Capture::start(sender.sound())
                     .inspect_err(|error| {
@@ -722,7 +758,7 @@ impl Sink {
     /// `height` lines starts at before it has one.
     fn open(&self, codec: Codec, width: u32, height: u32) -> Result<Encoder> {
         let target = self.video.as_ref().map_or_else(
-            || congestion::start(stream_connection::max_bitrate(height).into()),
+            || congestion::start(stream_connection::bitrate_cap(height, self.bitrate_kbps).into()),
             |video| video.sender.target(),
         );
         Encoder::new(
@@ -848,6 +884,8 @@ fn watch(
     // A frame that doesn't fit scales through this, a picture of the size
     // shown; one that does goes straight into the shared frame.
     let mut scratch = vec![];
+    let mut unfiltered = vec![];
+    let mut sharpness = 0;
     let mut shown = false;
     let mut failures = 0u64;
     while !stop.load(Ordering::Relaxed) {
@@ -855,6 +893,7 @@ fn watch(
             match control {
                 Control::Hear(hearing) => sound.hearing.store(hearing, Ordering::Relaxed),
                 Control::Volume(volume) => sound.volume.set(volume),
+                Control::Sharpness(amount) => sharpness = amount.min(100),
                 _ => {}
             }
         }
@@ -894,11 +933,15 @@ fn watch(
         };
         let (width, height) = (picture.width, picture.height);
         if writer.fits(width, height) && width <= max_width && height <= max_height {
-            writer.write(width, height, |pixels| picture.to_rgba(pixels));
+            writer.write(width, height, |pixels| {
+                picture.to_rgba(pixels);
+                sharpen(pixels, width, height, sharpness, &mut unfiltered);
+            });
         } else {
             let (width, height) = fit(width, height, max_width, max_height);
             writer.write(width, height, |pixels| {
-                picture.i420().to_rgba(&mut scratch, pixels, width, height)
+                picture.i420().to_rgba(&mut scratch, pixels, width, height);
+                sharpen(pixels, width, height, sharpness, &mut unfiltered);
             });
         }
         if !shown {
@@ -908,6 +951,47 @@ fn watch(
         }
     }
     Ok(())
+}
+
+/// Boost local contrast along edges using the four neighbouring RGB pixels.
+fn sharpen(pixels: &mut [u8], width: u32, height: u32, amount: u8, source: &mut Vec<u8>) {
+    if amount == 0 || width < 3 || height < 3 {
+        return;
+    }
+    source.clear();
+    source.extend_from_slice(pixels);
+    let stride = width as usize * 4;
+    let amount = i32::from(amount);
+    for (row, output) in pixels.chunks_exact_mut(stride).enumerate().skip(1).take(height as usize - 2) {
+        let center = row * stride;
+        for (x, pixel) in output.chunks_exact_mut(4).enumerate().skip(1).take(width as usize - 2) {
+            for (channel, sample) in pixel[..3].iter_mut().enumerate() {
+                let index = center + x * 4 + channel;
+                let adjacent = i32::from(source[index - stride])
+                    + i32::from(source[index + stride])
+                    + i32::from(source[index - 4])
+                    + i32::from(source[index + 4]);
+                let value = i32::from(*sample);
+                *sample = (value + (4 * value - adjacent) * amount / 400).clamp(0, 255) as u8;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn sharpness_changes_only_the_interior_rgb_channels() {
+    let mut pixels = [100, 100, 100, 88].repeat(9);
+    pixels[16..20].copy_from_slice(&[150, 120, 50, 40]);
+    let original = pixels.clone();
+    let mut source = Vec::new();
+    sharpen(&mut pixels, 3, 3, 0, &mut source);
+    assert_eq!(pixels, original);
+    assert!(source.is_empty());
+    sharpen(&mut pixels, 3, 3, 50, &mut source);
+    assert_eq!(&pixels[16..20], &[175, 130, 25, 40]);
+    assert_eq!(&pixels[..16], &original[..16]);
+    assert_eq!(&pixels[20..], &original[20..]);
 }
 
 /// Sleeps until the next frame is due, or returns false once told to stop.
@@ -1441,6 +1525,7 @@ impl Worker {
             width,
             height,
             fps: quality.fps,
+            bitrate_kbps: quality.bitrate_kbps,
             effort: if quality.high_quality {
                 Effort::High
             } else {
@@ -1526,6 +1611,10 @@ impl Worker {
     /// Tells a watching worker how loud to play the stream's sound.
     pub fn volume(&mut self, volume: f32) -> Result<()> {
         self.control(&Control::Volume(volume))
+    }
+
+    pub fn sharpness(&mut self, amount: u8) -> Result<()> {
+        self.control(&Control::Sharpness(amount))
     }
 
     /// Hands the worker the server Discord started the stream on.
@@ -1897,6 +1986,7 @@ mod tests {
             sound: false,
             video: None,
             fps: 30,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: true,
             started: Instant::now(),
@@ -1930,6 +2020,7 @@ mod tests {
             sound: false,
             video: None,
             fps: 30,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
             started: Instant::now(),
@@ -1967,6 +2058,7 @@ mod tests {
             sound: false,
             video: None,
             fps: 30,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
             started: Instant::now(),
@@ -1994,6 +2086,7 @@ mod tests {
             sound: false,
             video: None,
             fps: 30,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
             started: Instant::now(),
@@ -2036,6 +2129,7 @@ mod tests {
             width: PREVIEW_WIDTH,
             height: PREVIEW_HEIGHT,
             fps: 60,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
         };
@@ -2085,6 +2179,7 @@ mod tests {
             width: PREVIEW_WIDTH,
             height: PREVIEW_HEIGHT,
             fps: 30,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
         };
@@ -2220,6 +2315,7 @@ mod tests {
                 width: PREVIEW_WIDTH,
                 height: PREVIEW_HEIGHT,
                 fps: 30,
+                bitrate_kbps: 0,
                 effort: Effort::Light,
                 hardware: false,
             };
@@ -2273,6 +2369,7 @@ mod tests {
             width: PREVIEW_WIDTH,
             height: PREVIEW_HEIGHT,
             fps: 30,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
         };
@@ -2308,6 +2405,7 @@ mod tests {
             width: 16,
             height: 16,
             fps: 1,
+            bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
         };

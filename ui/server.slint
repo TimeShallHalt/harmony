@@ -4,7 +4,7 @@ import { ScrollView } from "scrollview.slint";
 import { Theme, Label, Middle, Popup } from "theme.slint";
 import { ActionButton, Avatar, IconButton, MenuItem, TextField, Motion, StatusText, ServerTagChip, PictureStore, StyledName, NameStyleRow, Nameplate, ProfileEffect, AccountLook } from "controls.slint";
 import { Choices, Picker, UnsavedBar } from "settings.slint";
-import { NameStyles } from "controls.slint";
+import { CharacterCounter, NameStyles } from "controls.slint";
 import { ProfileData, ProfileHeading, MemberSince, ActivityCard, ProfileBadge, ProfileBadgeRow, BadgeRows, BoardCard, WishlistCard, ProfileTheme } from "people.slint";
 
 // What an invite dialog shows: whom it invites where, and the link once
@@ -1905,6 +1905,9 @@ export component ProfileEditorDialog inherits Rectangle {
                                         edited(text) => { root.write(0, text); }
                                         accepted => { root.stop-editing(); }
                                     }
+                                    if root.editing == 1: CharacterCounter {
+                                        content: root.name; maximum: 32; height: 16px;
+                                    }
                                     // The username, then the pronouns or their field.
                                     HorizontalLayout {
                                         spacing: 6px; alignment: start;
@@ -2063,6 +2066,9 @@ export component ProfileEditorDialog inherits Rectangle {
                                             enabled: root.ready && root.prompt.bio-enabled; label: "Edit bio"; cursor: MouseCursor.text;
                                             clicked => { root.edit(3); }
                                         }
+                                    }
+                                    if root.editing == 2: CharacterCounter {
+                                        content: root.pronouns; maximum: 40; height: 16px;
                                     }
                                     if root.editing == 3: VerticalLayout {
                                         spacing: 4px;

@@ -550,6 +550,37 @@ fn show_emoji(adapter: &Rc<RefCell<Adapter>>, window: &YapfastWindow, query: &st
 }
 
 pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
+    window.global::<TextCounts>().on_count(|text| {
+        i32::try_from(text.as_str().chars().count()).unwrap_or(i32::MAX)
+    });
+    let state = adapter.clone();
+    let weak = window.as_weak();
+    window.on_toggle_room_typing(move |aside| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut adapter = state.borrow_mut();
+        let room = if aside {
+            adapter.app.state.aside.as_ref().map(|aside| &aside.room)
+        } else {
+            adapter.app.state.selected.as_ref()
+        };
+        let Some(room) = room.cloned().filter(|_| !adapter.app.state.preview) else {
+            return;
+        };
+        let share = !adapter.layout.share_typing_in(&room);
+        if share == adapter.layout.share_typing.unwrap_or(true) {
+            adapter.layout.typing_overrides.remove(&room);
+        } else {
+            adapter.layout.typing_overrides.insert(room, share);
+        }
+        adapter.layout.write(&adapter.root);
+        if aside {
+            window.set_aside_shares_typing(share);
+        } else {
+            window.set_room_shares_typing(share);
+        }
+    });
     adapter.borrow().motion_changes.init(
         (window.as_weak(), Rc::downgrade(adapter)),
         |(weak, _)| {
@@ -577,6 +608,11 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     super::games::bind(window, adapter);
     super::timezones::bind(window, adapter);
     super::local_profile::bind(window, adapter);
+    #[cfg(feature = "discord")]
+    super::camera_background::bind(window, adapter);
+    #[cfg(feature = "discord")]
+    super::clip_conversion::bind(window, adapter);
+    super::dm_groups::bind(window, adapter);
     super::orbs::bind(window, adapter);
     super::app_commands::bind(window, adapter);
     super::keybinds::bind(window, adapter);
@@ -1291,7 +1327,11 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         let adapter = adapter.clone();
         // An empty category's heading names the category itself.
         window.on_category_of(move |room| {
-            let app = &adapter.borrow().app;
+            let adapter = adapter.borrow();
+            if super::dm_groups::header(&adapter, &room) {
+                return room;
+            }
+            let app = &adapter.app;
             app.category_of(&room)
                 .or_else(|| app.state.is_category(&room).then(|| room.to_string()))
                 .unwrap_or_default()
@@ -2413,15 +2453,15 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         yapfast_core::push_to_talk::set_on(layout.input_mode == InputMode::PushToTalk);
         layout.push_to_talk_release_delay = Some(window.get_talk_delay().max(0) as u32);
         yapfast_core::push_to_talk::set_release_delay(layout.release_delay());
-        layout.microphone_volume = Some(window.get_microphone_volume().clamp(0, 200) as u8);
-        layout.speaker_volume = Some(window.get_speaker_volume().clamp(0, 200) as u8);
+        layout.microphone_volume = Some(window.get_microphone_volume().max(0));
+        layout.speaker_volume = Some(window.get_speaker_volume().max(0));
         play_call_volumes(&window);
         layout.share_typing = Some(window.get_share_typing());
         layout.notifications = Some(window.get_notifications());
         layout.notification_text = Some(window.get_notification_text());
         layout.flash_taskbar = Some(window.get_flash_taskbar());
         layout.sound_set = chosen(&SoundSet::ALL, window.get_sound_set());
-        layout.sound_volume = Some(window.get_sound_volume().clamp(0, 200) as u8);
+        layout.sound_volume = Some(window.get_sound_volume().max(0));
         layout.adjust_each_sound = window.get_adjust_each_sound();
         layout.gpu_rendering = window.get_gpu_rendering();
         layout.gpu_encoding = Some(window.get_gpu_encoding());
@@ -2496,6 +2536,28 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         }
     });
     window.on_parse_volume(|text| yapfast_core::volume::parse_percentage(&text).unwrap_or(-1));
+    #[cfg(feature = "discord")]
+    {
+        use yapfast_core::stream_worker::{set_stream_sharpness, stream_sharpness};
+        window.on_stream_sharpness_of(|person| i32::from(stream_sharpness(&person)));
+        let state = adapter.clone();
+        window.on_stream_sharpness_changed(move |person, amount, done| {
+            if person.is_empty() {
+                return;
+            }
+            let amount = amount.clamp(0, 100) as u8;
+            set_stream_sharpness(&person, amount);
+            if done {
+                let mut adapter = state.borrow_mut();
+                if amount == 0 {
+                    adapter.layout.stream_sharpness.remove(person.as_str());
+                } else {
+                    adapter.layout.stream_sharpness.insert(person.into(), amount);
+                }
+                adapter.layout.write(&adapter.root);
+            }
+        });
+    }
     window.on_volume_of(|person, stream| {
         let kind = if stream {
             yapfast_core::volume::Kind::Stream
@@ -2506,7 +2568,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     });
     let state = adapter.clone();
     window.on_volume_changed(move |person, stream, value, done| {
-        if person.is_empty() || !(0..=200).contains(&value) {
+        if person.is_empty() || value < 0 {
             return;
         }
         let kind = if stream {
@@ -2755,6 +2817,51 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         });
     });
     let state = adapter.clone();
+    window.on_save_all_attachments(move |item| {
+        let weak = Rc::downgrade(&state);
+        state.borrow_mut().dialog(async move {
+            let folder = rfd::AsyncFileDialog::new()
+                .set_title("Choose a folder for the attachments")
+                .pick_folder()
+                .await;
+            let (Some(folder), Some(adapter)) = (folder, weak.upgrade()) else {
+                return;
+            };
+            let mut adapter = adapter.borrow_mut();
+            let Some(window) = adapter.window.upgrade() else { return };
+            let Some(message) = adapter.app.state.message(&item) else { return };
+            let names: Vec<_> = message.attachments.iter().enumerate()
+                .filter(|(_, attachment)| attachment.placement == Placement::Message)
+                .map(|(index, attachment)| (index, attachment.name.clone()))
+                .collect();
+            if adapter.app.state.preview || names.len() < 2 {
+                return;
+            }
+            // Isolate each batch so files with the same name, or names
+            // already in the chosen folder, are saved independently.
+            let directory = tempfile::Builder::new()
+                .prefix("Harmony attachments-")
+                .tempdir_in(folder.path());
+            match directory {
+                Ok(directory) => {
+                    let directory = directory.keep();
+                    for (index, name) in names {
+                        let name = batch_attachment_name(index, &name);
+                        adapter.action(&window, Action::SaveAttachment {
+                            item: item.to_string(),
+                            index,
+                            path: directory.join(name),
+                        });
+                    }
+                }
+                Err(error) => {
+                    adapter.app.state.notice = Some(format!("Could not create an attachment folder. {error}"));
+                    adapter.refresh(&window);
+                }
+            }
+        });
+    });
+    let state = adapter.clone();
     let weak = window.as_weak();
     window.on_login(move || {
         if let Some(window) = weak.upgrade() {
@@ -2970,6 +3077,37 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         window.invoke_focus_composer();
     });
     let state = adapter.clone();
+    window.on_emoji_image_link(move |key| {
+        emoji_image_link(&state.borrow().app, &key).into()
+    });
+    let state = adapter.clone();
+    let weak = window.as_weak();
+    window.on_insert_emoji_image(move |key, editing| {
+        let Some(window) = weak.upgrade() else { return };
+        let (field, end) = {
+            let mut adapter = state.borrow_mut();
+            let link = emoji_image_link(&adapter.app, &key);
+            if link.is_empty() {
+                return;
+            }
+            let field = if editing { Field::Edit } else { Field::Channel };
+            let text = adapter.composer_text(field);
+            let at = if editing {
+                adapter.edit_caret
+            } else {
+                adapter.caret.as_ref()
+                    .filter(|(room, _)| adapter.app.state.selected.as_ref() == Some(room))
+                    .map(|(_, at)| *at)
+            }.filter(|&at| text.is_char_boundary(at)).unwrap_or(text.len());
+            let (before, after) = text.split_at(at);
+            let space = if before.ends_with(char::is_whitespace) || before.is_empty() { "" } else { " " };
+            let inserted = format!("{space}{link} ");
+            adapter.set_composer_text(&window, field, format!("{before}{inserted}{after}"));
+            (field, at + inserted.len())
+        };
+        place_composer_caret(&window, (field, end));
+    });
+    let state = adapter.clone();
     let weak = window.as_weak();
     window.on_mention_dismissed(move || {
         let Some(window) = weak.upgrade() else { return };
@@ -3002,6 +3140,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         let Some(window) = weak.upgrade() else { return };
         let mut adapter = state.borrow_mut();
         let Navigation::Server(server) = adapter.app.state.navigation.clone() else {
+            super::dm_groups::toggle(&mut adapter, &window, &category);
             return;
         };
         let collapsed = adapter.layout.collapsed.entry(server.clone()).or_default();
@@ -3300,7 +3439,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     });
     let state = adapter.clone();
     let weak = window.as_weak();
-    window.on_go_live(move |source, resolution, fps, high_quality| {
+    window.on_go_live(move |source, resolution, fps, bitrate, high_quality| {
         if let Some(window) = weak.upgrade() {
             #[cfg(feature = "discord")]
             {
@@ -3320,6 +3459,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
             let quality = voice::StreamQuality {
                 resolution,
                 fps: fps.clamp(1, 60) as u32,
+                bitrate_kbps: bitrate.clamp(0, 9000) as u32,
                 high_quality,
             };
             state
@@ -4013,6 +4153,28 @@ fn place_composer_caret(window: &YapfastWindow, (field, caret): (Field, usize)) 
         }
         Field::Edit => focus_edit(window, caret),
     }
+}
+
+/// Sharing an emoji as an ordinary image link keeps the existing message and
+/// reaction permissions in effect.
+fn emoji_image_link(app: &Application, key: &str) -> String {
+    let Some((name, id)) = key.split_once(':') else {
+        return String::new();
+    };
+    app.emoji_sets().into_iter().flat_map(|set| set.emoji)
+        .find(|emoji| emoji.id == id && emoji.text.trim_matches(':') == name)
+        .map_or_else(String::new, |emoji| emoji.picture)
+}
+
+fn batch_attachment_name(index: usize, name: &str) -> String {
+    let leaf = name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let cleaned = leaf.chars()
+        .filter(|&c| !c.is_control() && !links::hidden(c))
+        .map(|c| if "<>:\"/\\|?*".contains(c) { '_' } else { c })
+        .take(60).collect::<String>();
+    let leaf = cleaned.trim_matches([' ', '.']);
+    let leaf = if leaf.is_empty() { "attachment" } else { leaf };
+    format!("{:02}-{leaf}", index + 1)
 }
 
 /// Gives the field of the message being edited the keys, with its cursor at

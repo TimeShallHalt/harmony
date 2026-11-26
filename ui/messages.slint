@@ -185,6 +185,7 @@ export component EmojiButton inherits Rectangle {
     /// Its star was pressed: keep it among the favorites, or let it go.
     callback favorited;
     callback hovered;
+    callback menu(length, length);
     /// A locked emoji was pressed.
     callback locked;
     width: root.size; height: root.size;
@@ -209,10 +210,19 @@ export component EmojiButton inherits Rectangle {
             if event.text == "\n" || event.text == " " {
                 root.clicked(); return accept;
             }
+            if event.text == Key.F10 && event.modifiers.shift && root.favoritable {
+                root.menu(root.absolute-position.x, root.absolute-position.y + root.height);
+                return accept;
+            }
             return reject;
         }
         pointer := TouchArea {
             mouse-cursor: MouseCursor.pointer;
+            pointer-event(event) => {
+                if root.favoritable && event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                    root.menu(root.absolute-position.x + self.mouse-x, root.absolute-position.y + self.mouse-y);
+                }
+            }
             clicked => {
                 Tip.text = "";
                 if root.usable { root.clicked(); } else { root.locked(); }
@@ -1222,6 +1232,12 @@ export component EmojiPicker inherits Rectangle {
     /// An emoji's star was pressed: keep it among the favorites, or let it go.
     callback favorite(string);
     callback pick(EmojiCell);
+    callback show-image-menu(string) -> bool;
+    callback insert-image-link(string);
+    callback copy-image-link(string);
+    property <string> image-menu-key;
+    property <length> image-menu-x;
+    property <length> image-menu-y;
     callback close-picker;
     /// A locked emoji was pressed: offer Nitro, which unlocks it.
     callback unlock-nitro;
@@ -1334,6 +1350,14 @@ export component EmojiPicker inherits Rectangle {
                             clicked => { root.pick(tile.cell); }
                             locked => { root.unlock-nitro(); }
                             favorited => { root.favorite(tile.cell.key); }
+                            menu(x, y) => {
+                                if root.show-image-menu(tile.cell.key) {
+                                    root.image-menu-key = tile.cell.key;
+                                    root.image-menu-x = x - root.absolute-position.x;
+                                    root.image-menu-y = y - root.absolute-position.y;
+                                    image-menu.show();
+                                }
+                            }
                         }
                     }
                     if root.emoji-rows.length == 0: HorizontalLayout {
@@ -1360,6 +1384,31 @@ export component EmojiPicker inherits Rectangle {
                     }
                 }
             }
+        }
+    }
+    image-menu := PopupWindow {
+        x: max(4px, min(root.width - self.width - 4px, root.image-menu-x));
+        y: root.image-menu-y + self.height <= root.height ? root.image-menu-y : max(0px, root.image-menu-y - self.height);
+        width: image-menu-content.content-width;
+        height: image-menu-content.content-height;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        image-menu-content := ContextMenu {
+            rows: root.react-item == "yapfast:composer" || root.react-item == "yapfast:edit"
+                ? [
+                    { id: "insert", text: "Insert as image link", icon: @image-url("icons/link.svg") },
+                    { id: "copy", text: "Copy image link", icon: @image-url("icons/copy.svg") },
+                ]
+                : [{ id: "copy", text: "Copy image link", icon: @image-url("icons/copy.svg") }];
+            chose(id) => {
+                image-menu.close();
+                if id == "insert" {
+                    root.insert-image-link(root.image-menu-key);
+                    root.close-picker();
+                } else {
+                    root.copy-image-link(root.image-menu-key);
+                }
+            }
+            close => { image-menu.close(); }
         }
     }
 }
@@ -1433,6 +1482,7 @@ export component MessageMenu inherits Rectangle {
     callback view-reactions(string);
     callback copy-image(string, int);
     callback save-attachment(string, int);
+    callback save-all-attachments(string);
     callback open-link(string);
     panel := Rectangle {
         x: root.flip ? root.content-width - root.menu-width : 0px; y: 0px;
@@ -1537,6 +1587,12 @@ export component MessageMenu inherits Rectangle {
                 text: root.media-video ? "Save Video" : "Save Image"; icon: @image-url("icons/download.svg");
                 hovered => { root.apps-open = false; }
                 clicked => { root.save-attachment(root.menu-message.item, root.media-index); }
+            }
+            if !root.preview && root.menu-message.delivery == ""
+                && root.menu-message.images.length + root.menu-message.files.length > 1: MenuItem {
+                text: "Save all attachments"; icon: @image-url("icons/download.svg");
+                hovered => { root.apps-open = false; }
+                clicked => { root.save-all-attachments(root.menu-message.item); }
             }
             if root.link != "": MenuItem {
                 text: "Copy Link"; icon: @image-url("icons/link.svg");
@@ -2037,7 +2093,7 @@ component TextBlockView inherits VerticalLayout {
                     StyledText {
                         min-width: 0px;
                         text: root.block.text; link-color: Theme.link; default-color: Theme.text;
-                        default-font-family: "monospace"; default-font-size: root.code-size; max-lines: root.max-lines;
+                        default-font-family: ClientStyle.system24 ? "DM Mono" : "monospace"; default-font-size: root.code-size; max-lines: root.max-lines;
                     }
                 }
             }
@@ -2390,7 +2446,11 @@ export component HistoryEdge inherits HorizontalLayout {
             }
         }
         if root.intro == "channel": Rectangle { height: 8px; }
-        if root.intro == "channel": Text { text: root.intro-title; color: Theme.text; font-size: 32px; font-weight: 700; horizontal-alignment: center; overflow: elide; height: 40px; }
+        if root.intro == "channel": Text {
+            text: ClientStyle.system24 ? "┌─ " + root.intro-title + " ─┐" : root.intro-title;
+            color: Theme.text; font-size: ClientStyle.system24 ? 24px : 32px; font-weight: 700;
+            horizontal-alignment: center; overflow: elide; height: 40px;
+        }
         Rectangle { height: 8px; }
         Text { text: root.intro-text; color: Theme.secondary; font-size: root.intro == "server" ? 14px : 16px; horizontal-alignment: center; overflow: elide; height: 20px; }
     }

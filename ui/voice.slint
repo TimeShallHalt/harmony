@@ -1,7 +1,7 @@
 import { ScrollView, ListView } from "scrollview.slint";
 import { ExactVolume } from "personal-controls.slint";
 import { Theme, Middle, Label, Tip, Popup } from "theme.slint";
-import { ActionButton, IconButton, Avatar, CallButton, VolumeSlider, MenuItem } from "controls.slint";
+import { ActionButton, IconButton, Avatar, CallButton, VolumeSlider, MenuItem, TextField } from "controls.slint";
 import { EmojiCell, EmojiFace } from "messages.slint";
 
 export struct PersonRow {
@@ -1289,16 +1289,25 @@ export component ShareMenu inherits Rectangle {
     property <bool> lists: root.screens.length + root.windows.length + root.cameras.length > 0;
     in-out property <int> pick-source;
     in-out property <int> pick-resolution;
-    in-out property <int> pick-fps;
+    in-out property <string> pick-fps;
+    in-out property <string> pick-bitrate;
     in property <int> max-resolution;
     in property <int> fps-720: 30;
     in property <int> fps-hd: 30;
     property <int> max-fps: root.pick-resolution == 0 ? root.fps-720 : root.fps-hd;
+    property <int> max-bitrate: root.pick-resolution == 0 ? 3500 : 9000;
     changed max-resolution => { root.pick-resolution = min(root.pick-resolution, root.max-resolution); }
-    changed max-fps => { root.pick-fps = min(root.pick-fps, root.max-fps); }
+    changed max-fps => { if root.selected-fps > root.max-fps { root.pick-fps = root.max-fps; } }
+    changed max-bitrate => { if root.selected-bitrate > root.max-bitrate { root.pick-bitrate = root.max-bitrate; } }
+    property <int> selected-fps: root.parse-whole(root.pick-fps);
+    property <int> selected-bitrate: root.pick-bitrate == "" ? 0 : root.parse-whole(root.pick-bitrate);
+    property <bool> valid-fps: root.selected-fps >= 15 && root.selected-fps <= root.max-fps;
+    property <bool> valid-bitrate: root.selected-bitrate == 0
+        || (root.selected-bitrate >= 500 && root.selected-bitrate <= root.max-bitrate);
     /// The encoder's slower preset: a sharper picture for more CPU.
     in-out property <bool> pick-high-quality;
-    callback go-live(int, int, int, bool);
+    pure callback parse-whole(string) -> int;
+    callback go-live(int, int, int, int, bool);
     /// The menu's height with every choice showing. In a window too short for
     /// it, the menu is as tall as it gets and the choices scroll, above the
     /// button that starts the stream, which stays.
@@ -1378,12 +1387,18 @@ export component ShareMenu inherits Rectangle {
                     Text { text: "FRAME RATE"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
                 }
                 if !root.switching: VerticalLayout {
-                    spacing: 2px;
-                    for fps in [15, 30, 60]: MenuItem {
-                        text: fps + " fps"; checked: fps == root.pick-fps;
-                        disabled: fps > root.max-fps;
-                        clicked => { if !self.disabled { root.pick-fps = fps; } }
+                    padding-left: 8px; padding-right: 8px; spacing: 4px;
+                    TextField { label: "Frame rate in fps"; text <=> root.pick-fps; min-height: 30px; }
+                    Text { text: "15–" + root.max-fps + " fps"; color: root.valid-fps ? Theme.muted : Theme.danger; font-size: 12px; }
+                }
+                if !root.switching: VerticalLayout {
+                    padding-left: 8px; padding-right: 8px; padding-top: 8px; spacing: 4px;
+                    Text { text: "BITRATE LIMIT"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
+                    TextField {
+                        label: "Video bitrate limit in kilobits per second"; placeholder: "Automatic";
+                        text <=> root.pick-bitrate; min-height: 30px;
                     }
+                    Text { text: "500–" + root.max-bitrate + " kbps, or 0 for auto"; color: root.valid-bitrate ? Theme.muted : Theme.danger; font-size: 12px; }
                 }
                 if !root.switching: HorizontalLayout {
                     padding-left: 8px; padding-top: 8px; padding-bottom: 4px;
@@ -1400,7 +1415,8 @@ export component ShareMenu inherits Rectangle {
             padding: 4px; padding-top: 10px;
             ActionButton {
                 text: root.switching ? "Switch" : "Go Live"; icon: @image-url("icons/screen-share.svg"); primary: true; horizontal-stretch: 1;
-                clicked => { root.go-live(root.pick-source, root.pick-resolution, root.pick-fps, root.pick-high-quality); }
+                enabled: root.switching || (root.valid-fps && root.valid-bitrate);
+                clicked => { root.go-live(root.pick-source, root.pick-resolution, root.selected-fps, root.selected-bitrate, root.pick-high-quality); }
             }
         }
     }
@@ -1414,6 +1430,8 @@ export component VolumeMenu inherits Rectangle {
     in property <bool> volume-live;
     in-out property <int> voice-volume;
     in-out property <int> stream-volume;
+    in-out property <int> stream-sharpness;
+    callback sharpness-changed(string, int, bool);
     out property <length> content-height: volume-content.preferred-height;
     /// A person, whether it's their stream, the volume, and whether it's
     /// the last of a drag.
@@ -1440,6 +1458,13 @@ export component VolumeMenu inherits Rectangle {
             value <=> root.stream-volume;
             changed(volume) => { root.volume-changed(root.volume-person, true, volume, false); }
             committed(volume) => { root.volume-changed(root.volume-person, true, volume, true); }
+        }
+        if root.volume-live: VolumeSlider {
+            label: "Stream sharpness";
+            maximum: 100;
+            value <=> root.stream-sharpness;
+            changed(amount) => { root.sharpness-changed(root.volume-person, amount, false); }
+            committed(amount) => { root.sharpness-changed(root.volume-person, amount, true); }
         }
     }
 }

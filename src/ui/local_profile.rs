@@ -3,6 +3,7 @@
 use super::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
@@ -141,10 +142,44 @@ fn owner(state: &AppState) -> Option<&str> {
     if state.preview {
         return Some("preview");
     }
-    state
-        .discord_user
-        .as_deref()
-        .filter(|id| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()))
+    state.discord_user.as_deref().filter(|id| discord_id(id))
+}
+
+fn discord_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit())
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SharedLook {
+    version: u8,
+    user: String,
+    appearance: Look,
+}
+
+impl SharedLook {
+    fn import(file: std::fs::File, subject: &str) -> Result<Self, String> {
+        Self::parse(&read_limited(file, MAX_FILE)?, subject)
+    }
+
+    fn parse(bytes: &[u8], subject: &str) -> Result<Self, String> {
+        let result: Self = serde_json::from_slice(bytes)
+            .map_err(|error| format!("Invalid Harmony appearance file. {error}"))?;
+        if result.version != 1 || result.user != subject || !discord_id(subject) {
+            return Err("This appearance file does not match the open Discord profile.".into());
+        }
+        if !result.appearance.valid() || !FONT_IDS.contains(&result.appearance.font) {
+            return Err("The appearance file has invalid colors or fonts.".into());
+        }
+        Ok(result)
+    }
+}
+
+fn shared_path(root: &Path, account: &str, subject: &str) -> PathBuf {
+    root.join("local-profiles")
+        .join("shared")
+        .join(account)
+        .join(format!("{subject}.json"))
 }
 
 fn path(root: &Path, owner: &str) -> PathBuf {
@@ -170,6 +205,8 @@ pub(super) struct Editor {
     status: String,
     load_error: Option<String>,
     generation: u64,
+    shared: VecDeque<(String, Option<Look>)>,
+    account_revision: u64,
     pub(super) redraw_account: bool,
 }
 
@@ -194,6 +231,8 @@ impl Editor {
             .map(|e| format!("Couldn't read the local profile. {e}"));
         self.saved = loaded.ok().flatten().unwrap_or_default();
         self.owner = owner.map(str::to_owned);
+        self.shared.clear();
+        self.account_revision = self.account_revision.wrapping_add(1);
         self.base = Default::default();
         self.redraw_account = true;
         self.editing(
@@ -219,12 +258,31 @@ impl Editor {
         self.show(window, cosmetics);
     }
 
-    pub(super) fn decorate(&self, data: &mut ProfileData, state: &AppState) {
-        if self.owner.is_some()
-            && owner(state) == self.owner.as_deref()
-            && Some(data.id.as_str()) == self.owner.as_deref()
-        {
+    pub(super) fn decorate(&mut self, root: &Path, data: &mut ProfileData, state: &AppState) {
+        let Some(account) = owner(state).filter(|id| Some(*id) == self.owner.as_deref()) else {
+            return;
+        };
+        if data.id.as_str() == account {
             self.saved.apply(data, state.cosmetics);
+        } else if discord_id(account) && discord_id(&data.id) {
+            let entry = if let Some(index) = self
+                .shared
+                .iter()
+                .position(|(id, _)| id == data.id.as_str())
+            {
+                self.shared.remove(index).unwrap()
+            } else {
+                let look = std::fs::File::open(shared_path(root, account, &data.id))
+                    .ok()
+                    .and_then(|file| SharedLook::import(file, &data.id).ok())
+                    .map(|pack| pack.appearance);
+                (data.id.to_string(), look)
+            };
+            if let Some(look) = &entry.1 {
+                look.apply(data, state.cosmetics);
+            }
+            self.shared.push_front(entry);
+            self.shared.truncate(4);
         }
     }
 
@@ -262,7 +320,9 @@ impl Editor {
         self.base = base.clone();
         self.cosmetics = Some(state.cosmetics);
         if received || self.saved != Look::default() {
-            self.decorate(&mut base, state);
+            if Some(base.id.as_str()) == self.owner.as_deref() {
+                self.saved.apply(&mut base, state.cosmetics);
+            }
             window.set_account_profile(base);
         } else {
             window.set_account_profile(Default::default());
@@ -276,6 +336,11 @@ impl Editor {
     fn show(&self, window: &YapfastWindow, cosmetics: yapfast_core::application::Cosmetics) {
         let ui = window.global::<LocalProfile>();
         ui.set_available(self.draft.is_some());
+        ui.set_can_export(
+            self.draft.is_some()
+                && self.owner.as_deref().is_some_and(discord_id)
+                && self.saved != Look::default(),
+        );
         let Some(draft) = &self.draft else {
             ui.set_preview(Default::default());
             ui.set_status(self.status.as_str().into());
@@ -410,6 +475,47 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
         a.refresh_local_profile(&w);
         a.local_profile.show(&w, a.app.state.cosmetics);
     });
+    bind!(on_export_look, |a, w| {
+        let Some(user) = a.local_profile.owner.clone().filter(|id| discord_id(id)) else {
+            return;
+        };
+        let pack = SharedLook {
+            version: 1,
+            user,
+            appearance: a.local_profile.saved.clone(),
+        };
+        let weak = a.weak.clone();
+        let win = w.as_weak();
+        let revision = a.local_profile.account_revision;
+        a.dialog(async move {
+            let Some(file) = rfd::AsyncFileDialog::new()
+                .set_title("Export saved Harmony appearance")
+                .set_file_name("Profile.harmony-profile")
+                .add_filter("Harmony profile", &["harmony-profile"])
+                .save_file()
+                .await
+            else {
+                return;
+            };
+            let (Some(adapter), Some(window)) = (weak.upgrade(), win.upgrade()) else {
+                return;
+            };
+            let mut a = adapter.borrow_mut();
+            if a.local_profile.account_revision != revision
+                || owner(&a.app.state) != Some(pack.user.as_str())
+            {
+                return;
+            }
+            let result = serde_json::to_vec(&pack)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| theme_pack::write_atomic(file.path(), &bytes));
+            a.local_profile.status = match result {
+                Ok(()) => "Appearance exported. You can send the file as an attachment.".into(),
+                Err(error) => format!("Couldn't export the appearance. {error}"),
+            };
+            a.local_profile.show(&window, a.app.state.cosmetics);
+        });
+    });
     bind!(on_pick_image, |a, w, banner| {
         if a.local_profile.draft.is_none() {
             return;
@@ -447,6 +553,118 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
             }
         });
     });
+}
+
+const IMPORT: &str = "import-shared-profile";
+const REMOVE: &str = "remove-shared-profile";
+
+fn shared_subject<'a>(state: &'a AppState, target: &'a str) -> Option<(&'a str, &'a str)> {
+    let subject = target.strip_prefix(menus::PROFILE_MORE)?;
+    let account = owner(state).filter(|id| discord_id(id))?;
+    (discord_id(subject) && account != subject).then_some((account, subject))
+}
+
+pub(super) fn share_menu(a: &Adapter, target: &str) -> Vec<MenuRow> {
+    let Some((account, subject)) = shared_subject(&a.app.state, target) else {
+        return vec![];
+    };
+    let menu_row = |id: &str, text: &str| MenuRow {
+        id: id.into(),
+        text: text.into(),
+        plain: true,
+        ..Default::default()
+    };
+    let mut rows = vec![menu_row(IMPORT, "Import Harmony appearance…")];
+    if shared_path(&a.root, account, subject).is_file() {
+        rows.push(menu_row(REMOVE, "Remove shared appearance"));
+    }
+    rows
+}
+
+pub(super) fn choose_shared(
+    a: &mut Adapter,
+    window: &YapfastWindow,
+    target: &str,
+    id: &str,
+) -> bool {
+    if !matches!(id, IMPORT | REMOVE) {
+        return false;
+    }
+    let Some((account, subject)) = shared_subject(&a.app.state, target) else {
+        return true;
+    };
+    let path = shared_path(&a.root, account, subject);
+    if id == REMOVE {
+        let result = std::fs::remove_file(&path);
+        if result.is_ok() {
+            a.local_profile.shared.retain(|(id, _)| id != subject);
+            a.refresh_local_profile(window);
+        }
+        notice(
+            a,
+            window,
+            result.map_or_else(
+                |error| format!("Couldn't remove the shared appearance. {error}"),
+                |_| "Shared appearance removed.".into(),
+            ),
+        );
+        return true;
+    }
+    let (account, subject) = (account.to_owned(), subject.to_owned());
+    let weak = a.weak.clone();
+    let win = window.as_weak();
+    let runtime = a.runtime.clone();
+    let revision = a.local_profile.account_revision;
+    a.dialog(async move {
+        let Some(file) = rfd::AsyncFileDialog::new()
+            .set_title("Import this person's Harmony appearance")
+            .add_filter("Harmony profile", &["harmony-profile"])
+            .pick_file()
+            .await
+        else {
+            return;
+        };
+        let bytes = runtime
+            .spawn_blocking(move || {
+                let file = std::fs::File::open(file.path()).map_err(|e| e.to_string())?;
+                read_limited(file, MAX_FILE)
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+        let (Some(adapter), Some(window)) = (weak.upgrade(), win.upgrade()) else {
+            return;
+        };
+        let mut a = adapter.borrow_mut();
+        if owner(&a.app.state) != Some(account.as_str())
+            || a.local_profile.account_revision != revision
+        {
+            return;
+        }
+        let result = bytes.and_then(|bytes| {
+            let pack = SharedLook::parse(&bytes, &subject)?;
+            std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+            theme_pack::write_atomic(&path, &bytes)?;
+            Ok(pack.appearance)
+        });
+        let message = match result {
+            Ok(look) => {
+                a.local_profile.shared.retain(|(id, _)| id != &subject);
+                a.local_profile.shared.push_front((subject, Some(look)));
+                a.local_profile.shared.truncate(4);
+                a.refresh_local_profile(&window);
+                "Shared appearance saved for this profile.".into()
+            }
+            Err(error) => error,
+        };
+        notice(&mut a, &window, message);
+    });
+    true
+}
+
+fn notice(a: &mut Adapter, window: &YapfastWindow, message: String) {
+    a.app.state.notice = Some(message.clone());
+    window.set_notice(message.into());
 }
 
 impl Adapter {
@@ -516,6 +734,60 @@ mod tests {
         let mut out = Cursor::new(Vec::new());
         rgba.write_to(&mut out, image::ImageFormat::Png).unwrap();
         (out.into_inner(), rgba)
+    }
+
+    #[test]
+    fn shared_appearance_is_bound_to_the_recipient_and_subject() {
+        i_slint_backend_testing::init_no_event_loop();
+        let dir = tempfile::tempdir().unwrap();
+        let (window, a) = setup(dir.path(), "42");
+        let (bytes, art) = png();
+        let pack = SharedLook {
+            version: 1,
+            user: "43".into(),
+            appearance: Look {
+                top: "#193266".into(),
+                banner: Some(Art::new(bytes, art)),
+                ..Default::default()
+            },
+        };
+        let data = serde_json::to_vec(&pack).unwrap();
+        assert!(SharedLook::parse(&data, "44").is_err());
+        let dest = shared_path(dir.path(), "42", "43");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        theme_pack::write_atomic(&dest, &data).unwrap();
+        let mut a = a.borrow_mut();
+        let mut profile = ProfileData {
+            id: "43".into(),
+            ..Default::default()
+        };
+        let state = a.app.state.discord_user.clone();
+        assert_eq!(state.as_deref(), Some("42"));
+        {
+            let Adapter {
+                local_profile,
+                root,
+                app,
+                ..
+            } = &mut *a;
+            local_profile.decorate(root, &mut profile, &app.state);
+        }
+        assert_eq!(profile.banner.size().width, 3);
+        assert_eq!(profile.theme_primary, color("#193266").unwrap());
+        a.app.state.discord_user = Some("44".into());
+        let mut profile = ProfileData {
+            id: "43".into(),
+            ..Default::default()
+        };
+        let Adapter {
+            local_profile,
+            root,
+            app,
+            ..
+        } = &mut *a;
+        local_profile.sync(root, &app.state, &window);
+        local_profile.decorate(root, &mut profile, &app.state);
+        assert!(!profile.has_theme);
     }
 
     #[test]

@@ -123,7 +123,7 @@ out every second.
 
 Before sharing, the share button's menu picks a resolution and a frame rate, as
 Discord's client asks for them: 720p, 1080p or the screen's own size (up to
-4K), at 15, 30 or 60 fps. Its "Higher quality" checkbox, which Discord's client
+4K), with a whole frame rate from 15 fps to the account's limit. Its "Higher quality" checkbox, which Discord's client
 doesn't have, has x264 work harder on each frame. Yapfast remembers the choice
 beside the chosen audio devices (`devices.json`). The picker and the capture worker's
 launch path limit a saved choice to the current Discord account and server. The
@@ -136,8 +136,9 @@ the window: where they don't all fit, as with many windows open or the window
 short or zoomed, the choices scroll as one above Go Live, which stays in view.
 Larger screens, and those of another shape, are scaled down to fit. Yapfast
 caps them at the bitrates Discord's client uses: at most 3.5 Mbit/s up to 720p
-and 9 Mbit/s above, the cap op 12 announces, with the frame rate as its
-`max_framerate`. **Call connection → Stream → Measured output** shows the
+and 9 Mbit/s above. Enter a lower cap in the share dialog or leave it on
+Automatic. Op 12 announces the selected cap and frame rate.
+**Call connection → Stream → Measured output** shows the
 encoder dimensions and the number of complete original frames sent per second
 over the last reporting interval. Retransmitted packets do not add frames.
 The worker converts captured

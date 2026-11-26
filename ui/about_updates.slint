@@ -9,6 +9,7 @@ export global HarmonyAbout {
     in-out property <bool> check-automatically;
     in-out property <bool> download-automatically;
     in-out property <bool> windows-installer;
+    in-out property <bool> can-install;
     in-out property <int> interval-index;
     in-out property <bool> busy;
     in-out property <bool> can-download;
@@ -82,8 +83,8 @@ export component AboutUpdatesSettings inherits VerticalLayout {
             current: HarmonyAbout.interval-index; controlled: true;
             chosen(index) => { HarmonyAbout.save-update-options(true, HarmonyAbout.download-automatically, index); }
         }
-        if HarmonyAbout.windows-installer: SettingsSwitch {
-            text: "Download signed updates automatically"; description: "Keep the verified Windows installer ready for your next full quit.";
+        if HarmonyAbout.can-install: SettingsSwitch {
+            text: "Download signed updates automatically"; description: "Keep the verified update ready for your next full quit.";
             checked: HarmonyAbout.download-automatically; controlled: true;
             toggled(on) => { HarmonyAbout.save-update-options(HarmonyAbout.check-automatically, on, HarmonyAbout.interval-index); }
         }
@@ -98,7 +99,10 @@ export component AboutUpdatesSettings inherits VerticalLayout {
             if HarmonyAbout.release-page != "": ActionButton { text: "View release"; clicked => { root.open-link(HarmonyAbout.release-page); } }
         }
         if HarmonyAbout.ready: SettingsSwitch {
-            text: "Run Setup when I quit Harmony"; description: "Quit from the tray to finish. Setup uses your existing installation or lets you choose a folder.";
+            text: HarmonyAbout.windows-installer ? "Run Setup when I quit Harmony" : "Install when I quit Harmony";
+            description: HarmonyAbout.windows-installer
+                ? "Quit from the tray to finish. Setup uses your existing installation or lets you choose a folder."
+                : "Quit from the tray to replace the AppImage in its current folder.";
             checked: HarmonyAbout.install-on-quit; controlled: true;
             toggled(on) => { HarmonyAbout.arm-install(on); }
         }

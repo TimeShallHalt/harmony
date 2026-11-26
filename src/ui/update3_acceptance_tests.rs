@@ -17,6 +17,74 @@ fn fixture() -> (tempfile::TempDir, YapfastWindow, Rc<RefCell<Adapter>>) {
     bind_callbacks(&window, &adapter);
     (dir, window, adapter)
 }
+
+#[test]
+fn native_plugin_features_apply_and_restore_system24_presentation() {
+    let (dir, window, _) = fixture();
+    let style = window.global::<ClientStyle>();
+    window.invoke_choose_theme("system24-v2".into());
+    assert!(style.get_system24());
+    assert_eq!(style.get_font_family(), "DM Mono");
+    assert_eq!(style.get_panel_gap(), 12.0);
+    assert_eq!(style.get_divider_size(), 4.0);
+    assert_eq!(theme::Theme::shown(&window).chat.as_argb_encoded(), 0xff07_0709);
+    assert_eq!(Layout::read(dir.path()).theme.as_deref(), Some("system24-v2"));
+    window.invoke_choose_theme("harmony".into());
+    assert!(!style.get_system24());
+    assert_eq!(style.get_font_family(), "DM Sans");
+    assert_eq!(style.get_panel_gap(), 0.0);
+}
+
+#[test]
+fn native_plugin_features_count_scalars_and_keep_typing_overrides_local() {
+    let (dir, window, adapter) = fixture();
+    assert_eq!(
+        window.global::<TextCounts>().invoke_count("A😀e\u{301}".into()),
+        4,
+    );
+    let hidden = "discord:@me:20";
+    let visible = "discord:@me:21";
+    adapter.borrow_mut().app.state.selected = Some(hidden.into());
+    window.invoke_toggle_room_typing(false);
+    assert!(!window.get_room_shares_typing());
+    let saved = Layout::read(dir.path());
+    assert!(!saved.share_typing_in(hidden));
+    assert!(saved.share_typing_in(visible));
+
+    let mut adapter = adapter.borrow_mut();
+    let before = adapter.backend_command_count;
+    for room in [hidden, visible] {
+        adapter.execute(vec![Effect::Backend(Command::Typing {
+            room: room.into(),
+            typing: true,
+        })]);
+    }
+    assert_eq!(adapter.backend_command_count, before + 1);
+}
+
+#[test]
+fn native_plugin_features_keep_read_pins_on_the_rail_and_do_not_duplicate_unread_pins() {
+    let (_dir, window, adapter) = fixture();
+    let mut adapter = adapter.borrow_mut();
+    adapter.app.dispatch(Action::Preview);
+    let state = &mut adapter.app.state;
+    state.navigation = Navigation::DirectMessages;
+    for room in state.rooms.iter_mut().filter(|room| room.direct) {
+        Arc::make_mut(room).unread = u64::from(room.id != "sam");
+    }
+    state.pinned = vec!["sam".into(), "riley".into()];
+    adapter.show_sidebar(&window);
+    let rows: Vec<_> = window.get_servers().iter().filter(|row| row.dm).collect();
+    let order: Vec<_> = rows
+        .iter()
+        .map(|row| (row.id.as_str(), row.pinned_dm, row.unread))
+        .collect();
+    assert_eq!(
+        order,
+        [("sam", true, false), ("riley", true, true), ("party", false, true)],
+    );
+    assert_eq!(window.get_rooms().row_data(0).unwrap().heading, "PINNED DMS");
+}
 fn voice(room: &str) -> voice::State {
     voice::State {
         room: Some(room.into()),
@@ -788,10 +856,11 @@ fn nonfriend_gateway_observations_reach_both_profiles_and_keep_provenance() {
 fn exact_voice_stream_controls_have_independent_local_persistence() {
     let (dir, window, adapter) = fixture();
     let id = "update3-exact-gains";
-    for bad in ["NaN", "inf", "13.7", "201", "-1", "1e2", ""] {
+    for bad in ["NaN", "inf", "13.7", "2147483648", "-1", "1e2", ""] {
         assert_eq!(window.invoke_parse_volume(bad.into()), -1);
     }
     assert_eq!(window.invoke_parse_volume("137".into()), 137);
+    assert_eq!(window.invoke_parse_volume("201".into()), 201);
     window.invoke_volume_changed(id.into(), false, 137, true);
     window.invoke_volume_changed(id.into(), true, 176, true);
     let saved = Layout::read(dir.path());
@@ -869,7 +938,7 @@ fn exact_stream_entry_55_reaches_adapter_persists_and_reopens_with_default_bound
     assert_eq!(reopened.get_stream(), 55);
     assert_eq!(reopened.get_stream_entry(), "55");
     assert_eq!(volume::get(Kind::Stream, "repair-stream-55"), expected);
-    for value in [0, 200, 54] {
+    for value in [0, 200, 450, 3000, 54] {
         enter(value);
         assert_eq!(
             window.invoke_volume_of("repair-stream-55".into(), true),

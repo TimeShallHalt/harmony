@@ -2,6 +2,16 @@ import { Theme, Middle } from "theme.slint";
 import { ActionButton, IconButton, Avatar, SpoilerCover } from "controls.slint";
 import { EmojiCell, EmojiFace } from "messages.slint";
 
+export component TypingPrivacy inherits IconButton {
+    in property <bool> sharing;
+    icon: root.sharing ? @image-url("icons/keyboard.svg") : @image-url("icons/eye-off.svg");
+    label: root.sharing ? "Hide your typing indicator in this conversation"
+        : "Share your typing indicator in this conversation";
+    tint: root.sharing ? Theme.secondary : Theme.accent;
+    size: 28px;
+    glyph: 17px;
+}
+
 /// A file waiting to go with the next message. A spoiler's picture is blurred.
 export struct StagedFile { name: string, size: string, has-picture: bool, picture: image, spoiler: bool }
 

@@ -195,6 +195,8 @@ impl Camera {
     /// pictures to `sink`, at a call's size: [`WIDTH`] by [`HEIGHT`] at
     /// [`FPS`].
     pub fn open(id: Option<&str>, sink: Sink) -> Result<Self> {
+        #[cfg(feature = "discord")]
+        let sink = crate::camera_background::wrap(sink);
         Self::open_at(id, (WIDTH, HEIGHT, FPS), sink)
     }
 

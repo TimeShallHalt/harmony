@@ -39,11 +39,12 @@ put `$schema` in the pack itself: unknown keys are rejected.
 
 Base IDs match the built-in themes, with `harmony` added as the new default:
 `harmony`, `yap`, `bonfire`, `catppuccin-mocha`, `dracula`, `nord`, `gruvbox-dark`,
-`tokyo-night`, `catppuccin-latte`, `rose-pine-dawn`, `sakura`.
+`tokyo-night`, `system24-v2`, `catppuccin-latte`, `rose-pine-dawn`, `sakura`.
 `yap` is the preserved Harmony Classic ID for the original Yapfast palette.
 Existing packs keep that base and any imported logo; no migration is required.
-The base supplies unspecified colors and `dark`; it does not change the
-presentation mode. Existing palette credits remain in [themes.md](themes.md).
+The base supplies unspecified colors and `dark`. A pack based on
+`system24-v2` also inherits its native panel styling and monospace font.
+Existing palette credits remain in [themes.md](themes.md).
 
 ### Semantic colors
 

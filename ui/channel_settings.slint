@@ -3,7 +3,7 @@
 // restriction; and Permissions, its overwrites, each permission allowed,
 // denied or left to the roles for a role or member.
 import { Theme, Middle, Label, Tip } from "theme.slint";
-import { ActionButton, Avatar, IconButton, TextField } from "controls.slint";
+import { ActionButton, Avatar, CharacterCounter, IconButton, TextField } from "controls.slint";
 import { SettingsCard, SettingsFrame, SettingsRow, SettingsTitle, SettingsHeading, SettingsSwitch, UnsavedBar } from "settings.slint";
 import { ListView } from "scrollview.slint";
 import { RoleMemberRow } from "roles.slint";
@@ -180,6 +180,7 @@ component OverviewSection inherits VerticalLayout {
             placeholder: "Let everyone know how to use this channel!";
             edited(text) => { root.write(1, text); }
         }
+        CharacterCounter { content: root.topic; maximum: 1024; height: 16px; }
     }
     if root.prompt.kind == 0: VerticalLayout {
         spacing: 8px;

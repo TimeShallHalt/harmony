@@ -21,7 +21,7 @@ On the publisher's Windows machine, run this from the release checkout after bui
 ./scripts/sign-harmony-update.ps1 -Tag harmony-v1.2.0-b1 -Installer ./dist/harmony-simple/Harmony-1.2.0-Setup.exe -OutputDirectory ./dist/update-metadata
 ```
 
-Attach both `harmony-update.json` and `harmony-update.json.sig` alongside that installer on the matching stable GitHub release. Harmony verifies the signature, tag, platform, size and SHA-256 before offering to run Setup on full quit. Registered Inno installs keep their scope and folder. Other Windows copies open the installation wizard. On Linux the release page is available for manual installation.
+Attach both `harmony-update.json` and `harmony-update.json.sig` alongside that installer on the matching stable GitHub release. Harmony verifies the signature, tag, platform, size and SHA-256 before offering to run Setup on full quit. Registered Inno installs keep their scope and folder. Other Windows copies open the installation wizard. See [Linux AppImage packaging and signing](../docs/packaging.md#signing-releases) for the Linux assets.
 
 The private signing key is non-exportable. Moving signing to another Windows account or PC requires shipping a trusted public-key change while the current signer is available, or distributing a new installer manually.
 

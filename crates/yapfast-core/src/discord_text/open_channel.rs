@@ -164,6 +164,19 @@ pub enum Load {
     Around(u64),
 }
 
+fn check_message_body(discord: &Discord, body: &str, allow_empty: bool) -> Result<(), &'static str> {
+    let snapshots = discord.snapshots();
+    let premium = snapshots.borrow().account.as_ref().map_or(0, |account| account.premium_type);
+    let limit = super::message_limit(premium);
+    if body.chars().count() <= limit && (allow_empty || !body.trim().is_empty()) {
+        Ok(())
+    } else if limit == MAX_CHARS {
+        Err("Discord messages must contain text and be at most 2,000 characters.")
+    } else {
+        Err("Discord messages must contain text and be at most 4,000 characters.")
+    }
+}
+
 pub struct OpenChannel {
     pub room: String,
     pub(super) guild: String,
@@ -739,9 +752,7 @@ impl OpenChannel {
         options: SendOptions,
         files: Vec<OutgoingFile>,
     ) -> Result<(), &'static str> {
-        if (body.trim().is_empty() && files.is_empty()) || body.chars().count() > MAX_CHARS {
-            return Err("Discord messages must contain text and be at most 2,000 characters.");
-        }
+        check_message_body(discord, &body, !files.is_empty())?;
         if files.len() > yapfast_discord::api::MAX_FILES {
             return Err("A Discord message carries up to 10 files.");
         }
@@ -894,9 +905,7 @@ impl OpenChannel {
         item: String,
         body: String,
     ) -> Result<(), &'static str> {
-        if body.trim().is_empty() || body.chars().count() > MAX_CHARS {
-            return Err("Discord messages must contain text and be at most 2,000 characters.");
-        }
+        check_message_body(discord, &body, false)?;
         let id = sent_id(&item)
             .ok_or("Only sent messages can be edited.")?
             .to_owned();

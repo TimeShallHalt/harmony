@@ -1314,7 +1314,11 @@ impl Adapter {
             .map(|(index, room)| {
                 let mut folds_by = None;
                 let heading = if direct {
-                    String::new()
+                    if index == 0 && state.pinned.contains(&room.id) {
+                        "PINNED DMS".into()
+                    } else {
+                        String::new()
+                    }
                 } else if index < in_pinned {
                     if index == 0 { "PINNED CHANNELS" } else { "" }.into()
                 } else if room.capabilities.categories {
@@ -1470,6 +1474,7 @@ impl Adapter {
         // filtering; one without channels shows as its heading alone. The
         // pinned channels above them don't fold.
         let rows = match &state.navigation {
+            Navigation::DirectMessages => super::dm_groups::arrange(&self.layout, state, rows, !query.is_empty()),
             Navigation::Server(server) if query.is_empty() => {
                 let mut rows = rows;
                 let rest = rows.split_off(in_pinned);
@@ -3916,6 +3921,7 @@ impl Adapter {
             return;
         };
         let room = &aside.room;
+        window.set_aside_shares_typing(self.layout.share_typing_in(room));
         window.set_aside_can_attach(state.aside_can_attach());
         window.set_aside_can_mark_spoilers(state.aside_can_mark_spoilers());
         let rows = staged_rows(
@@ -4090,6 +4096,7 @@ impl Adapter {
         self.show_inline_edit(window);
         let state = &self.app.state;
         let room = state.selected_room();
+        window.set_room_shares_typing(room.is_some_and(|room| self.layout.share_typing_in(&room.id)));
         window.set_voice_room(room.is_some_and(|room| room.voice));
         window.set_voice_chat(state.voice_chat);
         window.set_has_voice_chat(room.is_some_and(|room| room.voice_chat()));
@@ -4098,6 +4105,12 @@ impl Adapter {
         window.set_room_ready(state.room_ready);
         window.set_draft(state.draft().into());
         let discord_room = room.is_some_and(|room| room.network == Network::Discord);
+        #[cfg(feature = "discord")]
+        window.global::<TextCounts>().set_message_limit(if discord_room {
+            self.app.discord_message_limit() as i32
+        } else {
+            0
+        });
         // An unverified Matrix device can type; the hint says why it can't send.
         window.set_composer_enabled(
             state.room_ready
@@ -4609,6 +4622,7 @@ impl Adapter {
         let choice = limits.constrain(voice.quality);
         window.set_share_resolution(resolution_index(choice.resolution));
         window.set_share_fps(choice.fps as i32);
+        window.set_share_bitrate(choice.bitrate_kbps as i32);
         window.set_share_high_quality(voice.quality.high_quality);
         window.set_share_live(
             voice
@@ -5085,7 +5099,7 @@ impl Adapter {
         }
         if let Some(view) = &state.panel_profile {
             let mut data = profile_data(&mut self.pictures, state, view);
-            self.local_profile.decorate(&mut data, state);
+            self.local_profile.decorate(&self.root, &mut data, state);
             // The DM list keeps up with whether they're around; the profile
             // was as it was when it opened.
             if let Some(room) = state.selected_room() {
@@ -5124,7 +5138,7 @@ impl Adapter {
             view.profile.id.clone().into()
         });
         let mut data = profile_data(&mut self.pictures, state, view);
-        self.local_profile.decorate(&mut data, state);
+        self.local_profile.decorate(&self.root, &mut data, state);
         if let Some(data) = changed_profile(&window.get_profile(), data) {
             window.set_profile(data);
         }
@@ -5335,31 +5349,51 @@ pub(super) fn unread_dm_rows(state: &AppState) -> Vec<ServerRow> {
                 && room.category != discord::SPAM
                 && (room.unread > 0 || room.mentions > 0)
         })
-        .map(|room| ServerRow {
-            id: room.id.as_str().into(),
-            name: room.name.as_str().into(),
-            initial: initial(&room.name),
-            picture_url: room.avatar.as_deref().unwrap_or_default().into(),
-            unread: true,
-            // Discord counts each of a DM's messages; Matrix counts its
-            // unread messages apart from its mentions.
-            badge: count_badge(room.mentions.max(room.unread)),
-            discord: room.network == Network::Discord,
-            dm: true,
-            ..Default::default()
-        })
+        .map(|room| dm_rail_row(room))
         .collect()
 }
 
-/// The whole rail: unread DMs, a line, then the servers and folders. Unread
-/// DMs come and go above the servers, so the model keeps rows by id rather
-/// than all moving down one.
+fn dm_rail_row(room: &yapfast_core::chat::ChatRoom) -> ServerRow {
+    ServerRow {
+        id: room.id.as_str().into(),
+        name: room.name.as_str().into(),
+        initial: initial(&room.name),
+        picture_url: room.avatar.as_deref().unwrap_or_default().into(),
+        unread: room.unread > 0 || room.mentions > 0,
+        badge: count_badge(room.mentions.max(room.unread)),
+        discord: room.network == Network::Discord,
+        dm: true,
+        ..Default::default()
+    }
+}
+
+/// Pinned and unread DMs, followed by the servers and folders.
 fn rail(
     state: &AppState,
     rooms_by_id: &HashMap<&str, &yapfast_core::chat::ChatRoom>,
     open_folders: &std::collections::BTreeSet<String>,
 ) -> Vec<ServerRow> {
-    let mut rail = unread_dm_rows(state);
+    let mut pinned = HashSet::new();
+    let mut rail: Vec<_> = state
+        .pinned
+        .iter()
+        .filter(|id| pinned.insert(id.as_str()))
+        .filter_map(|id| {
+            let room = rooms_by_id
+                .get(id.as_str())
+                .filter(|room| room.direct && !room.request && room.category != discord::SPAM)?;
+            Some(ServerRow {
+                selected: state.selected.as_ref() == Some(id),
+                pinned_dm: true,
+                ..dm_rail_row(room)
+            })
+        })
+        .collect();
+    rail.extend(
+        unread_dm_rows(state)
+            .into_iter()
+            .filter(|row| !pinned.contains(row.id.as_str())),
+    );
     rail.push(ServerRow {
         divider: true,
         ..Default::default()

@@ -64,10 +64,12 @@ fn invalid_volume_callback_does_not_mutate_either_persisted_gain() {
     window.invoke_volume_changed(person.into(), false, 137, true);
     window.invoke_volume_changed(person.into(), true, 176, true);
     let before = Layout::read(dir.path());
-    for invalid in [-1, 201, i32::MAX] {
+    for invalid in [-1, i32::MIN] {
         window.invoke_volume_changed(person.into(), false, invalid, true);
         window.invoke_volume_changed(person.into(), true, invalid, true);
     }
+    window.invoke_volume_changed("".into(), false, 650, true);
+    window.invoke_volume_changed("".into(), true, 650, true);
     let after = Layout::read(dir.path());
     assert_eq!(
         after.volumes, before.volumes,

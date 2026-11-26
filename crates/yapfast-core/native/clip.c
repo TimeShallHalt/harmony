@@ -22,7 +22,7 @@ typedef void (*yapfast_clip_packet)(void *user, const unsigned char *data, size_
 /* An encoder of `width` by `height` frames timed in milliseconds, at
  * `quality`, libvpx's constant quality level: 0 best, 63 smallest. */
 struct yapfast_clip *yapfast_clip_new(unsigned width, unsigned height, unsigned quality,
-                                unsigned threads) {
+                                unsigned threads, unsigned kbps) {
   vpx_codec_enc_cfg_t config;
   if (vpx_codec_enc_config_default(vpx_codec_vp9_cx(), &config, 0)) return NULL;
   config.g_w = width;
@@ -33,11 +33,13 @@ struct yapfast_clip *yapfast_clip_new(unsigned width, unsigned height, unsigned 
   config.g_pass = VPX_RC_ONE_PASS;
   /* Looking ahead lets libvpx add hidden reference frames. */
   config.g_lag_in_frames = 25;
-  config.rc_end_usage = VPX_Q;
+  config.rc_end_usage = kbps ? VPX_VBR : VPX_Q;
+  if (kbps) config.rc_target_bitrate = kbps;
   config.rc_min_quantizer = 0;
   config.rc_max_quantizer = 63;
   config.rc_dropframe_thresh = 0;
   config.kf_mode = VPX_KF_AUTO;
+  if (kbps) config.kf_max_dist = 120;
 
   struct yapfast_clip *clip = calloc(1, sizeof *clip);
   if (!clip) return NULL;
@@ -45,8 +47,8 @@ struct yapfast_clip *yapfast_clip_new(unsigned width, unsigned height, unsigned 
     free(clip);
     return NULL;
   }
-  vpx_codec_control(&clip->codec, VP8E_SET_CQ_LEVEL, quality);
-  vpx_codec_control(&clip->codec, VP8E_SET_CPUUSED, 2);
+  if (!kbps) vpx_codec_control(&clip->codec, VP8E_SET_CQ_LEVEL, quality);
+  vpx_codec_control(&clip->codec, VP8E_SET_CPUUSED, kbps ? 5 : 2);
   vpx_codec_control(&clip->codec, VP8E_SET_ENABLEAUTOALTREF, 1);
   vpx_codec_control(&clip->codec, VP9E_SET_ROW_MT, 1);
   clip->width = width;

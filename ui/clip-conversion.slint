@@ -1,0 +1,39 @@
+import { Theme } from "theme.slint";
+import { ActionButton } from "controls.slint";
+
+export global ClipConversion {
+    in property <bool> available;
+    in property <bool> busy;
+    in property <bool> converting;
+    callback choose;
+    callback cancel;
+}
+
+export component ClipConversionDialog inherits Rectangle {
+    background: #00000099;
+    TouchArea {}
+    Rectangle {
+        width: min(360px, parent.width - 32px);
+        height: content.preferred-height;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 12px; background: Theme.raised;
+        border-width: 1px; border-color: Theme.edge;
+        accessible-role: groupbox; accessible-label: "Compressing clip";
+        focus := FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if event.text == Key.Escape { ClipConversion.cancel(); return accept; }
+                return reject;
+            }
+            content := VerticalLayout {
+                spacing: 12px; padding: 20px;
+                Text {
+                    text: "Compressing clip…"; color: Theme.text;
+                    font-size: 18px; font-weight: 700;
+                }
+                ActionButton { text: "Cancel"; clicked => { ClipConversion.cancel(); } }
+            }
+        }
+    }
+}

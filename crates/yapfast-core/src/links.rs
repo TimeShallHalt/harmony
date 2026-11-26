@@ -8,6 +8,89 @@ use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
 /// opening the address that follows.
 pub const LEAVE: &str = "yapfast:leave/";
 
+/// A direct Discord CDN emoji image linked in Markdown. Ignore code, images,
+/// and HTML, and use the canonical CDN address when fetching the artwork.
+pub fn emoji_links(markdown: &str) -> Vec<(Range<usize>, String, bool)> {
+    if !markdown.contains("/emojis/") {
+        return Vec::new();
+    }
+    fn emoji(url: &str) -> Option<(&str, bool)> {
+        let file = url
+            .strip_prefix("https://cdn.discordapp.com/emojis/")
+            .or_else(|| url.strip_prefix("https://media.discordapp.net/emojis/"))?;
+        let file = file.split(['?', '#']).next()?;
+        let (id, extension) = file.rsplit_once('.')?;
+        if id.is_empty() || id.len() > 20 || !id.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        match extension {
+            "gif" => Some((id, true)),
+            "png" | "webp" | "jpg" | "jpeg" => Some((id, false)),
+            _ => None,
+        }
+    }
+    let mut skipped = Vec::<Range<usize>>::new();
+    let mut found = Vec::new();
+    for (event, range) in
+        Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH).into_offset_iter()
+    {
+        match event {
+            Event::Start(Tag::Link {
+                dest_url,
+                link_type,
+                ..
+            }) => {
+                if matches!(link_type, LinkType::Inline | LinkType::Autolink)
+                    && let Some((id, animated)) = emoji(&dest_url)
+                {
+                    found.push((range.clone(), id.to_owned(), animated));
+                }
+                skipped.push(range);
+            }
+            Event::Start(Tag::Image { .. } | Tag::CodeBlock(_) | Tag::HtmlBlock)
+            | Event::Code(_)
+            | Event::Html(_)
+            | Event::InlineHtml(_) => skipped.push(range),
+            _ => {}
+        }
+    }
+    for range in addresses(markdown) {
+        if !skipped
+            .iter()
+            .any(|skip| skip.start < range.end && range.start < skip.end)
+            && let Some((id, animated)) = emoji(&markdown[range.clone()])
+        {
+            found.push((range, id.to_owned(), animated));
+        }
+    }
+    found.sort_by_key(|(range, _, _)| range.start);
+    found
+}
+
+#[cfg(test)]
+#[test]
+fn reads_only_discord_emoji_links_outside_code() {
+    let message = concat!(
+        "hi [wave](https://cdn.discordapp.com/emojis/123.png?size=64), ",
+        "<https://media.discordapp.net/emojis/456.gif> and ",
+        "https://cdn.discordapp.com/emojis/789.webp. ",
+        "`https://cdn.discordapp.com/emojis/4.png` ",
+        "![image](https://cdn.discordapp.com/emojis/5.png) ",
+        "https://cdn.discordapp.com.invalid/emojis/6.png ",
+        "https://cdn.discordapp.com@invalid.test/emojis/8.png ",
+        "https://cdn.discordapp.com/emojis/../7.png",
+    );
+    let links = emoji_links(message);
+    assert_eq!(
+        links
+            .iter()
+            .map(|(_, id, animated)| (id.as_str(), *animated))
+            .collect::<Vec<_>>(),
+        [("123", false), ("456", true), ("789", false)],
+    );
+    assert!(message[links[0].0.clone()].starts_with("[wave]"));
+}
+
 /// Turns bare web addresses in Markdown into links, leaving code, existing
 /// links and HTML alone.
 pub fn linkify(markdown: &str) -> String {

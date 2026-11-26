@@ -80,6 +80,17 @@ pub fn max_bitrate(height: u32) -> u32 {
     if height > 720 { 9_000_000 } else { 3_500_000 }
 }
 
+/// Apply the user's video bitrate ceiling within the normal stream budget.
+/// Zero leaves the adaptive encoder on its automatic policy.
+pub fn bitrate_cap(height: u32, kbps: u32) -> u32 {
+    let max = max_bitrate(height);
+    if kbps == 0 {
+        max
+    } else {
+        kbps.saturating_mul(1000).clamp(congestion::FLOOR as u32, max)
+    }
+}
+
 /// Op 5's speaking flags for a stream's sound: shared sound, not a
 /// microphone, as Discord's client marks it.
 const SOUNDSHARE: u8 = 2;
@@ -137,6 +148,7 @@ struct Shared {
     size: Mutex<(u32, u32)>,
     /// Sending: the bit/s to encode at, as [`Controller`] decides.
     target: AtomicU64,
+    cap_kbps: u32,
     /// Sending: the codecs offered, most wanted first, and whether that
     /// changed since Discord was told. Receiving: the codecs decoded.
     offers: Mutex<Vec<Codec>>,
@@ -154,12 +166,13 @@ struct Shared {
 }
 
 impl Shared {
-    fn new(size: (u32, u32)) -> Arc<Self> {
+    fn new(size: (u32, u32), cap_kbps: u32) -> Arc<Self> {
         Arc::new(Self {
             link: Mutex::new(Link::Connecting),
             keyframe: AtomicBool::new(true),
             size: Mutex::new(size),
-            target: AtomicU64::new(congestion::start(max_bitrate(size.1).into())),
+            target: AtomicU64::new(congestion::start(bitrate_cap(size.1, cap_kbps).into())),
+            cap_kbps,
             offers: Mutex::new(vec![SEND_CODEC]),
             offers_changed: AtomicBool::new(false),
             chosen: Mutex::new(None),
@@ -228,8 +241,19 @@ impl StreamSender {
         fps: u32,
         offers: Vec<Codec>,
     ) -> Result<Self> {
+        Self::start_with_bitrate_cap(server, width, height, fps, offers, 0)
+    }
+
+    pub fn start_with_bitrate_cap(
+        server: StreamServer,
+        width: u32,
+        height: u32,
+        fps: u32,
+        offers: Vec<Codec>,
+        cap_kbps: u32,
+    ) -> Result<Self> {
         let (user, channel, _) = ids(&server)?;
-        let shared = Shared::new((width, height));
+        let shared = Shared::new((width, height), cap_kbps);
         *lock(&shared.offers) = offers;
         // A few frames of slack; beyond that the network can't keep up.
         let (frames, receiver) = mpsc::channel(4);
@@ -340,7 +364,7 @@ impl StreamReceiver {
     /// most wanted first.
     pub fn start(server: StreamServer, decodes: Vec<Codec>) -> Result<Self> {
         let (user, channel, streamer) = ids(&server)?;
-        let shared = Shared::new((0, 0));
+        let shared = Shared::new((0, 0), 0);
         *lock(&shared.offers) = decodes;
         // Frames waiting to be decoded; more means decoding can't keep up.
         let (frames, receiver) = channel::sync_channel(4);
@@ -397,6 +421,17 @@ pub(crate) fn video_attributes(
     (width, height): (u32, u32),
     fps: u32,
 ) -> Value {
+    stream_attributes(ssrc, video, rtx, (width, height), fps, max_bitrate(height))
+}
+
+fn stream_attributes(
+    ssrc: u32,
+    video: u32,
+    rtx: u32,
+    (width, height): (u32, u32),
+    fps: u32,
+    bitrate: u32,
+) -> Value {
     json!({
         "audio_ssrc": ssrc,
         "video_ssrc": video,
@@ -408,7 +443,7 @@ pub(crate) fn video_attributes(
             "active": true,
             "quality": 100,
             "rtx_ssrc": rtx,
-            "max_bitrate": max_bitrate(height),
+            "max_bitrate": bitrate,
             "max_framerate": fps,
             "max_resolution": {"type": "fixed", "width": width, "height": height},
         }],
@@ -507,7 +542,10 @@ async fn send(
     let mut connection = open(server, user, channel, Role::Send, shared).await?;
     let (ssrc, video, rtx) = (connection.ssrc, connection.video, connection.rtx);
     let mut size = *lock(&shared.size);
-    let mut pacing = Controller::new(max_bitrate(size.1).into());
+    let describe = |size: (u32, u32)| {
+        stream_attributes(ssrc, video, rtx, size, fps, bitrate_cap(size.1, shared.cap_kbps))
+    };
+    let mut pacing = Controller::new(bitrate_cap(size.1, shared.cap_kbps).into());
     shared.target.store(pacing.target(), Ordering::Relaxed);
     // When the last video sender reports went out, by the time in them.
     let mut echoed = [(0u32, std::time::Instant::now()); ECHOED];
@@ -515,7 +553,7 @@ async fn send(
     send_json(
         &mut connection.ws,
         12,
-        video_attributes(ssrc, video, rtx, size, fps),
+        describe(size),
     )
     .await?;
     send_json(
@@ -566,8 +604,8 @@ async fn send(
                 let wanted = *lock(&shared.size);
                 if wanted != size {
                     size = wanted;
-                    send_json(&mut connection.ws, 12, video_attributes(ssrc, video, rtx, size, fps)).await?;
-                    if let Some(reason) = pacing.set_cap(max_bitrate(size.1).into()) {
+                    send_json(&mut connection.ws, 12, describe(size)).await?;
+                    if let Some(reason) = pacing.set_cap(bitrate_cap(size.1, shared.cap_kbps).into()) {
                         retarget(shared, &pacing, reason, None);
                     }
                 }
@@ -664,7 +702,7 @@ async fn send(
                     // Tell whoever connected about the video again, in case
                     // the server doesn't pass it on to late viewers.
                     if op == 11 {
-                        send_json(&mut connection.ws, 12, video_attributes(ssrc, video, rtx, size, fps)).await?;
+                        send_json(&mut connection.ws, 12, describe(size)).await?;
                         send_json(&mut connection.ws, 5, json!({"speaking": SOUNDSHARE, "delay": 0, "ssrc": ssrc})).await?;
                     }
                 }
@@ -1123,6 +1161,19 @@ async fn receive_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bitrate_cap_applies_to_initial_pacing_and_stream_attributes() {
+        assert_eq!(bitrate_cap(720, 0), 3_500_000);
+        assert_eq!(bitrate_cap(720, 8000), 3_500_000);
+        assert_eq!(bitrate_cap(1080, 8000), 8_000_000);
+        assert_eq!(bitrate_cap(1080, u32::MAX), 9_000_000);
+        let shared = Shared::new((1280, 720), 1250);
+        assert_eq!(shared.target.load(Ordering::Relaxed), 1_250_000);
+        let description = stream_attributes(1, 2, 3, (1280, 720), 24, bitrate_cap(720, 1250));
+        assert_eq!(description["streams"][0]["max_bitrate"], 1_250_000);
+        assert_eq!(description["streams"][0]["max_framerate"], 24);
+    }
 
     #[test]
     fn paces_frames_by_the_target() {

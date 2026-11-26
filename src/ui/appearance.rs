@@ -94,6 +94,7 @@ impl Adapter {
         window.set_theme_colours(editor.rows());
         window.set_theme_can_save(true);
         window.set_theme_editor(true);
+        window.global::<ClientStyle>().set_system24(editor.base == theme::SYSTEM24_ID);
         self.set_theme(window, &editor.theme);
         self.theme_editor = Some(editor);
     }
@@ -121,6 +122,7 @@ impl Adapter {
         window.set_theme_start(index);
         window.set_theme_dark(theme.dark);
         window.set_theme_can_save(true);
+        window.global::<ClientStyle>().set_system24(base == theme::SYSTEM24_ID);
         self.set_theme(window, &theme);
     }
 

@@ -92,6 +92,21 @@ def dependency_notices(metadata, package, licenses, skia_archive, skia_source, w
         if license_file(path) or path.name == "README.md":
             shutil.copy2(path, font_notices / path.name)
     shutil.copy2(ROOT / "src/LICENSE-emojibase.txt", licenses / "LICENSE-emojibase.txt")
+    selfie = ROOT / "vendor/mediapipe-selfie"
+    if selfie.is_dir():
+        model_notices = licenses / "mediapipe-selfie"
+        model_notices.mkdir()
+        for name in ("LICENSE", "README.md"):
+            shutil.copy2(selfie / name, model_notices / name)
+        dependencies.append({
+            "name": "MediaPipe Selfie Segmentation",
+            "version": "SelfieBarracuda ONNX 47a67596979ed0081c9bb3ddaceea10aa875b800",
+            "license": "Apache-2.0",
+            "source": "https://github.com/keijiro/SelfieBarracuda",
+            "repository": "https://github.com/google-ai-edge/mediapipe",
+            "license_files": [(model_notices / name).relative_to(package).as_posix()
+                              for name in ("LICENSE", "README.md")],
+        })
     for item in sorted(metadata["packages"], key=lambda value: (value["name"], value["version"])):
         if item["name"] == "yapfast":
             continue

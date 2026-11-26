@@ -2,6 +2,42 @@ import { ScrollView } from "scrollview.slint";
 import { Theme, Tip, Middle, Label } from "theme.slint";
 import { ClientStyle } from "yapfast/style.slint";
 
+export global TextCounts {
+    in property <int> message-limit;
+    pure callback count(string) -> int;
+    count(text) => { return text.character-count; }
+}
+
+export component CharacterCounter inherits Text {
+    in property <string> content;
+    in property <int> maximum;
+    property <int> count: TextCounts.count(root.content);
+    text: root.maximum > 0 ? root.count + " / " + root.maximum : root.count + " characters";
+    color: root.maximum > 0 && root.count > root.maximum ? Theme.danger : Theme.muted;
+    font-size: 12px;
+    horizontal-alignment: right;
+    vertical-alignment: center;
+    accessible-role: text;
+    accessible-label: root.maximum > 0
+        ? root.count + " of " + root.maximum + " characters" : self.text;
+}
+
+export component TerminalPanelOutline inherits Rectangle {
+    in property <string> title;
+    background: transparent;
+    border-width: 2px;
+    border-color: Theme.line;
+    Rectangle {
+        x: 10px; y: -7px; width: legend.preferred-width + 8px; height: 15px;
+        background: Theme.rail;
+        legend := Text {
+            x: 4px; y: 0px; width: parent.width - 8px; height: parent.height;
+            text: root.title; color: Theme.muted; font-size: 11px; font-weight: 500;
+            vertical-alignment: center; accessible-role: none;
+        }
+    }
+}
+
 // A labelled action. Primary is marigold, danger red, ghost transparent until hovered.
 export component ActionButton inherits Rectangle {
     in property <string> text;
@@ -1436,6 +1472,7 @@ export component VolumeSlider inherits Rectangle {
     in property <int> step: 5;
     /// Marks 100% and snaps to it.
     in property <bool> full-mark: root.maximum > 100;
+    property <int> track-value: min(root.maximum, max(0, root.value));
     callback changed(int);
     callback committed(int);
     height: column.preferred-height;
@@ -1456,7 +1493,7 @@ export component VolumeSlider inherits Rectangle {
         }
     }
     function move(by: int) {
-        root.set(root.value + by);
+        root.set(root.track-value + by);
         root.committed(root.value);
     }
     function point(x: length) {
@@ -1473,12 +1510,12 @@ export component VolumeSlider inherits Rectangle {
             height: 18px;
             Rectangle { y: (parent.height - self.height) / 2; height: 4px; border-radius: 2px; background: Theme.field; }
             Rectangle {
-                x: 0; y: (parent.height - self.height) / 2; width: parent.width * root.value / root.maximum; height: 4px;
+                x: 0; y: (parent.height - self.height) / 2; width: parent.width * root.track-value / root.maximum; height: 4px;
                 border-radius: 2px; background: Theme.accent;
             }
             if root.full-mark: Rectangle { x: parent.width * 100 / root.maximum - 1px; y: (parent.height - self.height) / 2; width: 2px; height: 10px; background: Theme.secondary; }
             Rectangle {
-                x: parent.width * root.value / root.maximum - self.width / 2; y: (parent.height - self.height) / 2;
+                x: parent.width * root.track-value / root.maximum - self.width / 2; y: (parent.height - self.height) / 2;
                 width: 14px; height: 14px; border-radius: 7px; background: Theme.text;
                 border-width: focus.has-focus ? 2px : 0px; border-color: Theme.accent;
             }

@@ -1,5 +1,5 @@
 import { Theme, Tip } from "theme.slint";
-import { IconButton, TextField, Picture } from "controls.slint";
+import { ContextMenu, IconButton, TextField, Picture } from "controls.slint";
 
 /// A tile of the GIF picker's grid, placed by the adapter as Discord's
 /// masonry places it. `kind`: 0 a GIF, 1 the Favorites tile, 2 "Trending
@@ -79,6 +79,11 @@ export component GifPicker inherits VerticalLayout {
     callback category(string);
     callback pick(string, bool);
     callback favorite(string);
+    callback copy-link(string);
+    callback open-link(string);
+    property <string> menu-url;
+    property <length> menu-x;
+    property <length> menu-y;
     /// How far the grid is scrolled and how tall it shows, for the adapter
     /// to load the pictures in sight.
     callback scrolled-to(length, length);
@@ -171,6 +176,13 @@ export component GifPicker inherits VerticalLayout {
                 enabled: tile.kind != 4;
                 mouse-cursor: MouseCursor.pointer;
                 pointer-event(event) => {
+                    if tile.kind == 0 && event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        root.menu-url = tile.url;
+                        root.menu-x = self.absolute-position.x + self.mouse-x - root.absolute-position.x;
+                        root.menu-y = self.absolute-position.y + self.mouse-y - root.absolute-position.y;
+                        gif-menu.show();
+                        return;
+                    }
                     if event.kind != PointerEventKind.up || event.button != PointerEventButton.left || !self.has-hover { return; }
                     if tile.kind == 0 { root.pick(tile.url, event.modifiers.shift); }
                     else if tile.kind == 1 { root.show-view(2); }
@@ -225,6 +237,24 @@ export component GifPicker inherits VerticalLayout {
         if root.note != "": Text {
             x: 24px; y: 40px; width: parent.width - 48px;
             text: root.note; color: Theme.muted; font-size: 15px; wrap: word-wrap; horizontal-alignment: center;
+        }
+    }
+    gif-menu := PopupWindow {
+        x: max(4px, min(root.width - self.width - 4px, root.menu-x));
+        y: root.menu-y + self.height <= root.height ? root.menu-y : max(0px, root.menu-y - self.height);
+        width: menu-content.content-width; height: menu-content.content-height;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        menu-content := ContextMenu {
+            rows: [
+                { id: "copy", text: "Copy GIF link", icon: @image-url("icons/copy.svg") },
+                { id: "open", text: "Open GIF link", icon: @image-url("icons/external-link.svg") },
+            ];
+            chose(id) => {
+                gif-menu.close();
+                if id == "copy" { root.copy-link(root.menu-url); }
+                else { root.open-link(root.menu-url); }
+            }
+            close => { gif-menu.close(); }
         }
     }
 }

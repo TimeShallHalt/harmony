@@ -70,6 +70,7 @@ export component ScheduledDialog inherits Rectangle {
                             Text { text: "TO " + Scheduling.destination; color: Theme.text; font-size: 13px; wrap: word-wrap; }
                             Composer {
                                 label: "Scheduled message content"; placeholder: "Message (up to 2,000 characters)"; text <=> Scheduling.body;
+                                counter-limit: 2000;
                                 background: Theme.sunken;
                                 edited(text) => { Scheduling.changed(); }
                                 accepted => { Scheduling.review(); }

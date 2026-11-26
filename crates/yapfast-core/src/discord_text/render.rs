@@ -418,9 +418,9 @@ pub(super) fn custom_emoji(message: &Message) -> Vec<CustomEmoji> {
     found
 }
 
-/// The custom emoji in Discord's markup.
+/// The custom emoji in Discord's markup and linked CDN artwork.
 fn emoji_in(content: &str) -> Vec<CustomEmoji> {
-    yapfast_discord::message::custom_emoji(content)
+    let mut found: Vec<_> = yapfast_discord::message::custom_emoji(content)
         .into_iter()
         .map(|emoji| CustomEmoji {
             text: format!(":{}:", emoji.name),
@@ -435,7 +435,20 @@ fn emoji_in(content: &str) -> Vec<CustomEmoji> {
             animated: emoji.animated,
             usable: true,
         })
-        .collect()
+        .collect();
+    for (_, id, animated) in crate::links::emoji_links(content) {
+        if found.iter().any(|emoji| emoji.id == id) {
+            continue;
+        }
+        found.push(CustomEmoji {
+            text: format!(":emoji_{id}:"),
+            picture: yapfast_discord::ready::custom_emoji(&id, animated, crate::chat::EMOJI_PICTURE_SIZE),
+            id,
+            animated,
+            usable: true,
+        });
+    }
+    found
 }
 
 /// Sends the open server channel's topic, as [`Event::Topic`], when it

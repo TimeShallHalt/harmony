@@ -1,0 +1,54 @@
+import { Theme } from "theme.slint";
+import { ActionButton, TextField } from "controls.slint";
+
+export global DmCategories {
+    in-out property <bool> open;
+    in property <bool> renaming;
+    in property <string> owner;
+    in property <string> target;
+    in-out property <string> name;
+    in property <string> error;
+    callback save;
+}
+
+export component DmCategoryDialog inherits Rectangle {
+    background: #00000099;
+    TouchArea { }
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(400px, parent.width - 32px);
+        height: content.preferred-height;
+        background: Theme.raised;
+        border-color: Theme.edge; border-width: 1px; border-radius: 12px;
+        accessible-role: groupbox;
+        accessible-label: DmCategories.renaming ? "Rename DM category" : "New DM category";
+        FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape { DmCategories.open = false; return accept; }
+                return reject;
+            }
+            content := VerticalLayout {
+                padding: 20px; spacing: 12px;
+                Text {
+                    text: DmCategories.renaming ? "Rename DM category" : "New DM category";
+                    color: Theme.text; font-weight: 700; font-size: 18px;
+                }
+                name := TextField {
+                    label: "Category name"; text: DmCategories.name;
+                    init => { self.focus-input(); }
+                    edited(value) => { DmCategories.name = value; }
+                    accepted => { DmCategories.save(); }
+                }
+                if DmCategories.error != "": Text {
+                    text: DmCategories.error; color: Theme.danger; wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end; spacing: 8px;
+                    ActionButton { text: "Cancel"; clicked => { DmCategories.open = false; } }
+                    ActionButton { text: "Save"; primary: true; clicked => { DmCategories.save(); } }
+                }
+            }
+        }
+    }
+}

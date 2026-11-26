@@ -592,6 +592,52 @@ const SAKURA: Theme = Theme {
     avatar: rgb(0xc08aa2),
 };
 
+pub(super) const SYSTEM24_ID: &str = "system24-v2";
+
+// system24-v2's monochrome palette and violet accents in native sRGB.
+const SYSTEM24: Theme = Theme {
+    dark: true,
+    rail: rgb(0x070709),
+    sidebar: rgb(0x070709),
+    panel: rgb(0x070709),
+    chat: rgb(0x070709),
+    stage: rgb(0x070709),
+    raised: rgb(0x1d1d1d),
+    field: rgb(0x1d1d1d),
+    sunken: rgb(0x070709),
+    hover: rgba(0x6f6f6f1a),
+    active: rgba(0x6f6f6f33),
+    row_hover: rgba(0x6f6f6f1a),
+    line: rgb(0x303030),
+    edge: rgb(0x1d1d1d),
+    outline: rgb(0x303030),
+    outline_chat: rgb(0x303030),
+    outline_field: rgb(0x303030),
+    text: rgb(0xaeaeae),
+    secondary: rgb(0xcecece),
+    muted: rgb(0x808080),
+    faint: rgb(0x5b5b5b),
+    accent: rgb(0xb589d6),
+    accent_hover: rgb(0xc598e7),
+    on_accent: rgb(0x070709),
+    accent_soft: rgba(0xb589d626),
+    danger: rgb(0xdf7a9b),
+    danger_hover: rgb(0xf089aa),
+    on_danger: rgb(0x070709),
+    live: rgb(0x3bb693),
+    loud: rgb(0xbb9b39),
+    link: rgb(0xc598e7),
+    button_default: rgb(0x262626),
+    button_default_hover: rgb(0x303030),
+    overlay: rgb(0xeeeeee),
+    shimmer: rgba(0xeeeeee10),
+    reply_spine: rgb(0x484848),
+    tooltip: rgb(0x1d1d1d),
+    avatar: rgb(0x484848),
+    mentioned: rgba(0xb589d61a),
+    mentioned_hover: rgba(0xb589d628),
+};
+
 /// A theme Yapfast comes with: the id a layout stores and the name Appearance
 /// shows.
 pub struct BuiltIn {
@@ -602,7 +648,7 @@ pub struct BuiltIn {
 
 /// The themes Yapfast comes with, as Appearance lists them: the dark ones, then
 /// the light ones. The palettes credited in docs/themes.md are MIT licensed.
-pub const BUILT_IN: [BuiltIn; 11] = [
+pub const BUILT_IN: [BuiltIn; 12] = [
     BuiltIn {
         id: "harmony",
         name: "Harmony",
@@ -642,6 +688,11 @@ pub const BUILT_IN: [BuiltIn; 11] = [
         id: "tokyo-night",
         name: "Tokyo Night",
         theme: TOKYO_NIGHT,
+    },
+    BuiltIn {
+        id: SYSTEM24_ID,
+        name: "system24-v2",
+        theme: SYSTEM24,
     },
     BuiltIn {
         id: "catppuccin-latte",

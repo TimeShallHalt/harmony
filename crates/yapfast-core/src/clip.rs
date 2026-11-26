@@ -8,6 +8,7 @@ use std::ffi::{c_int, c_longlong, c_uchar, c_uint, c_ulong, c_void};
 use livekit::webrtc::native::yuv_helper;
 
 use crate::chat::Picture;
+pub mod conversion;
 
 /// libvpx's constant quality level: 0 best, 63 smallest.
 const QUALITY: u32 = 36;
@@ -28,6 +29,7 @@ unsafe extern "C" {
         height: c_uint,
         quality: c_uint,
         threads: c_uint,
+        kbps: c_uint,
     ) -> *mut Raw;
     #[allow(clippy::too_many_arguments)]
     fn yapfast_clip_encode(
@@ -49,6 +51,15 @@ unsafe extern "C" {
 /// The encoder, freed when dropped.
 struct Clip(*mut Raw);
 
+impl Clip {
+    fn new(width: u32, height: u32, kbps: u32) -> Option<Self> {
+        let threads = if kbps == 0 { 1 } else { 4 };
+        // SAFETY: plain values; null means libvpx refused them.
+        let raw = unsafe { yapfast_clip_new(width, height, QUALITY, threads, kbps) };
+        (!raw.is_null()).then(|| Self(raw))
+    }
+}
+
 impl Drop for Clip {
     fn drop(&mut self) {
         // SAFETY: the pointer came from yapfast_clip_new and is freed once.
@@ -59,6 +70,7 @@ impl Drop for Clip {
 /// An encoded frame, shown from `time`, in milliseconds.
 struct Encoded {
     time: u64,
+    track: u8,
     keyframe: bool,
     data: Vec<u8>,
 }
@@ -80,6 +92,7 @@ extern "C" fn take(
     };
     frames.push(Encoded {
         time: u64::try_from(pts).unwrap_or(0),
+        track: 1,
         keyframe: key != 0,
         data: data.to_vec(),
     });
@@ -90,25 +103,70 @@ extern "C" fn take(
 pub fn thumbnail(picture: &Picture) -> Option<Vec<u8>> {
     let animation = picture.animation.as_ref()?;
     let (width, height) = (picture.width, picture.height);
-    // SAFETY: plain values; null means libvpx refused them.
-    let raw = unsafe { yapfast_clip_new(width, height, QUALITY, 1) };
-    if raw.is_null() {
-        return None;
+    let clip = Clip::new(width, height, 0)?;
+    let mut convert = Pixels::new(width, height);
+    let mut frames = Vec::with_capacity(animation.delays.len());
+    let (mut time, mut count) = (0, 0);
+    for (mut rgba, &delay) in picture.frames().zip(&animation.delays) {
+        flatten(&mut rgba);
+        convert.encode(&clip, Some(&rgba), time, delay, &mut frames)?;
+        time += u64::from(delay);
+        count += 1;
     }
-    let clip = Clip(raw);
-    let chroma_width = width.div_ceil(2);
-    let pixels = (width * height) as usize;
-    let chroma = (chroma_width * height.div_ceil(2)) as usize;
-    let mut planes = vec![0; pixels + 2 * chroma];
-    let mut frames: Vec<Encoded> = Vec::with_capacity(animation.delays.len());
-    let encode = |planes: Option<&[u8]>, time: u64, delay: u32, frames: &mut Vec<Encoded>| {
-        let (y, u, v) = match planes {
-            Some(planes) => {
-                let (y, chroma_planes) = planes.split_at(pixels);
-                let (u, v) = chroma_planes.split_at(chroma);
-                (y.as_ptr(), u.as_ptr(), v.as_ptr())
-            }
-            None => (std::ptr::null(), std::ptr::null(), std::ptr::null()),
+    convert.encode(&clip, None, 0, 0, &mut frames)?;
+    // Every frame came out, and they make an animation.
+    (frames.len() == count && count > 1).then_some(())?;
+    Some(webm(width, height, &frames, time, None))
+}
+
+struct Pixels {
+    width: u32,
+    height: u32,
+    planes: Vec<u8>,
+}
+
+impl Pixels {
+    fn new(width: u32, height: u32) -> Self {
+        let pixels = width as usize * height as usize;
+        let chroma = width.div_ceil(2) as usize * height.div_ceil(2) as usize;
+        Self {
+            width,
+            height,
+            planes: vec![0; pixels + 2 * chroma],
+        }
+    }
+
+    fn encode(
+        &mut self,
+        clip: &Clip,
+        rgba: Option<&[u8]>,
+        time: u64,
+        delay: u32,
+        frames: &mut Vec<Encoded>,
+    ) -> Option<()> {
+        let (width, height) = (self.width, self.height);
+        let chroma_width = width.div_ceil(2);
+        let pixels = (width * height) as usize;
+        let chroma = (chroma_width * height.div_ceil(2)) as usize;
+        let (y, u, v) = if let Some(rgba) = rgba {
+            let (y, chroma_planes) = self.planes.split_at_mut(pixels);
+            let (u, v) = chroma_planes.split_at_mut(chroma);
+            // libyuv's ABGR is R, G, B, A in memory.
+            yuv_helper::abgr_to_i420(
+                rgba,
+                width * 4,
+                y,
+                width,
+                u,
+                chroma_width,
+                v,
+                chroma_width,
+                width as i32,
+                height as i32,
+            );
+            (y.as_ptr(), u.as_ptr(), v.as_ptr())
+        } else {
+            (std::ptr::null(), std::ptr::null(), std::ptr::null())
         };
         // SAFETY: the planes are the encoder's size, or null to finish;
         // `frames` outlives the call, which is all `take` borrows it for.
@@ -128,33 +186,7 @@ pub fn thumbnail(picture: &Picture) -> Option<Vec<u8>> {
             )
         };
         (encoded >= 0).then_some(())
-    };
-    let (mut time, mut count) = (0, 0);
-    for (mut rgba, &delay) in picture.frames().zip(&animation.delays) {
-        flatten(&mut rgba);
-        let (y, chroma_planes) = planes.split_at_mut(pixels);
-        let (u, v) = chroma_planes.split_at_mut(chroma);
-        // libyuv's ABGR is R, G, B, A in memory.
-        yuv_helper::abgr_to_i420(
-            &rgba,
-            width * 4,
-            y,
-            width,
-            u,
-            chroma_width,
-            v,
-            chroma_width,
-            width as i32,
-            height as i32,
-        );
-        encode(Some(&planes), time, delay, &mut frames)?;
-        time += u64::from(delay);
-        count += 1;
     }
-    encode(None, 0, 0, &mut frames)?;
-    // Every frame came out, and they make an animation.
-    (frames.len() == count && count > 1).then_some(())?;
-    Some(webm(width, height, &frames, time))
 }
 
 /// Puts transparent pixels over [`BACKGROUND`].
@@ -207,7 +239,13 @@ const CLUSTER_MS: u64 = 30_000;
 /// A WebM file of VP9 `frames`, each shown from its time until the next's
 /// and the last until `duration`, in milliseconds. Each element's size is
 /// worked out before it's written, so the frames are copied once.
-fn webm(width: u32, height: u32, frames: &[Encoded], duration: u64) -> Vec<u8> {
+fn webm(
+    width: u32,
+    height: u32,
+    frames: &[Encoded],
+    duration: u64,
+    opus_skip: Option<u16>,
+) -> Vec<u8> {
     let mut header = Vec::new();
     uint(&mut header, EBML_VERSION, 1);
     uint(&mut header, EBML_READ_VERSION, 1);
@@ -234,6 +272,32 @@ fn webm(width: u32, height: u32, frames: &[Encoded], duration: u64) -> Vec<u8> {
     bytes(&mut track, VIDEO, &video);
     let mut tracks = Vec::new();
     bytes(&mut tracks, TRACK_ENTRY, &track);
+    if let Some(skip) = opus_skip {
+        const CODEC_PRIVATE: u32 = 0x63A2;
+        const CODEC_DELAY: u32 = 0x56AA;
+        const SEEK_PREROLL: u32 = 0x56BB;
+        const AUDIO: u32 = 0xE1;
+        const SAMPLE_FREQUENCY: u32 = 0xB5;
+        const CHANNELS: u32 = 0x9F;
+        let mut sound = Vec::new();
+        bytes(&mut sound, SAMPLE_FREQUENCY, &48_000f64.to_be_bytes());
+        uint(&mut sound, CHANNELS, 2);
+        let mut track = Vec::new();
+        uint(&mut track, TRACK_NUMBER, 2);
+        uint(&mut track, TRACK_UID, 2);
+        uint(&mut track, TRACK_TYPE, 2);
+        uint(&mut track, FLAG_LACING, 0);
+        bytes(&mut track, CODEC_ID, b"A_OPUS");
+        bytes(&mut track, CODEC_PRIVATE, &conversion::opus_head(skip));
+        uint(
+            &mut track,
+            CODEC_DELAY,
+            u64::from(skip) * 1_000_000_000 / 48_000,
+        );
+        uint(&mut track, SEEK_PREROLL, 80_000_000);
+        bytes(&mut track, AUDIO, &sound);
+        bytes(&mut tracks, TRACK_ENTRY, &track);
+    }
 
     let mut clusters: Vec<&[Encoded]> = Vec::new();
     let mut rest = frames;
@@ -273,8 +337,7 @@ fn webm(width: u32, height: u32, frames: &[Encoded], duration: u64) -> Vec<u8> {
         uint(&mut out, TIMESTAMP, start);
         for frame in cluster {
             head(&mut out, SIMPLE_BLOCK, block(frame));
-            // Track 1, as a size-coded number.
-            out.push(0x81);
+            out.push(0x80 | frame.track);
             out.extend(((frame.time - start) as i16).to_be_bytes());
             out.push(if frame.keyframe { 0x80 } else { 0 });
             out.extend_from_slice(&frame.data);

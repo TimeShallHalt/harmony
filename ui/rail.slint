@@ -2,6 +2,7 @@ import { ServerActivityIndicators } from "server-activity.slint";
 import { DmHeading } from "yapfast/dm-heading.slint";
 import { NewTag } from "yapfast/new-tags.slint";
 import { ClientStyle } from "yapfast/style.slint";
+import { TerminalPanelOutline } from "controls.slint";
 import { ListView } from "scrollview.slint";
 import { Theme, Tip, Middle, Label } from "theme.slint";
 import { Avatar, Nameplate, PictureStore, StatusText, StyledName, NameStyleRow, VoiceSpot, ServerTagChip, ActivityClock } from "controls.slint";
@@ -33,6 +34,7 @@ export struct ServerRow {
     /// An unread DM above the servers, as in Discord: `id` is its room's,
     /// `picture-url` its avatar or group icon, and `badge` its unread messages.
     dm: bool,
+    pinned-dm: bool,
     /// The line between those DMs and the servers.
     divider: bool,
 }
@@ -1055,9 +1057,11 @@ export component ServerRail inherits Rectangle {
                     y: 0px;
                     initial: server.initial; picture-url: server.picture-url;
                     label: server.name + (server.discord && root.matrix-build ? ", Discord" : "")
-                        + (server.badge != "" ? ", " + server.badge + " unread" : ", unread");
-                    tip: server.discord && root.matrix-build ? server.name + " (Discord)" : server.name;
-                    unread: true; badge: server.badge; discord: server.discord;
+                        + (server.pinned-dm ? ", pinned" : "")
+                        + (server.badge != "" ? ", " + server.badge + " unread" : server.unread ? ", unread" : "");
+                    tip: server.name + (server.discord && root.matrix-build ? " (Discord)" : "")
+                        + (server.pinned-dm ? " · Pinned" : "");
+                    selected: server.selected; unread: server.unread; badge: server.badge; discord: server.discord;
                     clicked => { root.open-dm(server.id); }
                     context-menu(x, y) => { root.open-server-menu(server.id, x, y); }
                 }
@@ -1084,6 +1088,7 @@ export component ServerRail inherits Rectangle {
             clicked => { root.join-server(); }
         }
     }
+    if ClientStyle.system24: TerminalPanelOutline { title: "servers"; }
 }
 
 // The sidebar's conversations: on the DM home, the friends list and requests
@@ -1342,14 +1347,14 @@ export component RoomList inherits Rectangle {
                     Rectangle { height: 1px; background: Theme.line; }
                 }
                 // Their heading neither folds nor has a menu.
-                if room.heading != "" && room.pinned && !room.direct: HorizontalLayout {
+                if room.heading != "" && room.pinned: HorizontalLayout {
                     height: 36px; padding-left: 16px;
                     Text {
                         text: room.heading; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px;
                         vertical-alignment: center; overflow: elide; accessible-role: text;
                     }
                 }
-                if room.heading != "" && !(room.pinned && !room.direct): CategoryHeading {
+                if room.heading != "" && !room.pinned: CategoryHeading {
                     text: room.heading; collapsed: room.collapsed;
                     can-create: root.may-create(room.id);
                     create => { root.create-channel(room.id); }

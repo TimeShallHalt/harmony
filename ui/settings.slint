@@ -8,6 +8,7 @@ import { ActionButton, IconButton, Avatar, SensitivitySlider, VolumeSlider, Text
 import { DiscordLinkPanel } from "discord.slint";
 import { ChannelRow } from "rail.slint";
 import { Soundboard, SoundRow } from "voice.slint";
+import { ExactVolume } from "personal-controls.slint";
 
 import { NewTag, NewTags } from "yapfast/new-tags.slint";
 
@@ -593,6 +594,15 @@ export component KeybindSettings inherits VerticalLayout {
     }
 }
 
+export global CameraBackground {
+    in property <bool> available;
+    in property <bool> busy;
+    in property <bool> active;
+    in property <string> status;
+    callback choose;
+    callback clear;
+}
+
 // Settings: the audio devices and camera, and how calls start and sound.
 export component VoiceSettings inherits VerticalLayout {
     in property <[string]> microphones;
@@ -641,9 +651,7 @@ export component VoiceSettings inherits VerticalLayout {
     in property <string> talk-note;
     /// Discord is linked, so its calls' noise suppression shows.
     in property <bool> discord;
-    /// How loud every call sends the microphone and plays, as sliders'
-    /// percentages from 0% to 200%. Dragging plays each step through
-    /// call-volumes-changed, and letting go saves the last.
+    /// Local microphone and playback percentages.
     in-out property <int> microphone-volume: 100;
     in-out property <int> speaker-volume: 100;
     /// How loud the Discord soundboard plays, on its slider from 0% to
@@ -665,6 +673,7 @@ export component VoiceSettings inherits VerticalLayout {
     /// Sets the chosen server's entrance sound, or takes it away with "".
     callback choose-entrance-sound(string);
     callback call-volumes-changed;
+    callback parse-volume(string) -> int;
     callback select-microphone(int);
     callback select-speaker(int);
     callback select-camera(int);
@@ -683,8 +692,9 @@ export component VoiceSettings inherits VerticalLayout {
             spacing: 8px; horizontal-stretch: 1; min-width: 0; preferred-width: 0;
             SettingsHeading { text: "MICROPHONE"; }
             ComboBox { model: root.microphones; current-index <=> root.microphone-index; enabled: root.microphones.length > 0; accessible-label: "Microphone device"; selected => { root.select-microphone(self.current-index); } }
-            VolumeSlider {
+            ExactVolume {
                 label: "Microphone volume"; value <=> root.microphone-volume;
+                parse(text) => { return root.parse-volume(text); }
                 changed => { root.call-volumes-changed(); }
                 committed => { root.preferences-changed(); }
             }
@@ -693,8 +703,9 @@ export component VoiceSettings inherits VerticalLayout {
             spacing: 8px; horizontal-stretch: 1; min-width: 0; preferred-width: 0;
             SettingsHeading { text: "SPEAKERS"; }
             ComboBox { model: root.speakers; current-index <=> root.speaker-index; enabled: root.speakers.length > 0; accessible-label: "Speaker device"; selected => { root.select-speaker(self.current-index); } }
-            VolumeSlider {
+            ExactVolume {
                 label: "Speaker volume"; value <=> root.speaker-volume;
+                parse(text) => { return root.parse-volume(text); }
                 changed => { root.call-volumes-changed(); }
                 committed => { root.preferences-changed(); }
             }
@@ -734,6 +745,24 @@ export component VoiceSettings inherits VerticalLayout {
                 Rectangle { horizontal-stretch: 1; }
             }
         }
+    }
+    if CameraBackground.available: VerticalLayout {
+        spacing: 6px;
+        SettingsHeading { text: "CAMERA BACKGROUND"; }
+        Label { text: "Replace the background in your camera preview and calls with a picture."; }
+        HorizontalLayout {
+            spacing: 8px; alignment: start;
+            ActionButton {
+                text: CameraBackground.active ? "Change background…" : "Choose background…";
+                small: true; enabled: !CameraBackground.busy;
+                clicked => { CameraBackground.choose(); }
+            }
+            if CameraBackground.active: ActionButton {
+                text: "Remove background"; small: true; enabled: !CameraBackground.busy;
+                clicked => { CameraBackground.clear(); }
+            }
+        }
+        if CameraBackground.status != "": Label { text: CameraBackground.status; }
     }
     HorizontalLayout {
         ActionButton { text: "Refresh devices"; icon: @image-url("icons/refresh-cw.svg"); ghost: true; small: true; clicked => { root.refresh-devices(); } }
@@ -1162,6 +1191,12 @@ export component AppearanceSettings inherits VerticalLayout {
             checked <=> Looks.profile-frames;
             toggled => { root.preferences-changed(); }
         }
+        SettingsSwitch {
+            text: "Use profile accent gradients";
+            description: "Use an avatar or accent colour for profiles without a theme. Only you see it.";
+            checked <=> Looks.accent-profiles;
+            toggled => { root.preferences-changed(); }
+        }
     }
     if root.editor: form := VerticalLayout {
         property <bool> confirming;
@@ -1328,8 +1363,7 @@ export component MessageSettings inherits VerticalLayout {
     }
     SettingsSwitch {
         text: "Let others see when you're typing";
-        description: (root.matrix && root.discord ? "Discord and Matrix show" : root.matrix ? "Matrix shows" : "Discord shows")
-            + " \"typing...\" while you write. Others still show here when they type.";
+        description: "Sets the default for conversations. Use the typing privacy button beside the message field to change it for one conversation.";
         checked <=> root.share-typing;
         toggled => { root.preferences-changed(); }
     }
@@ -1393,6 +1427,7 @@ export component SoundSettings inherits VerticalLayout {
     in-out property <bool> adjust-each;
     in property <[int]> each;
     callback preferences-changed;
+    callback parse-volume(string) -> int;
     callback each-changed(int, int);
     /// Plays a sound by its index in `names`, as it's set.
     callback play(int);
@@ -1410,9 +1445,10 @@ export component SoundSettings inherits VerticalLayout {
             chosen => { root.preferences-changed(); root.play(0); }
         }
     }
-    VolumeSlider {
-        label: "Volume"; maximum: 200;
+    ExactVolume {
+        label: "Volume";
         value <=> root.volume;
+        parse(text) => { return root.parse-volume(text); }
         committed => { root.preferences-changed(); root.play(6); }
     }
     SettingsSwitch {

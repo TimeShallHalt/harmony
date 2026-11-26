@@ -55,16 +55,16 @@ fn native_exact_entries_commit_independently_on_enter_and_reject_invalid_input()
         "partially typed text never changes a gain"
     );
     enter();
-    w.set_stream_entry("176".into());
+    w.set_stream_entry("1250".into());
     w.invoke_focus_stream();
     enter();
-    assert_eq!((w.get_voice(), w.get_stream()), (137, 176));
-    assert_eq!(&*commits.borrow(), &[(false, 137), (true, 176)]);
+    assert_eq!((w.get_voice(), w.get_stream()), (137, 1250));
+    assert_eq!(&*commits.borrow(), &[(false, 137), (true, 1250)]);
     for boundary in [0, 200] {
         w.set_voice_entry(boundary.to_string().into());
         w.invoke_focus_voice();
         enter();
         assert_eq!(w.get_voice(), boundary);
-        assert_eq!(w.get_stream(), 176);
+        assert_eq!(w.get_stream(), 1250);
     }
 }

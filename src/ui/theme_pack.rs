@@ -58,6 +58,7 @@ pub const BASES: &[&str] = &[
     "nord",
     "gruvbox-dark",
     "tokyo-night",
+    "system24-v2",
     "catppuccin-latte",
     "rose-pine-dawn",
     "sakura",

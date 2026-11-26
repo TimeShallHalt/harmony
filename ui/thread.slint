@@ -3,7 +3,7 @@ import { Theme, Middle } from "theme.slint";
 import { IconButton, PingToggle, ActionButton, MessagesSkeleton, TextField } from "controls.slint";
 import { FoundRow, FoundCard } from "header.slint";
 import { SettingsSwitch } from "settings.slint";
-import { Composer, StagedFile, StagedTile, MentionRow, MentionList, EmojiSuggestions } from "composer.slint";
+import { Composer, StagedFile, StagedTile, MentionRow, MentionList, EmojiSuggestions, TypingPrivacy } from "composer.slint";
 import { EmojiCell, EmojiButton, MessageRow, MessageContent, HistoryEdge } from "messages.slint";
 
 /// A Discord thread beside the open channel, in place of its member list, as
@@ -22,6 +22,8 @@ export component ThreadPanel inherits Rectangle {
     in property <string> bot-failed-item;
     in property <string> bot-failed-text;
     in property <bool> composer-enabled;
+    in property <bool> shares-typing;
+    callback toggle-typing;
     in property <bool> reactions-enabled;
     in property <bool> new-reactions-enabled;
     in property <bool> can-send;
@@ -403,6 +405,13 @@ export component ThreadPanel inherits Rectangle {
                             suggestion-dismissed => { root.suggestion-dismissed(); }
                             escaped => { return root.escape-composing(); }
                             got-focus => { root.composer-focused(); }
+                        }
+                        if root.composer-enabled: VerticalLayout {
+                            alignment: end; padding-bottom: 8px;
+                            TypingPrivacy {
+                                sharing: root.shares-typing;
+                                clicked => { root.toggle-typing(); composer.focus-input(); }
+                            }
                         }
                         VerticalLayout {
                             alignment: end; padding-bottom: 8px;

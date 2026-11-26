@@ -54,8 +54,8 @@ export component PlatformIndicators inherits Text {
     accessible-role: text; accessible-label: root.label;
 }
 
-// Numeric entry deliberately shares the slider's safe gain scale, not an
-// unbounded gain. Only Enter/Set commits, so partially typed text never plays.
+// The slider handles everyday adjustments. Enter or Set applies exact gains,
+// including values beyond the slider's range.
 export component ExactVolume inherits VerticalLayout {
     in property <string> target;
     in property <string> label;
@@ -69,8 +69,8 @@ export component ExactVolume inherits VerticalLayout {
     public function focus-entry() { field.focus-input(); }
     public function submit() {
         let parsed = root.parse(root.entry);
-        if parsed < 0 || parsed > 200 {
-            root.error = "Enter a whole percentage from 0 to 200.";
+        if parsed < 0 {
+            root.error = "Enter a valid nonnegative whole percentage.";
         } else {
             root.error = "";
             root.value = parsed;
@@ -88,8 +88,8 @@ export component ExactVolume inherits VerticalLayout {
     HorizontalLayout {
         spacing: 6px;
         field := TextField {
-            text <=> root.entry; label: root.label + " exact percentage, 0 to 200";
-            placeholder: "0–200"; text-size: 13px; min-height: 32px;
+            text <=> root.entry; label: root.label + " exact percentage";
+            placeholder: "Percentage"; text-size: 13px; min-height: 32px;
             accepted => { root.submit(); }
         }
         Text { text: "%"; color: Theme.secondary; vertical-alignment: center; }

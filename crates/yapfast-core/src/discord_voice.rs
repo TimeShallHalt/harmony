@@ -270,8 +270,9 @@ impl Watch {
     fn open(&mut self, server: &StreamServer, state: &mut State) -> Result<()> {
         self.opening = None;
         let volume = crate::volume::heard(crate::volume::Kind::Stream, &self.user);
-        let (worker, frames, reports) =
+        let (mut worker, frames, reports) =
             Worker::watch(server, state.speaker.clone(), state.deafened, volume)?;
+        worker.sharpness(stream_worker::stream_sharpness(&self.user))?;
         self.worker = Some((worker, reports));
         if let Some(shown) = state.watching.as_mut() {
             shown.frames = Some(Arc::new(frames));
@@ -486,6 +487,7 @@ pub(crate) async fn call(
         let mut ticks = tokio::time::interval(Duration::from_millis(150));
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut volumes = crate::volume::changes();
+        let mut sharpness = stream_worker::sharpness_changes();
         // The voice connection dropped, and the call ends when `lost` comes
         // unless Discord says it moved the call meanwhile.
         let mut dropped = false;
@@ -876,6 +878,14 @@ pub(crate) async fn call(
                     }
                 }
                 Ok(()) = volumes.changed() => Watch::volume(&mut watch),
+                Ok(()) = sharpness.changed() => {
+                    if let Some(watching) = watch.as_mut()
+                        && let Some((worker, _)) = watching.worker.as_mut()
+                        && let Err(error) = worker.sharpness(stream_worker::stream_sharpness(&watching.user))
+                    {
+                        tracing::warn!(%error, "could not set stream sharpness");
+                    }
+                }
                 event = watch_event(&mut watch) => {
                     let mut stop = None;
                     match event {

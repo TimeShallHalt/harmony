@@ -388,11 +388,11 @@ pub fn render(set: SoundSet, sound: Sound) -> Vec<f32> {
     stereo
 }
 
-/// A volume slider's percentage, up to 200%, as a gain. Loudness is heard on a
+/// A volume control's percentage as a gain. Loudness is heard on a
 /// log scale, so the square spreads quiet settings along more of the slider.
 /// At 200% the loudest sounds reach full scale.
-pub fn gain(percent: u8) -> f32 {
-    (f32::from(percent.min(200)) / 100.0).powi(2)
+pub fn gain(percent: i32) -> f32 {
+    (percent.max(0) as f32 / 100.0).powi(2)
 }
 
 /// Plays `sound` once on `speaker`, a device id as in [`crate::voice::State`],

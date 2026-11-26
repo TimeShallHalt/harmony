@@ -84,6 +84,11 @@ pub use open_channel::{Load, OpenChannel};
 
 /// Discord's message length limit without Nitro, in characters.
 pub const MAX_CHARS: usize = 2000;
+
+/// The message limit follows the account's current Discord subscription.
+pub fn message_limit(premium_type: u8) -> usize {
+    if premium_type == 2 { 4000 } else { MAX_CHARS }
+}
 /// How long someone shows as typing after Discord says they started.
 const TYPING: Duration = Duration::from_secs(10);
 /// How often Discord hears that this account is still typing.

@@ -46,7 +46,12 @@ mod browser;
 mod call_link;
 mod call_timer;
 mod callbacks;
+#[cfg(feature = "discord")]
+mod camera_background;
 mod channel_settings;
+#[cfg(feature = "discord")]
+mod clip_conversion;
+mod dm_groups;
 mod emoji_animation;
 mod emoji_grid;
 mod games;
@@ -1296,6 +1301,7 @@ struct Layout {
     flash_taskbar: Option<bool>,
     /// DMs pinned to the top of the DM list, by room ID, the first pinned first.
     pinned: Vec<String>,
+    dm_groups: std::collections::BTreeMap<String, Vec<dm_groups::Group>>,
     /// Message times as 9:41 PM rather than 21:41.
     twelve_hour_clock: bool,
     /// Message times with their seconds, as 21:41:05.
@@ -1327,6 +1333,7 @@ struct Layout {
     name_styles: Option<bool>,
     server_tags: Option<bool>,
     profile_frames: Option<bool>,
+    accent_profiles: bool,
     /// Joining a call turns the microphone on; on unless turned off.
     unmute_on_join: Option<bool>,
     /// Joining a call deafens.
@@ -1352,22 +1359,25 @@ struct Layout {
     push_to_talk_release_delay: Option<u32>,
     /// The Keybinds page's keybinds, in its order.
     keybinds: Vec<crate::keybinds::Binding>,
-    /// How loud every call sends the microphone and plays, as sliders'
-    /// percentages from 0% to 200%; 100% unless changed.
-    microphone_volume: Option<u8>,
-    speaker_volume: Option<u8>,
+    /// Local microphone and playback percentages, 100% unless changed.
+    microphone_volume: Option<i32>,
+    speaker_volume: Option<i32>,
     /// How loud people sound in calls, and their streams, by Discord or
     /// Matrix user id; see [`yapfast_core::volume`]. Unlisted people are as they
     /// come.
     volumes: std::collections::BTreeMap<String, f32>,
     stream_volumes: std::collections::BTreeMap<String, f32>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    stream_sharpness: std::collections::BTreeMap<String, u8>,
     /// Those muted for this account alone, from their menu in a call.
     muted_people: std::collections::BTreeSet<String>,
     /// Those whose soundboard sounds this account doesn't hear, from the
     /// same menu.
     soundboard_muted_people: std::collections::BTreeSet<String>,
-    /// Others see when this account is typing; on unless turned off.
+    /// Whether to share typing when a conversation has no local override.
     share_typing: Option<bool>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    typing_overrides: std::collections::BTreeMap<String, bool>,
     /// Device-local contact annotations scoped by provider-qualified account.
     local_timezones: yapfast_core::local_timezones::Preferences,
     /// Desktop notifications, and whether they say what messages say; on unless
@@ -1378,10 +1388,9 @@ struct Layout {
     /// read once, to keep messages quiet for someone who turned it off.
     #[serde(skip_serializing)]
     notification_sound: Option<bool>,
-    /// The instrument Yapfast's sounds play on, and how loud they are as a slider's
-    /// percentage from 0% to 200%; [`DEFAULT_SOUND_VOLUME`] unless changed.
+    /// The instrument for local sounds and its volume percentage.
     sound_set: SoundSet,
-    sound_volume: Option<u8>,
+    sound_volume: Option<i32>,
     /// Each sound has its own volume too, against that one; [`Self::each_sound`]
     /// holds them.
     adjust_each_sound: bool,
@@ -1423,7 +1432,7 @@ struct Layout {
 }
 
 /// Yapfast's sounds start as they're made: 12 dB under full scale at the loudest.
-const DEFAULT_SOUND_VOLUME: u8 = 100;
+const DEFAULT_SOUND_VOLUME: i32 = 100;
 
 /// The noise suppression settings' choices, in the order they show.
 const SUPPRESSORS: [yapfast_core::noise::Suppressor; 3] = [
@@ -1508,7 +1517,7 @@ fn choice<T: PartialEq>(choices: &[T], value: T) -> i32 {
 
 /// Calls send the microphone and play at the volume sliders' values.
 fn play_call_volumes(window: &YapfastWindow) {
-    let gain = |value: i32| yapfast_core::volume::from_slider(value.clamp(0, 200) as f32);
+    let gain = |value: i32| yapfast_core::volume::from_slider(value as f32);
     yapfast_core::volume::set_microphone(gain(window.get_microphone_volume()));
     yapfast_core::volume::set_speakers(gain(window.get_speaker_volume()));
 }
@@ -1522,6 +1531,13 @@ fn chosen<T: Copy>(choices: &[T], index: i32) -> T {
 }
 
 impl Layout {
+    fn share_typing_in(&self, room: &str) -> bool {
+        self.typing_overrides
+            .get(room)
+            .copied()
+            .unwrap_or(self.share_typing.unwrap_or(true))
+    }
+
     /// Hands the date format and the 12-hour clock to what formats times.
     fn apply_date_format(&self) {
         clock::set_date_format(self.date_format.and_then(|index| {
@@ -1618,6 +1634,7 @@ impl Layout {
         looks.set_name_styles(cosmetics.name_styles);
         looks.set_server_tags(cosmetics.server_tags);
         looks.set_profile_frames(cosmetics.frames);
+        looks.set_accent_profiles(self.accent_profiles);
         pictures::set_moving_collectibles(cosmetics.moving);
     }
 
@@ -1630,6 +1647,7 @@ impl Layout {
         self.name_styles = Some(looks.get_name_styles());
         self.server_tags = Some(looks.get_server_tags());
         self.profile_frames = Some(looks.get_profile_frames());
+        self.accent_profiles = looks.get_accent_profiles();
         pictures::set_moving_collectibles(self.cosmetics().moving);
     }
 
@@ -1659,7 +1677,7 @@ impl Layout {
     /// How loud a sound plays, as a gain.
     fn sound_gain(&self, sound: Sound) -> f32 {
         sounds::gain(self.sound_volume.unwrap_or(DEFAULT_SOUND_VOLUME))
-            * sounds::gain(self.each_sound(sound))
+            * sounds::gain(i32::from(self.each_sound(sound)))
     }
 
     fn selected_theme(&self, window: &YapfastWindow) -> (String, theme::Theme) {
@@ -1679,6 +1697,10 @@ impl Layout {
     fn apply_appearance(&self, window: &YapfastWindow) {
         theme::apply_pack_style(window, self.theme_pack.as_ref());
         let (id, chosen) = self.selected_theme(window);
+        let base = self.theme_pack.as_ref().map(|saved| saved.pack.base.as_str())
+            .or_else(|| self.custom_themes.iter().find(|custom| custom.id == id).map(|custom| custom.base))
+            .unwrap_or(&id);
+        window.global::<ClientStyle>().set_system24(base == theme::SYSTEM24_ID);
         chosen.apply(window);
         window.set_theme_id(id.into());
         window.set_themes(theme::cards(&self.custom_themes));
@@ -1765,14 +1787,18 @@ impl Layout {
         );
         window.set_talk_delay(self.release_delay() as i32);
         yapfast_core::push_to_talk::set_release_delay(self.release_delay());
-        window.set_microphone_volume(self.microphone_volume.unwrap_or(100).into());
-        window.set_speaker_volume(self.speaker_volume.unwrap_or(100).into());
+        window.set_microphone_volume(self.microphone_volume.unwrap_or(100).max(0));
+        window.set_speaker_volume(self.speaker_volume.unwrap_or(100).max(0));
         play_call_volumes(window);
         for (person, volume) in &self.volumes {
             yapfast_core::volume::set(yapfast_core::volume::Kind::Voice, person, *volume);
         }
         for (person, volume) in &self.stream_volumes {
             yapfast_core::volume::set(yapfast_core::volume::Kind::Stream, person, *volume);
+        }
+        #[cfg(feature = "discord")]
+        for (person, amount) in &self.stream_sharpness {
+            yapfast_core::stream_worker::set_stream_sharpness(person, *amount);
         }
         for person in &self.muted_people {
             yapfast_core::volume::mute(person, true);
@@ -1784,7 +1810,7 @@ impl Layout {
         window.set_notifications(self.notifications.unwrap_or(true));
         window.set_notification_text(self.notification_text.unwrap_or(true));
         window.set_sound_set(choice(&SoundSet::ALL, self.sound_set));
-        window.set_sound_volume(self.sound_volume.unwrap_or(DEFAULT_SOUND_VOLUME).into());
+        window.set_sound_volume(self.sound_volume.unwrap_or(DEFAULT_SOUND_VOLUME).max(0));
         window.set_adjust_each_sound(self.adjust_each_sound);
         window.set_gpu_rendering(self.gpu_rendering);
         window.set_gpu_encoding(self.gpu_encoding.unwrap_or(true));
@@ -3084,8 +3110,8 @@ impl Adapter {
                     }
                 }
                 Effect::Sound(sound) => self.sound(sound),
-                Effect::Backend(Command::Typing { .. })
-                    if !self.layout.share_typing.unwrap_or(true) => {}
+                Effect::Backend(Command::Typing { ref room, .. })
+                    if !self.layout.share_typing_in(room) => {}
                 Effect::Backend(command) => {
                     #[cfg(test)]
                     {

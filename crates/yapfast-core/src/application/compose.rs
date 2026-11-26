@@ -3,6 +3,14 @@
 use super::*;
 
 impl Application {
+    /// Character budget for a Discord message from the linked account.
+    #[cfg(feature = "discord")]
+    pub fn discord_message_limit(&self) -> usize {
+        let premium = self.discord.as_ref().and_then(|snapshot| snapshot.account.as_ref())
+            .map_or(0, |account| account.premium_type);
+        crate::discord_text::message_limit(premium)
+    }
+
     pub(super) fn edit_last(&mut self) -> Vec<Effect> {
         // Up in an empty option of a command being written, or in the `/`
         // picker, is the command's.

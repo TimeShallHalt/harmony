@@ -1259,11 +1259,15 @@ export component ProfileCard inherits Rectangle {
     // the first colour to the second under a wash, white on a light theme and
     // black on a dark one, flat down to the banner's end, inside a 2px border
     // that is the same two colours at full strength.
-    property <bool> themed: root.data.has-theme;
-    property <bool> light: root.themed && ProfileTheme.light(root.data.theme-primary);
+    property <bool> accent-gradient: Looks.accent-profiles && root.data.id != "" && !root.data.has-theme;
+    property <bool> themed: root.data.has-theme || root.accent-gradient;
+    property <color> primary: root.accent-gradient
+        ? Theme.panel.mix(root.data.has-accent ? root.data.accent : root.data.tint, 0.55) : root.data.theme-primary;
+    property <color> secondary: root.accent-gradient ? Theme.panel : root.data.theme-secondary;
+    property <bool> light: root.themed && ProfileTheme.light(root.primary);
     property <color> plain-ground: root.docked && ClientStyle.enabled ? Theme.panel : Theme.sidebar;
-    property <color> theme-start: ProfileTheme.wash(root.data.theme-primary, root.light);
-    property <color> theme-end: ProfileTheme.wash(root.data.theme-secondary, root.light);
+    property <color> theme-start: ProfileTheme.wash(root.primary, root.light);
+    property <color> theme-end: ProfileTheme.wash(root.secondary, root.light);
     /// The text, which a theme sets whatever Yapfast's own theme is.
     property <color> ink: root.themed ? ProfileTheme.ink(root.light) : Theme.text;
     property <color> ink2: root.themed ? ProfileTheme.ink2(root.light) : Theme.secondary;
@@ -1280,7 +1284,7 @@ export component ProfileCard inherits Rectangle {
     property <color> bubble: !root.themed ? Theme.raised : root.light ? #ffffff : #232427;
     property <color> bubble-edge: !root.themed ? Theme.edge : root.light ? #00000026 : #404044;
     height: min(body.preferred-height, root.limit);
-    background: root.themed ? @linear-gradient(180deg, root.data.theme-primary 0%, root.data.theme-secondary 100%) : root.plain-ground;
+    background: root.themed ? @linear-gradient(180deg, root.primary 0%, root.secondary 100%) : root.plain-ground;
     border-radius: root.docked ? (ClientStyle.enabled ? 8px : 0px) : 12px; border-width: root.themed ? 0px : root.docked && !ClientStyle.enabled ? 0px : 1px; border-color: Theme.edge;
     drop-shadow-blur: root.docked ? 0px : 24px; drop-shadow-color: root.docked ? transparent : #00000080; drop-shadow-offset-y: root.docked ? 0px : 8px;
     accessible-role: groupbox;
@@ -1338,7 +1342,7 @@ export component ProfileCard inherits Rectangle {
                         height: root.banner-height + root.avatar-size / 2 + 8px;
                         Rectangle {
                             y: 0px; height: root.banner-height;
-                            background: root.data.has-accent ? root.data.accent : root.themed ? root.data.theme-primary : Theme.raised;
+                            background: root.data.has-accent ? root.data.accent : root.themed ? root.primary : Theme.raised;
                             if root.data.banner.width > 0: Picture {
                                 width: parent.width; height: parent.height; image-fit: cover;
                                 still: root.data.banner; frames: root.banner-frames; delays: root.banner-delays;
@@ -1908,9 +1912,13 @@ export component ProfileModal inherits Rectangle {
         || (root.page == 2 && root.data.servers.length == 0);
     property <bool> loading-tab: root.blank-tab && (root.page == 0 ? !root.data.recent-known : !root.data.mutuals-known);
     property <bool> empty-tab: root.blank-tab && !root.loading-tab;
-    property <bool> themed: root.data.has-theme;
-    property <bool> light: root.themed && ProfileTheme.light(root.data.theme-primary);
-    property <color> theme-start: ProfileTheme.wash(root.data.theme-primary, root.light);
+    property <bool> accent-gradient: Looks.accent-profiles && root.data.id != "" && !root.data.has-theme;
+    property <bool> themed: root.data.has-theme || root.accent-gradient;
+    property <color> primary: root.accent-gradient
+        ? Theme.panel.mix(root.data.has-accent ? root.data.accent : root.data.tint, 0.55) : root.data.theme-primary;
+    property <color> secondary: root.accent-gradient ? Theme.panel : root.data.theme-secondary;
+    property <bool> light: root.themed && ProfileTheme.light(root.primary);
+    property <color> theme-start: ProfileTheme.wash(root.primary, root.light);
     // What tiles take on the panel, which a theme tints: on a light one
     // Discord's 24% white.
     property <color> tile: !root.themed ? Theme.raised : root.light ? #ffffff3d : #ffffff14;
@@ -1920,9 +1928,9 @@ export component ProfileModal inherits Rectangle {
     property <color> hover: !root.themed ? Theme.hover : root.light ? #00000014 : #ffffff0a;
     // The whole panel takes the profile's theme, not only the card on its left.
     background: root.themed
-        ? @linear-gradient(180deg, root.theme-start 0%, ProfileTheme.wash(root.data.theme-secondary, root.light) 100%)
+        ? @linear-gradient(180deg, root.theme-start 0%, ProfileTheme.wash(root.secondary, root.light) 100%)
         : Theme.sidebar;
-    border-radius: 8px; border-width: root.data.has-theme ? 0px : 1px; border-color: Theme.edge;
+    border-radius: 8px; border-width: root.themed ? 0px : 1px; border-color: Theme.edge;
     drop-shadow-blur: 24px; drop-shadow-color: #00000080; drop-shadow-offset-y: 8px;
     accessible-role: groupbox;
     accessible-label: root.data.name + "'s full profile";

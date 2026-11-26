@@ -315,7 +315,8 @@ pub fn encode(samples: &[f32]) -> Result<Vec<u8>> {
     Ok(builder.finish()?.data)
 }
 
-fn page(bytes: &mut Vec<u8>, sequence: &mut u32, flags: u8, granule: u64, packet: &[u8]) {
+/// Appends one complete packet in an Ogg page. Use a fresh sequence for each stream.
+pub fn page(bytes: &mut Vec<u8>, sequence: &mut u32, flags: u8, granule: u64, packet: &[u8]) {
     let start = bytes.len();
     bytes.extend_from_slice(b"OggS\0");
     bytes.push(flags);

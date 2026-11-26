@@ -22,6 +22,8 @@ pub mod blocks;
 #[cfg(feature = "matrix")]
 pub mod calls;
 pub mod camera;
+#[cfg(feature = "discord")]
+pub mod camera_background;
 pub mod chat;
 pub mod cli;
 #[cfg(feature = "discord")]

@@ -89,6 +89,10 @@ fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some(yapfast_core::recording::ARGUMENT) {
         return yapfast_core::recording::run();
     }
+    #[cfg(feature = "discord")]
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new(yapfast_core::clip::conversion::ARGUMENT)) {
+        return yapfast_core::clip::conversion::run();
+    }
     let mut arguments: Vec<_> = std::env::args().skip(1).collect();
     // First, so nothing a desktop handed over with the link is read as an option.
     let handed = handed_link(&mut arguments);

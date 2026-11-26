@@ -17,30 +17,30 @@ use std::{
 
 use tokio::sync::watch;
 
-/// Twice as loud, as Discord allows.
-pub const MAX: f32 = 2.0;
+/// The high end of the regular drag control, in percent.
+const SLIDER_END: f32 = 200.0;
+const SLIDER_END_GAIN: f32 = 1.995_262_4;
 
-/// Parse an exact entry on the same safe 0–200% scale as the voice/stream
-/// sliders. Reject instead of silently clamping or accepting non-finite gains.
+/// The largest gain representable by the desktop's whole-percent input.
+pub const MAX: f32 = i32::MAX as f32 / SLIDER_END * SLIDER_END_GAIN;
+
+/// Read a whole percentage, including boosts above the drag control's range.
 pub fn parse_percentage(text: &str) -> Result<i32, &'static str> {
     let text = text.trim();
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
-        return Err("Enter a whole percentage from 0 to 200.");
+        return Err("Enter a nonnegative whole percentage.");
     }
-    text.parse::<i32>()
-        .ok()
-        .filter(|value| (0..=200).contains(value))
-        .ok_or("Enter a whole percentage from 0 to 200.")
+    text.parse().map_err(|_| "That percentage is too large.")
 }
 
-/// The gain of a slider at `value`, from 0 to 200, as Discord's volume
-/// sliders map it: below 100 on a power curve, `(value / 100)^2.8`, so 50 is
-/// about -17 dB; above it 6 dB more for each 100, so 200 is about twice as
-/// loud. A linear slider made everything loud: 40 on Discord's is 0.077, not
-/// 0.4.
+/// Keep the established loudness curve through 200%. Higher percentages
+/// raise the amplitude proportionally from that point.
 pub fn from_slider(value: f32) -> f32 {
-    let share = value.max(0.0) / 100.0;
-    if share < 1.0 {
+    let value = value.clamp(0.0, i32::MAX as f32);
+    let share = value / 100.0;
+    if value >= SLIDER_END {
+        value / SLIDER_END * SLIDER_END_GAIN
+    } else if share < 1.0 {
         share.powf(2.8)
     } else {
         10f32.powf((share - 1.0) * 6.0 / 20.0)
@@ -53,6 +53,8 @@ pub fn to_slider(gain: f32) -> f32 {
         0.0
     } else if gain < 1.0 {
         gain.powf(1.0 / 2.8) * 100.0
+    } else if gain >= SLIDER_END_GAIN {
+        gain / SLIDER_END_GAIN * SLIDER_END
     } else {
         (20.0 * gain.log10() / 6.0 + 1.0) * 100.0
     }
@@ -170,6 +172,9 @@ pub fn heard(kind: Kind, person: &str) -> f32 {
 
 /// Sets how loud the microphone sends in every call, from 0.0 to [`MAX`].
 pub fn set_microphone(gain: f32) {
+    if !gain.is_finite() {
+        return;
+    }
     MICROPHONE.store(gain.clamp(0.0, MAX).to_bits(), Ordering::Relaxed);
 }
 
@@ -180,6 +185,9 @@ pub fn microphone() -> f32 {
 
 /// Sets how loud every call plays, from 0.0 to [`MAX`].
 pub fn set_speakers(gain: f32) {
+    if !gain.is_finite() {
+        return;
+    }
     let gain = gain.clamp(0.0, MAX).to_bits();
     if SPEAKERS.swap(gain, Ordering::Relaxed) != gain {
         CHANGED.send_modify(|changes| *changes += 1);
@@ -208,10 +216,12 @@ mod tests {
         assert_eq!(parse_percentage("137"), Ok(137));
         assert_eq!(parse_percentage(" 0 "), Ok(0));
         assert_eq!(parse_percentage("200"), Ok(200));
+        assert_eq!(parse_percentage("10000"), Ok(10000));
+        assert_eq!(parse_percentage("2147483647"), Ok(i32::MAX));
         for invalid in [
             "",
             "-1",
-            "201",
+            "2147483648",
             "NaN",
             "inf",
             "13.7",
@@ -244,11 +254,7 @@ mod tests {
         assert!(changes.has_changed().unwrap());
         changes.mark_unchanged();
         assert_eq!(get(Kind::Voice, "volume-test-1"), 0.5);
-        assert_eq!(
-            get(Kind::Stream, "volume-test-1"),
-            MAX,
-            "at most twice as loud"
-        );
+        assert_eq!(get(Kind::Stream, "volume-test-1"), 3.0);
         assert_eq!(
             get(Kind::Voice, "volume-test-2"),
             1.0,
@@ -316,7 +322,8 @@ mod tests {
         assert!(close(from_slider(50.0), 0.143), "about -17 dB");
         assert!(close(from_slider(40.0), 0.077));
         assert!(close(from_slider(200.0), 1.995), "6 dB louder");
-        for value in [1.0, 18.0, 40.0, 99.0, 100.0, 150.0, 200.0] {
+        assert!(close(from_slider(1000.0), 9.976_312));
+        for value in [1.0, 18.0, 40.0, 99.0, 100.0, 150.0, 200.0, 201.0, 375.0, 1000.0] {
             assert!(close(to_slider(from_slider(value)), value), "{value}");
         }
         // A stream's default shows at about 54, as on Discord.

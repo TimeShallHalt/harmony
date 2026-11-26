@@ -1,11 +1,11 @@
-//! Public Harmony release discovery and publisher-authenticated Windows installer downloads.
+//! Public Harmony release discovery and publisher-authenticated desktop updates.
 use anyhow::{Context, Result, anyhow, ensure};
 use reqwest::Client;
 use ring::{digest, signature};
 use serde::Deserialize;
 use std::{
     fs,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -16,6 +16,44 @@ const LATEST: &str = "https://api.github.com/repos/TimeShallHalt/harmony/release
 const PUBLIC_KEY: &str = include_str!("../packaging/keys/harmony-update.pub");
 const MAX_INSTALLER: u64 = 512 * 1024 * 1024;
 pub const WINDOWS_INSTALLER: bool = cfg!(all(windows, target_arch = "x86_64"));
+
+#[derive(Clone, Copy)]
+enum Platform {
+    Windows,
+    Linux,
+}
+
+impl Platform {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Windows => "windows-x64",
+            Self::Linux => "linux-x64",
+        }
+    }
+
+    fn manifest(self) -> &'static str {
+        match self {
+            Self::Windows => "harmony-update.json",
+            Self::Linux => "harmony-update-linux-x64.json",
+        }
+    }
+
+    fn artifact(self, tag: &str) -> Option<String> {
+        Build::from_tag(tag)?;
+        let (version, _) = tag.strip_prefix("harmony-v")?.split_once("-b")?;
+        Some(match self {
+            Self::Windows => format!("Harmony-{version}-Setup.exe"),
+            Self::Linux => format!("Harmony-{version}-x86_64.AppImage"),
+        })
+    }
+
+    fn cached(self) -> &'static str {
+        match self {
+            Self::Windows => "Harmony-Setup.exe",
+            Self::Linux => "Harmony-x86_64.AppImage",
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Build([u64; 3], u64);
@@ -43,6 +81,7 @@ pub struct Release {
     pub tag: String,
     pub notes: String,
     pub has_installer: bool,
+    pub has_appimage: bool,
 }
 
 impl Release {
@@ -51,6 +90,14 @@ impl Release {
     }
     fn url(&self, asset: &str) -> String {
         format!("{RELEASES}/download/{}/{asset}", self.tag)
+    }
+
+    pub fn downloadable(&self) -> bool {
+        if WINDOWS_INSTALLER {
+            self.has_installer
+        } else {
+            self.has_appimage && can_install()
+        }
     }
 }
 
@@ -69,12 +116,6 @@ struct Listing {
     assets: Vec<Asset>,
 }
 
-fn installer_name(tag: &str) -> Option<String> {
-    Build::from_tag(tag)?;
-    let (version, _) = tag.strip_prefix("harmony-v")?.split_once("-b")?;
-    Some(format!("Harmony-{version}-Setup.exe"))
-}
-
 fn available(bytes: &[u8], current: &str, build: u64) -> Result<Option<Release>> {
     let listing: Listing = serde_json::from_slice(bytes)?;
     let newer = Build::from_tag(&listing.tag_name).context("Unrecognized Harmony release tag")?;
@@ -88,21 +129,23 @@ fn available(bytes: &[u8], current: &str, build: u64) -> Result<Option<Release>>
     {
         return Ok(None);
     }
-    let installer = installer_name(&listing.tag_name).context("Invalid installer version")?;
-    let has_installer = [
-        installer.as_str(),
-        "harmony-update.json",
-        "harmony-update.json.sig",
-    ]
-    .iter()
-    .all(|name| {
-        listing
-            .assets
+    let has_assets = |platform: Platform| {
+        let artifact = platform.artifact(&listing.tag_name).unwrap();
+        let manifest = platform.manifest();
+        let sig = format!("{manifest}.sig");
+        [artifact.as_str(), manifest, sig.as_str()]
             .iter()
-            .filter(|asset| asset.name == *name)
-            .count()
-            == 1
-    });
+            .all(|name| {
+                listing
+                    .assets
+                    .iter()
+                    .filter(|asset| asset.name == *name)
+                    .count()
+                    == 1
+            })
+    };
+    let (has_installer, has_appimage) =
+        (has_assets(Platform::Windows), has_assets(Platform::Linux));
     Ok(Some(Release {
         tag: listing.tag_name,
         notes: listing
@@ -113,6 +156,7 @@ fn available(bytes: &[u8], current: &str, build: u64) -> Result<Option<Release>>
             .take(2000)
             .collect(),
         has_installer,
+        has_appimage,
     }))
 }
 
@@ -177,7 +221,13 @@ struct Manifest {
     sha256: String,
 }
 
-fn authenticate(bytes: &[u8], sig: &[u8], key: &[u8], release: &Release) -> Result<Manifest> {
+fn authenticate_for(
+    bytes: &[u8],
+    sig: &[u8],
+    key: &[u8],
+    release: &Release,
+    platform: Platform,
+) -> Result<Manifest> {
     signature::UnparsedPublicKey::new(&signature::ECDSA_P256_SHA256_FIXED, key)
         .verify(bytes, sig)
         .map_err(|_| anyhow!("Harmony's release signature could not be verified"))?;
@@ -186,8 +236,8 @@ fn authenticate(bytes: &[u8], sig: &[u8], key: &[u8], release: &Release) -> Resu
         m.schema == 1
             && m.repository == REPO
             && m.tag == release.tag
-            && m.platform == "windows-x64"
-            && Some(&m.installer) == installer_name(&release.tag).as_ref(),
+            && m.platform == platform.id()
+            && Some(&m.installer) == platform.artifact(&release.tag).as_ref(),
         "The signed installer belongs to a different release or platform"
     );
     ensure!(
@@ -204,6 +254,18 @@ fn authenticate(bytes: &[u8], sig: &[u8], key: &[u8], release: &Release) -> Resu
 pub struct Staged {
     path: PathBuf,
     manifest: Manifest,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    appimage: Option<AppImage>,
+}
+
+pub fn can_install() -> bool {
+    if WINDOWS_INSTALLER {
+        return true;
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return AppImage::running().is_ok();
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    false
 }
 
 #[cfg(windows)]
@@ -239,6 +301,11 @@ fn hold_update_directories(path: &Path) -> Result<Vec<fs::File>> {
 fn verified_file(path: &Path, manifest: &Manifest) -> Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
     // Keep this exact image read-only and in place until CreateProcess has opened it.
     #[cfg(windows)]
     {
@@ -277,20 +344,35 @@ fn verified_file(path: &Path, manifest: &Manifest) -> Result<fs::File> {
         hex::encode(hash.finish()) == manifest.sha256,
         "Installer checksum mismatch"
     );
+    file.rewind()?;
     Ok(file)
 }
 
 pub async fn download(release: &Release, cache: &Path) -> Result<Staged> {
     ensure!(
-        WINDOWS_INSTALLER && release.has_installer,
-        "No signed Windows x64 installer is available"
+        release.downloadable(),
+        "No signed update is available for this installation"
     );
+    let platform = if WINDOWS_INSTALLER {
+        Platform::Windows
+    } else {
+        Platform::Linux
+    };
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    let appimage = Some(AppImage::running()?);
     let client = client()?;
-    let bytes = get_small(&client, &release.url("harmony-update.json"), 16 * 1024).await?;
-    let sig = get_small(&client, &release.url("harmony-update.json.sig"), 64).await?;
-    let manifest = authenticate(&bytes, &sig, &hex::decode(PUBLIC_KEY.trim())?, release)?;
+    let name = platform.manifest();
+    let bytes = get_small(&client, &release.url(name), 16 * 1024).await?;
+    let sig = get_small(&client, &release.url(&format!("{name}.sig")), 64).await?;
+    let manifest = authenticate_for(
+        &bytes,
+        &sig,
+        &hex::decode(PUBLIC_KEY.trim())?,
+        release,
+        platform,
+    )?;
     fs::create_dir_all(cache)?;
-    let path = cache.join("Harmony-Setup.exe");
+    let path = cache.join(platform.cached());
     if verified_file(&path, &manifest).is_err() {
         let mut response = client
             .get(release.url(&manifest.installer))
@@ -317,7 +399,89 @@ pub async fn download(release: &Release, cache: &Path) -> Result<Staged> {
         temporary.as_file().sync_all()?;
         temporary.persist(&path)?;
     }
-    Ok(Staged { path, manifest })
+    Ok(Staged {
+        path,
+        manifest,
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        appimage,
+    })
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+struct AppImage {
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+    mode: u32,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl AppImage {
+    fn running() -> Result<Self> {
+        let path = crate::desktop_entry::appimage(&std::env::current_exe()?)
+            .context("Harmony is not running from an AppImage")?;
+        Self::at(path)
+    }
+
+    fn at(path: PathBuf) -> Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+        ensure!(path.is_absolute(), "Expected an absolute AppImage path");
+        let file = fs::symlink_metadata(&path)?;
+        let parent = fs::symlink_metadata(path.parent().context("Expected an AppImage folder")?)?;
+        // SAFETY: geteuid takes no parameters and returns the current effective UID.
+        let owner = unsafe { libc::geteuid() };
+        ensure!(
+            file.is_file()
+                && parent.is_dir()
+                && file.uid() == owner
+                && parent.uid() == owner
+                && file.mode() & 0o022 == 0
+                && parent.mode() & 0o022 == 0
+                && file.mode() & 0o100 != 0
+                && parent.mode() & 0o300 == 0o300,
+            "Move Harmony's AppImage to a folder you own to install updates"
+        );
+        Ok(Self {
+            path,
+            device: file.dev(),
+            inode: file.ino(),
+            mode: file.mode() & 0o777,
+        })
+    }
+
+    fn replace(&self, path: &Path, manifest: &Manifest) -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = self.path.parent().context("Expected an AppImage folder")?;
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".harmony-update-")
+            .tempfile_in(parent)?;
+        let source = verified_file(path, manifest)?;
+        ensure!(
+            std::io::copy(
+                &mut source.take(manifest.bytes + 1),
+                temporary.as_file_mut()
+            )? == manifest.bytes,
+            "The staged AppImage changed while it was copied"
+        );
+        let mut ready = verified_file(temporary.path(), manifest)?;
+        let mut header = [0; 11];
+        ready.read_exact(&mut header)?;
+        ensure!(
+            &header[..4] == b"\x7fELF" && &header[8..] == b"AI\x02",
+            "The signed file is not a type 2 AppImage"
+        );
+        temporary
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(self.mode))?;
+        temporary.as_file().sync_all()?;
+        let current = Self::at(self.path.clone())?;
+        ensure!(
+            current.device == self.device && current.inode == self.inode,
+            "The installed AppImage changed. Check for updates again."
+        );
+        temporary.persist(&self.path)?;
+        Ok(())
+    }
 }
 
 /// Select silent mode only for the exact location and scope registered by Harmony Setup.
@@ -372,6 +536,10 @@ fn installed_scope(program: &Path) -> Option<&'static str> {
 
 impl Staged {
     pub fn launch(&self) -> Result<()> {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        if let Some(appimage) = &self.appimage {
+            return appimage.replace(&self.path, &self.manifest);
+        }
         ensure!(WINDOWS_INSTALLER, "Installer requires Windows x64");
         #[cfg(windows)]
         let _directories = hold_update_directories(&self.path)?;
@@ -407,8 +575,13 @@ mod tests {
             tag: TAG.into(),
             notes: "Changes".into(),
             has_installer: true,
+            has_appimage: true,
         }
     }
+    fn authenticate(bytes: &[u8], sig: &[u8], key: &[u8], release: &Release) -> Result<Manifest> {
+        authenticate_for(bytes, sig, key, release, Platform::Windows)
+    }
+
     fn manifest(content: &[u8]) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
             "schema":1, "repository":REPO, "tag":TAG, "platform":"windows-x64",
@@ -460,6 +633,7 @@ mod tests {
             tag: format!("harmony-v{}-b{}", build.version, build.build_id),
             notes: String::new(),
             has_installer: true,
+            has_appimage: false,
         };
         let manifest = authenticate(
             &fs::read(folder.join("harmony-update.json")).unwrap(),
@@ -472,6 +646,55 @@ mod tests {
         #[cfg(windows)]
         let _parents = hold_update_directories(&path).unwrap();
         verified_file(&path, &manifest).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires HARMONY_SIGNED_UPDATE_DIR with the matching local release artifacts"]
+    fn packaged_appimage_matches_the_embedded_publisher_key_and_build() {
+        let folder = PathBuf::from(std::env::var_os("HARMONY_SIGNED_UPDATE_DIR").unwrap());
+        let build = crate::build_info::BuildInfo::current();
+        let release = Release {
+            tag: format!("harmony-v{}-b{}", build.version, build.build_id),
+            notes: String::new(),
+            has_installer: false,
+            has_appimage: true,
+        };
+        let name = Platform::Linux.manifest();
+        let manifest = authenticate_for(
+            &fs::read(folder.join(name)).unwrap(),
+            &fs::read(folder.join(format!("{name}.sig"))).unwrap(),
+            &hex::decode(PUBLIC_KEY.trim()).unwrap(),
+            &release,
+            Platform::Linux,
+        )
+        .unwrap();
+        verified_file(&folder.join(&manifest.installer), &manifest).unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    fn replacing_a_verified_appimage_is_atomic_and_refuses_a_changed_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("Harmony.AppImage");
+        let staged = dir.path().join("signed.AppImage");
+        let mut payload = vec![42; 512];
+        payload[..4].copy_from_slice(b"\x7fELF");
+        payload[8..11].copy_from_slice(b"AI\x02");
+        fs::write(&staged, &payload).unwrap();
+        fs::write(&target, b"Previous Harmony AppImage").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+        let installed = AppImage::at(target.clone()).unwrap();
+        let mut receipt: Manifest = serde_json::from_slice(&manifest(&payload)).unwrap();
+        receipt.platform = Platform::Linux.id().into();
+        receipt.installer = Platform::Linux.artifact(TAG).unwrap();
+        installed.replace(&staged, &receipt).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), payload);
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert!(installed.replace(&staged, &receipt).is_err());
     }
 
     #[test]

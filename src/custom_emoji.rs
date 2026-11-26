@@ -119,20 +119,30 @@ pub fn linked(markdown: &str, emoji: &[CustomEmoji]) -> String {
 }
 
 fn replace(markdown: &str, emoji: &[CustomEmoji], link: bool) -> String {
-    let mut out = markdown.to_owned();
+    let show = |id: &str, glyph: char| {
+        if link {
+            format!("[{}](<{}>)", glyph, crate::emoji_text::custom_link(id))
+        } else {
+            glyph.to_string()
+        }
+    };
+    let mut out = String::with_capacity(markdown.len());
+    let mut copied = 0;
+    for (range, id, _) in yapfast_core::links::emoji_links(markdown) {
+        if range.start >= copied
+            && let Some(glyph) = glyph(&id)
+        {
+            out.push_str(&markdown[copied..range.start]);
+            out.push_str(&show(&id, glyph));
+            copied = range.end;
+        }
+    }
+    out.push_str(&markdown[copied..]);
     for each in emoji {
         if let Some(glyph) = glyph(&each.id)
             && out.contains(&each.text)
         {
-            let shown = if link {
-                format!(
-                    "[{}](<{}>)",
-                    glyph,
-                    crate::emoji_text::custom_link(&each.id)
-                )
-            } else {
-                glyph.to_string()
-            };
+            let shown = show(&each.id, glyph);
             out = out.replace(&each.text, &shown);
         }
     }

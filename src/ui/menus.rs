@@ -106,6 +106,9 @@ fn events(adapter: &Adapter, server: &str) -> Menu {
 /// What a server's, conversation's or person's menu offers; nothing for one
 /// Yapfast doesn't know.
 pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
+    if !person && let Some(menu) = super::dm_groups::heading_menu(adapter, id) {
+        return menu;
+    }
     if let Some(place) = id.strip_prefix(BELL) {
         return Notify::of(adapter, place)
             .map_or_else(Menu::default, |notify| notify.bell(adapter));
@@ -113,6 +116,7 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
     if let Some(server) = id.strip_prefix(EVENTS) {
         return events(adapter, server);
     }
+    let shared_appearance = super::local_profile::share_menu(adapter, id);
     let (id, _) = relationship_place(id);
     let icons = &adapter.icons;
     let app = &adapter.app;
@@ -358,7 +362,7 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
             notify.dress(adapter, row);
         }
     }
-    let submenus = rows
+    let mut submenus: Vec<_> = rows
         .iter()
         .map(|row| {
             if row.id == choice_id(MenuChoice::Mute) || row.id == choice_id(MenuChoice::MuteServer)
@@ -389,6 +393,14 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
             }
         })
         .collect();
+    if let Some((row, submenu)) = super::dm_groups::room_menu(adapter, id, person) {
+        rows.push(row);
+        submenus.push(submenu);
+    }
+    for row in shared_appearance {
+        rows.push(row);
+        submenus.push(Vec::new());
+    }
     (rows, submenus)
 }
 
@@ -877,6 +889,12 @@ pub(super) fn choose(
     person: bool,
     id: &str,
 ) {
+    if !person && super::dm_groups::choose(adapter, window, &target, id) {
+        return;
+    }
+    if person && super::local_profile::choose_shared(adapter, window, &target, id) {
+        return;
+    }
     // The events popout only lists them.
     if target.starts_with(EVENTS) {
         return;
@@ -1187,8 +1205,7 @@ pub(super) fn choose(
     let pins = matches!(action, Action::Pin { .. } | Action::CloseDm(_));
     adapter.action(window, action);
     if pins {
-        adapter.layout.pinned = adapter.app.state.pinned.clone();
-        adapter.layout.write(&adapter.root);
+        super::dm_groups::save_pins(adapter);
     }
 }
 

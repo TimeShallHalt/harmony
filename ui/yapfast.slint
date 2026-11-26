@@ -2,10 +2,17 @@ import { AccountPopover } from "yapfast/account-popover.slint";
 import { VoiceNotes, VoiceNoteDialog } from "voice_notes.slint";
 export { VoiceNotes } from "voice_notes.slint";
 import { LocalProfile, LocalProfileSettings } from "local-profile.slint";
+import { DmCategories, DmCategoryDialog } from "dm-categories.slint";
+import { ClipConversion, ClipConversionDialog } from "clip-conversion.slint";
+export { ClipConversion } from "clip-conversion.slint";
+export { DmCategories } from "dm-categories.slint";
+export { CameraBackground } from "settings.slint";
 import { OrbsSettings } from "orbs.slint";
 export { Orbs, QuestRow, OrbItemRow } from "orbs.slint";
 export { LocalProfile } from "local-profile.slint";
 import { ClientStyle } from "yapfast/style.slint";
+export { TextCounts } from "controls.slint";
+import { TerminalPanelOutline } from "controls.slint";
 import { WindowBar } from "yapfast/window-bar.slint";
 import { AboutUpdatesSettings } from "about_updates.slint";
 import { Palette } from "std-widgets.slint";
@@ -13,6 +20,10 @@ import { ListView, Autoscroll, AutoscrollMarker } from "scrollview.slint";
 // The UI's typeface, Atkinson Hyperlegible Next; ExtraBold serves weight 900.
 import "fonts/DMSans[opsz,wght].ttf";
 import "fonts/DMSans-Italic[opsz,wght].ttf";
+import "fonts/DMMono-Light.ttf";
+import "fonts/DMMono-Regular.ttf";
+import "fonts/DMMono-Italic.ttf";
+import "fonts/DMMono-Medium.ttf";
 import "fonts/AtkinsonHyperlegibleNext-Regular.ttf";
 import "fonts/AtkinsonHyperlegibleNext-Italic.ttf";
 import "fonts/AtkinsonHyperlegibleNext-Medium.ttf";
@@ -53,7 +64,7 @@ import { StickerPicker, StickerGridTile } from "stickers.slint";
 import { ServerTags, ActionButton, IconButton, Motion, PingToggle, DeviceToggle, Avatar, TextField, MessagesSkeleton, ContextMenu, MenuItem, MenuRow, QuickDeviceMenu, HeaderToggle, Banner, StatusText, Nameplate, AccountLook, PictureStore } from "controls.slint";
 import { PersonRow, VoiceCard, CallLink, CallLinkCard, LinkTouch, SignalIcon, VoiceDock, StreamPip, CallInvite, JoinVoice, ParticipantGrid, CallControls, IncomingCall, SwitchDialog, InputLevel, ShareMenu, ShareScreen, VolumeMenu, Soundboard, SoundRow } from "voice.slint";
 import { ServerRow, RoomRow, StatusDot, ServerRail, ServerHeader, RoomList, VoiceCardView } from "rail.slint";
-import { StagedFile, StagedTile, Composer, MentionRow, MentionList, EmojiSuggestions, RequestBar } from "composer.slint";
+import { StagedFile, StagedTile, Composer, MentionRow, MentionList, EmojiSuggestions, RequestBar, TypingPrivacy } from "composer.slint";
 import { InlineEdit, EmojiCell, EmojiRow, EmojiTile, EmojiSection, RailSection, EmojiCard, EmojiCardView, MessageStickerCard, MessageStickerCardView, MessageRow, ReactionToggle, EmojiButton, EmojiPicker, MessageMenu, MessageGallery, MessageStickers, FileCard, MessageContent, EmbedView, BotTag, NoConversation, ConversationStart, HistoryEdge, UnreadBar, PresentBar, ImageViewer, VideoViewer, VideoPlayer, VoicePlayer, Polls } from "messages.slint";
 import { Choices, SettingsRow, SettingsScreen, AccountSettings, AppearanceSettings, ThemeCard, ThemeColour, VoiceSettings, KeybindSettings, KeybindRow, MessageSettings, NotificationSettings, SoundSettings, AdvancedSettings, DiscordLinkSettings, DiscordSettings, BlockedRow, GameActivitySettings, GameExecutable } from "settings.slint";
 import { ActivityMenu, MemberRow, MemberActivityRow, ProfileData, BadgeTipCard, ProfileServerRow, MemberPanel, ProfileCard, ProfileModal, ServerCard, RoleCard, TagCard, TagCardView } from "people.slint";
@@ -125,8 +136,9 @@ export component YapfastWindow inherits Window {
     callback minimize-window();
     callback maximize-window();
     callback close-window();
-    background: Theme.chat;
+    background: ClientStyle.system24 ? Theme.edge : Theme.chat;
     default-font-family: ClientStyle.font-family;
+    default-font-weight: ClientStyle.system24 ? 300 : 0;
     // default-font-family: "Satoshi";
     // Both faces' x-heights are about half their size, small, so text
     // defaults to 16px.
@@ -668,6 +680,8 @@ export component YapfastWindow inherits Window {
     callback emoji-suggestion-dismissed;
     // An emoji from the picker, by its reaction key, goes in at the composer's cursor.
     callback insert-emoji(string);
+    callback emoji-image-link(string) -> string;
+    callback insert-emoji-image(string, bool);
     /// An emoji chosen for the message being edited.
     callback insert-edit-emoji(string);
     /// The GIF picker, in the picker above the composer; see GifPicker.
@@ -1023,6 +1037,7 @@ export component YapfastWindow inherits Window {
     /// harder for a sharper picture.
     in property <int> share-resolution: 1;
     in property <int> share-fps: 30;
+    in property <int> share-bitrate;
     in property <int> share-max-resolution: 0;
     in property <int> share-fps-720: 30;
     in property <int> share-fps-hd: 30;
@@ -1392,6 +1407,9 @@ export component YapfastWindow inherits Window {
     in-out property <int> speaker-volume: 100;
     callback call-volumes-changed();
     in-out property <bool> share-typing: true;
+    in property <bool> room-shares-typing;
+    in property <bool> aside-shares-typing;
+    callback toggle-room-typing(bool);
     in-out property <bool> notifications: true;
     in-out property <bool> notification-text: true;
     in-out property <bool> flash-taskbar: true;
@@ -1549,7 +1567,7 @@ export component YapfastWindow inherits Window {
     /// in share-resolution, frame rate, and quality, as in share-high-quality.
     /// Where the system's dialog picks a screen or window (!share-lists), a
     /// choice of it comes before the cameras.
-    callback go-live(int, int, int, bool);
+    callback go-live(int, int, int, int, bool);
     /// While sharing, share what the share menu lists at this index in place
     /// of what's shared, as go-live counts them.
     callback switch-live(int);
@@ -1596,7 +1614,9 @@ export component YapfastWindow inherits Window {
     callback stop-moving-person;
     // Someone's volumes, from a right click on them in a call, as percentages.
     callback volume-of(string, bool) -> int;
-    callback parse-volume(string) -> int;
+    pure callback parse-volume(string) -> int;
+    callback stream-sharpness-of(string) -> int;
+    callback stream-sharpness-changed(string, int, bool);
     /// A person, whether it's their stream, the volume, and whether it's
     /// the last of a drag, which is when it's remembered.
     callback volume-changed(string, bool, int, bool);
@@ -1605,6 +1625,7 @@ export component YapfastWindow inherits Window {
     property <bool> volume-live;
     property <int> voice-volume: 100;
     property <int> stream-volume: 100;
+    property <int> stream-sharpness;
     function open-call-link(x: length, y: length, width: length, height: length) {
         root.anchor(x, y, width, height, false);
         call-link-menu.show();
@@ -1623,6 +1644,7 @@ export component YapfastWindow inherits Window {
         root.volume-live = person.live;
         root.voice-volume = root.volume-of(person.person, false);
         root.stream-volume = root.volume-of(person.person, true);
+        root.stream-sharpness = root.stream-sharpness-of(person.person);
         root.menu-target = "in-voice:" + room + "/" + person.person;
         root.menu-person = true;
         root.prepare-menu(root.menu-target, true);
@@ -1678,6 +1700,7 @@ export component YapfastWindow inherits Window {
     callback cancel-send(string);
     callback attach;
     callback save-attachment(string, int);
+    callback save-all-attachments(string);
     callback copy-attachment(string, int);
     /// An attachment's address on the web, or empty when it has none.
     pure callback attachment-link(string, int) -> string;
@@ -2031,7 +2054,8 @@ export component YapfastWindow inherits Window {
     // The quality picked in the share menu, from the last choice each time it opens.
     property <int> pick-source;
     property <int> pick-resolution;
-    property <int> pick-fps;
+    property <string> pick-fps;
+    property <string> pick-bitrate;
     property <bool> pick-high-quality;
     // The menu switches what's shared, as it was when it opened.
     property <bool> pick-switch;
@@ -2040,6 +2064,7 @@ export component YapfastWindow inherits Window {
         root.pick-source = 0;
         root.pick-resolution = root.share-resolution;
         root.pick-fps = root.share-fps;
+        root.pick-bitrate = root.share-bitrate == 0 ? "" : root.share-bitrate + "";
         root.pick-high-quality = root.share-high-quality;
         root.pick-switch = root.sharing;
         // Shown once the list is in, so it opens at its full height.
@@ -2079,11 +2104,13 @@ export component YapfastWindow inherits Window {
             fps-720: root.share-fps-720; fps-hd: root.share-fps-hd;
             pick-source <=> root.pick-source; pick-resolution <=> root.pick-resolution; pick-fps <=> root.pick-fps;
             pick-high-quality <=> root.pick-high-quality;
-            go-live(source, resolution, fps, high-quality) => {
+            pick-bitrate <=> root.pick-bitrate;
+            parse-whole(text) => { return root.parse-volume(text); }
+            go-live(source, resolution, fps, bitrate, high-quality) => {
                 if root.pick-switch {
                     root.switch-live(source);
                 } else {
-                    root.go-live(source, resolution, fps, high-quality);
+                    root.go-live(source, resolution, fps, bitrate, high-quality);
                 }
                 share-menu.close();
             }
@@ -2254,6 +2281,10 @@ export component YapfastWindow inherits Window {
                 MenuItem {
                     text: "Upload a File"; icon: @image-url("icons/file.svg"); disabled: !root.can-attach;
                     clicked => { if root.can-attach { plus-menu.close(); root.attach(); } }
+                }
+                if ClipConversion.available && root.can-attach: MenuItem {
+                    text: "Compress video or audio…"; icon: @image-url("icons/file.svg"); disabled: ClipConversion.busy;
+                    clicked => { plus-menu.close(); ClipConversion.choose(); }
                 }
                 if VoiceNotes.available: MenuItem {
                     text: "Record Voice Message"; icon: @image-url("icons/mic.svg");
@@ -2496,6 +2527,8 @@ export component YapfastWindow inherits Window {
                     show-view(view) => { root.gif-view-chosen(view); }
                     category(name) => { root.gif-category(name); }
                     pick(url, insert) => { root.gif-pick(url, insert); expressions.close(); }
+                    copy-link(url) => { root.copy-text(url); }
+                    open-link(url) => { root.open-link(url); }
                     favorite(url) => { root.gif-favorite(url); }
                     scrolled-to(top, height) => { root.gifs-scrolled(top, height); }
                     resized => { root.gif-picker-resized(); }
@@ -2522,6 +2555,9 @@ export component YapfastWindow inherits Window {
                     emoji-search(text) => { root.emoji-search(text); }
                     favorite(key) => { root.emoji-favorite(key); }
                     pick(cell) => { root.pick(cell); }
+                    show-image-menu(key) => { return root.emoji-image-link(key) != ""; }
+                    copy-image-link(key) => { root.copy-text(root.emoji-image-link(key)); }
+                    insert-image-link(key) => { root.insert-emoji-image(key, root.react-item == "yapfast:edit"); }
                     unlock-nitro => { root.unlock-nitro(); }
                     close-picker => { expressions.close(); }
                     scrolled-to(top, height) => { root.emoji-scrolled-to(top, height); }
@@ -2573,6 +2609,9 @@ export component YapfastWindow inherits Window {
             emoji-search(text) => { root.emoji-search(text); }
             favorite(key) => { root.emoji-favorite(key); }
             pick(cell) => { root.pick(cell); }
+            show-image-menu(key) => { return root.emoji-image-link(key) != ""; }
+            copy-image-link(key) => { root.copy-text(root.emoji-image-link(key)); }
+            insert-image-link(key) => { root.insert-emoji-image(key, root.react-item == "yapfast:edit"); }
             unlock-nitro => { root.unlock-nitro(); }
             close-picker => { emoji-picker.close(); }
             scrolled-to(top, height) => { root.emoji-scrolled-to(top, height); }
@@ -2613,6 +2652,8 @@ export component YapfastWindow inherits Window {
             width: voice-menu.menu-width; height: self.content-height;
             volume-person: root.volume-person; volume-name: root.volume-name; volume-live: root.volume-live;
             voice-volume <=> root.voice-volume; stream-volume <=> root.stream-volume;
+            stream-sharpness <=> root.stream-sharpness;
+            sharpness-changed(person, amount, done) => { root.stream-sharpness-changed(person, amount, done); }
             parse-volume(text) => { return root.parse-volume(text); }
             volume-changed(person, stream, volume, last) => { root.volume-changed(person, stream, volume, last); }
         }
@@ -2677,6 +2718,7 @@ export component YapfastWindow inherits Window {
             media-index: root.menu-media; media-video: root.menu-video; link: root.menu-link;
             copy-image(item, index) => { root.copy-attachment(item, index); message-menu.close(); }
             save-attachment(item, index) => { root.save-attachment(item, index); message-menu.close(); }
+            save-all-attachments(item) => { root.save-all-attachments(item); message-menu.close(); }
             open-link(link) => { root.open-link(link); message-menu.close(); }
         }
     }
@@ -2699,16 +2741,19 @@ export component YapfastWindow inherits Window {
     }
 
     HorizontalLayout {
-        y: root.title-height; height: root.height - root.title-height;
+        x: ClientStyle.panel-gap; width: root.width - 2 * ClientStyle.panel-gap;
+        y: root.title-height + ClientStyle.panel-gap;
+        height: root.height - root.title-height - 2 * ClientStyle.panel-gap;
         visible: root.workspace;
-        spacing: 0px;
+        spacing: ClientStyle.panel-gap;
         // Navigation: the rail and the sidebar, with the voice and account dock across both.
         Rectangle {
-            width: 72px + root.sidebar-shown; background: Theme.rail;
+            width: 72px + ClientStyle.panel-gap + root.sidebar-shown;
+            background: ClientStyle.system24 ? transparent : Theme.rail;
             VerticalLayout {
-                spacing: 0px;
+                spacing: ClientStyle.panel-gap;
                 HorizontalLayout {
-                    vertical-stretch: 1; spacing: 0px;
+                    vertical-stretch: 1; spacing: ClientStyle.panel-gap;
                     // Server rail.
                     ServerRail {
                         dms-selected: root.dms-selected; dms-unread: root.dms-unread; dms-badge: root.dms-badge; servers: root.servers;
@@ -2724,8 +2769,9 @@ export component YapfastWindow inherits Window {
                     // Channel sidebar: a lighter sheet held by the rail and the dock.
                     Rectangle {
                         width: root.sidebar-shown; background: Theme.sidebar;
-                        border-top-left-radius: ClientStyle.enabled ? 12px : 10px; border-bottom-left-radius: ClientStyle.enabled ? 0px : 10px;
-                        clip: true;
+                        border-top-left-radius: ClientStyle.system24 ? 0px : ClientStyle.enabled ? 12px : 10px;
+                        border-bottom-left-radius: ClientStyle.enabled || ClientStyle.system24 ? 0px : 10px;
+                        clip: !ClientStyle.system24;
                         VerticalLayout {
                             spacing: 0px;
                             header-box := Rectangle {
@@ -2880,9 +2926,12 @@ export component YapfastWindow inherits Window {
                         // Discord's outline: the top and left edges meet in a 12px rounded corner,
                         // and the left line runs down to the account panel. There is no line
                         // between the sidebar and the conversation: only their grounds differ.
-                        if ClientStyle.enabled: Rectangle {
+                        if ClientStyle.enabled && !ClientStyle.system24: Rectangle {
                             x: 0px; y: 0px; width: parent.width + 16px; height: parent.height + 16px;
                             border-width: 1px; border-color: Theme.outline; border-radius: 12px; background: transparent;
+                        }
+                        if ClientStyle.system24: TerminalPanelOutline {
+                            title: root.dms-selected ? "messages" : "channels";
                         }
                     }
                 }
@@ -2915,7 +2964,7 @@ export component YapfastWindow inherits Window {
                         // Anywhere on the card brightens its nameplate; each part lights only itself.
                         property <bool> hot: account-touch.has-hover || avatar-touch.has-hover || mic.hovered || ear.hovered || cog.hovered;
                         height: ClientStyle.account-height; background: Theme.panel;
-                        border-radius: ClientStyle.enabled ? 8px : 0px;
+                        border-radius: ClientStyle.enabled && !ClientStyle.system24 ? 8px : 0px;
                         // The nameplate fills the card, a pixel beyond it above and below.
                         if AccountLook.nameplate-url != "": Nameplate {
                             x: 0px; y: -1px; width: parent.width + 1px; height: parent.height + 2px;
@@ -3007,10 +3056,11 @@ export component YapfastWindow inherits Window {
                             }
                         }
                         // Discord's thin outline around the card.
-                        if ClientStyle.enabled: Rectangle {
+                        if ClientStyle.enabled && !ClientStyle.system24: Rectangle {
                             width: parent.width; height: parent.height; border-radius: 8px;
                             border-width: 1px; border-color: Theme.overlay.with-alpha(0.02); background: transparent;
                         }
+                        if ClientStyle.system24: TerminalPanelOutline { title: "account"; }
                     }
                 }
             }
@@ -3611,7 +3661,7 @@ export component YapfastWindow inherits Window {
                                                 y: parent.body;
                                                 height: parent.height - self.y - parent.tail;
                                                 background: row-pointer.has-hover ? Theme.mentioned-hover : Theme.mentioned;
-                                                Rectangle { x: 0px; width: 2px; background: Theme.accent; }
+                                                Rectangle { x: 0px; width: ClientStyle.system24 ? ClientStyle.divider-size : 2px; background: Theme.accent; }
                                             }
                                             // The keyboard's message has a marigold edge.
                                             if self.lit && root.browsing: Rectangle { x: 0px; y: parent.body; width: 3px; height: parent.height - parent.body; background: Theme.accent; }
@@ -3661,7 +3711,7 @@ export component YapfastWindow inherits Window {
                                                     // date and "New" together when both are here.
                                                     if message.day != "" || message.unread-start: HorizontalLayout {
                                                         padding-left: 16px; padding-right: 16px; padding-bottom: 6px; spacing: 10px; height: 26px;
-                                                        Rectangle { horizontal-stretch: 1; Rectangle { height: 1px; background: message.unread-start ? Theme.accent : Theme.line; } }
+                                                        Rectangle { horizontal-stretch: 1; Rectangle { height: message.unread-start ? ClientStyle.divider-size : 1px; background: message.unread-start ? Theme.accent : Theme.line; } }
                                                         if message.day != "": Text { text: message.day; color: Theme.muted; font-size: ClientStyle.enabled ? 12px : 13px; font-weight: ClientStyle.enabled ? 600 : 700; vertical-alignment: center; }
                                                         if message.day != "" && message.unread-start: Text { text: "·"; color: Theme.muted; font-size: 13px; font-weight: 700; vertical-alignment: center; }
                                                         if message.unread-start: Rectangle {
@@ -3959,9 +4009,9 @@ export component YapfastWindow inherits Window {
                                 border-width: 1px;
                                 border-color: composer.focused ? Theme.muted.with-alpha(0.55) : ClientStyle.enabled ? Theme.outline-field : Theme.line;
                                 animate border-color { duration: Theme.quick; }
-                                border-radius: 10px;
-                                border-top-left-radius: root.compose-label != "" ? 0px : 10px;
-                                border-top-right-radius: root.compose-label != "" ? 0px : 10px;
+                                border-radius: ClientStyle.system24 ? 0px : 10px;
+                                border-top-left-radius: root.compose-label != "" || ClientStyle.system24 ? 0px : 10px;
+                                border-top-right-radius: root.compose-label != "" || ClientStyle.system24 ? 0px : 10px;
                                 VerticalLayout {
                                     spacing: 0px;
                                     // Files waiting to go with the message, in a row that scrolls sideways.
@@ -4050,6 +4100,13 @@ export component YapfastWindow inherits Window {
                                         }
                                         // As Discord's: the GIFs, the stickers, then the emoji,
                                         // in one picker.
+                                        if root.composer-enabled && !root.preview: VerticalLayout {
+                                            alignment: end; padding-bottom: ClientStyle.composer-button-inset;
+                                            TypingPrivacy {
+                                                sharing: root.room-shares-typing;
+                                                clicked => { root.toggle-room-typing(false); composer.focus-input(); }
+                                            }
+                                        }
                                         if root.can-pick-gifs: VerticalLayout {
                                             alignment: end; padding-bottom: ClientStyle.composer-button-inset;
                                             gif-button := IconButton {
@@ -4152,6 +4209,8 @@ export component YapfastWindow inherits Window {
                         composer-focused => { root.aside-composer-last = true; }
                         escape-composing => { return root.escape-composing(); }
                         busy: root.busy; bot-busy-item: root.bot-busy-item; bot-failed-item: root.bot-failed-item; bot-failed-text: root.bot-failed-text; composer-enabled: root.aside-composer-enabled; can-send: root.aside-can-send;
+                        shares-typing: root.aside-shares-typing;
+                        toggle-typing => { root.toggle-room-typing(true); }
                         reactions-enabled: root.aside-reactions-enabled; new-reactions-enabled: root.aside-new-reactions-enabled;
                         sending: root.sending; compose-label: root.aside-compose-label; draft <=> root.aside-draft;
                         reply-ping: root.aside-reply-ping; toggle-reply-ping => { root.aside-toggle-reply-ping(); }
@@ -4261,7 +4320,8 @@ export component YapfastWindow inherits Window {
                 }
             }
             // The window's top outline carries on over the conversation to its right edge.
-            if ClientStyle.enabled: Rectangle { y: 0px; height: 1px; background: Theme.outline; }
+            if ClientStyle.enabled && !ClientStyle.system24: Rectangle { y: 0px; height: 1px; background: Theme.outline; }
+            if ClientStyle.system24: TerminalPanelOutline { title: root.voice-panel ? "call" : "conversation"; }
             // The header casts a soft shadow over the conversation.
             if !ClientStyle.enabled: Rectangle {
                 y: 48px; height: 6px;
@@ -4272,11 +4332,12 @@ export component YapfastWindow inherits Window {
     // The edge between sidebar and conversation resizes the sidebar. A double-click
     // restores the default width.
     if root.workspace: TouchArea {
-        x: 72px + root.sidebar-shown - 4px; y: root.title-height; width: 8px; height: root.height - root.title-height;
+        x: 72px + root.sidebar-shown + 2 * ClientStyle.panel-gap - 4px;
+        y: root.title-height + ClientStyle.panel-gap; width: 8px; height: root.height - self.y - ClientStyle.panel-gap;
         mouse-cursor: ew-resize;
         moved => {
             if self.pressed {
-                root.sidebar-width = max(180px, min(380px, root.width - 72px - 420px - root.docked-width, root.sidebar-shown + self.mouse-x - self.pressed-x));
+                root.sidebar-width = max(180px, min(380px, root.width - 72px - 420px - root.docked-width - 4 * ClientStyle.panel-gap, root.sidebar-shown + self.mouse-x - self.pressed-x));
             }
         }
         pointer-event(event) => {
@@ -4292,11 +4353,12 @@ export component YapfastWindow inherits Window {
     }
     // So does the edge of the thread beside the conversation, below the header.
     if root.workspace && root.aside-docked: TouchArea {
-        x: root.width - root.aside-shown - 4px; y: root.title-height + ClientStyle.header-height; width: 8px; height: root.height - root.title-height - ClientStyle.header-height;
+        x: root.width - root.aside-shown - ClientStyle.panel-gap - 4px;
+        y: root.title-height + ClientStyle.header-height + ClientStyle.panel-gap; width: 8px; height: root.height - self.y - ClientStyle.panel-gap;
         mouse-cursor: ew-resize;
         moved => {
             if self.pressed {
-                root.aside-width = max(320px, min(800px, root.width - 72px - root.sidebar-shown - 420px, root.aside-shown - (self.mouse-x - self.pressed-x)));
+                root.aside-width = max(320px, min(800px, root.width - 72px - root.sidebar-shown - 420px - 4 * ClientStyle.panel-gap, root.aside-shown - (self.mouse-x - self.pressed-x)));
             }
         }
         pointer-event(event) => {
@@ -4314,11 +4376,12 @@ export component YapfastWindow inherits Window {
     // click restores the style's width.
     if root.workspace && root.members-docked: TouchArea {
         property <length> right: root.profile-docked ? ClientStyle.profile-width : 0px;
-        x: root.width - self.right - root.members-shown - 4px; y: root.title-height + ClientStyle.header-height; width: 8px; height: root.height - root.title-height - ClientStyle.header-height;
+        x: root.width - self.right - root.members-shown - ClientStyle.panel-gap - 4px;
+        y: root.title-height + ClientStyle.header-height + ClientStyle.panel-gap; width: 8px; height: root.height - self.y - ClientStyle.panel-gap;
         mouse-cursor: ew-resize;
         moved => {
             if self.pressed {
-                root.members-width = max(200px, min(480px, root.width - 72px - root.sidebar-shown - self.right - 420px, root.members-shown - (self.mouse-x - self.pressed-x)));
+                root.members-width = max(200px, min(480px, root.width - 72px - root.sidebar-shown - self.right - 420px - 4 * ClientStyle.panel-gap, root.members-shown - (self.mouse-x - self.pressed-x)));
             }
         }
         pointer-event(event) => {
@@ -4547,6 +4610,7 @@ export component YapfastWindow inherits Window {
             entrance-server-chosen(index) => { root.entrance-server-chosen(index); }
             choose-entrance-sound(id) => { root.choose-entrance-sound(id); }
             call-volumes-changed => { root.call-volumes-changed(); }
+            parse-volume(text) => { return root.parse-volume(text); }
             record-talk-key(on) => { root.record-talk-key(on); }
             select-microphone(index) => { root.select-microphone(index); }
             select-speaker(index) => { root.select-speaker(index); }
@@ -4580,6 +4644,7 @@ export component YapfastWindow inherits Window {
         }
         if root.settings-section == 5: SoundSettings {
             sound-set <=> root.sound-set; volume <=> root.sound-volume;
+            parse-volume(text) => { return root.parse-volume(text); }
             adjust-each <=> root.adjust-each-sound; each: root.each-sound;
             preferences-changed => { root.preferences-changed(); }
             each-changed(index, percent) => { root.each-sound-changed(index, percent); }
@@ -5107,6 +5172,8 @@ export component YapfastWindow inherits Window {
         close-status => { root.close-status(); }
     }
     if Scheduling.open: ScheduledDialog { }
+    if DmCategories.open: DmCategoryDialog { width: parent.width; height: parent.height; }
+    if ClipConversion.converting: ClipConversionDialog { width: parent.width; height: parent.height; }
     // Making a poll; see PollDialog.
     if VoiceNotes.open: VoiceNoteDialog { width: parent.width; height: parent.height; }
     poll-motion := PopupMotion { open: root.poll-open; }

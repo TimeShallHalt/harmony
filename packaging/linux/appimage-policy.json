@@ -1,0 +1,11 @@
+{
+  "glibc_floor": "2.39",
+  "libstdcxx_floor": "3.4.33",
+  "host_libraries": [
+    "ld-linux-x86-64.so.2", "libc.so.6", "libm.so.6", "libgcc_s.so.1", "libstdc++.so.6",
+    "libglib-2.0.so.0", "libgobject-2.0.so.0", "libgio-2.0.so.0",
+    "libpulse.so.0", "libpulse-simple.so.0", "libfontconfig.so.1", "libfreetype.so.6"
+  ],
+  "runtime_url": "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+  "runtime_sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
+}

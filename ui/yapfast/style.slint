@@ -2,6 +2,9 @@
 // Disabled for comparisons with the inherited interface.
 export global ClientStyle {
     in-out property <bool> enabled: true;
+    in-out property <bool> system24;
+    out property <length> panel-gap: self.system24 ? 12px : 0px;
+    out property <length> divider-size: self.system24 ? 4px : 1px;
     // An open-licensed, bundled face gives every platform the same text metrics.
     in-out property <string> native-font: "DM Sans";
     // Empty/-1px inputs inherit native defaults; resetting preserves live bindings.
@@ -23,13 +26,14 @@ export global ClientStyle {
     in-out property <length> pack-title-height: -1px;
     in-out property <length> pack-title-inset: -1px;
     in-out property <length> pack-title-text-size: -1px;
-    out property <string> font-family: self.pack-font-family != "" ? self.pack-font-family : (self.enabled ? self.native-font : "Atkinson Hyperlegible Next");
+    out property <string> font-family: self.pack-font-family != "" ? self.pack-font-family
+        : self.system24 ? "DM Mono" : (self.enabled ? self.native-font : "Atkinson Hyperlegible Next");
     out property <length> text-size: self.pack-text-size >= 0px ? self.pack-text-size : (self.enabled ? 15px : 16px);
     out property <length> sidebar-width: self.pack-sidebar-width >= 0px ? self.pack-sidebar-width : (self.enabled ? 304px : 240px);
     // Discord's header rows: 48px between its outline and the line under them, 50px with both.
     out property <length> header-height: self.pack-header-height >= 0px ? self.pack-header-height : (self.enabled ? 50px : 48px);
     out property <length> account-inset: self.enabled ? 8px : 0px;
-    out property <length> account-height: self.pack-account-height >= 0px ? self.pack-account-height : (self.enabled ? 57px : 56px);
+    out property <length> account-height: self.pack-account-height >= 0px ? self.pack-account-height : (self.system24 ? 48px : self.enabled ? 57px : 56px);
     out property <length> rail-tile: self.pack-rail-tile >= 0px ? self.pack-rail-tile : (self.enabled ? 40px : 48px);
     // Discord's folders are 48px tiles between its 40px servers, 8px apart in both.
     out property <length> folder-tile: 48px;
@@ -52,7 +56,7 @@ export global ClientStyle {
     out property <length> intro-channel-height: 203px;
     // Window chrome shares these metrics with the content inset and resize handles.
     // Its colours stay in Theme, so built-in themes and the live editor apply together.
-    out property <length> title-height: self.pack-title-height >= 0px ? self.pack-title-height : (32px);
+    out property <length> title-height: self.pack-title-height >= 0px ? self.pack-title-height : (self.system24 ? 26px : 32px);
     out property <length> caption-width: self.enabled ? 36px : 44px;
     out property <length> caption-icon-size: self.enabled ? 12px : 16px;
     out property <length> title-inset: self.pack-title-inset >= 0px ? self.pack-title-inset : (16px);

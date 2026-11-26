@@ -152,14 +152,17 @@ impl StreamLimits {
         } else {
             self.fps_hd
         };
-        let fps = match choice.fps.min(max) {
-            0..=29 => 15,
-            30..=59 => 30,
-            _ => 60,
+        let fps = choice.fps.clamp(15, max.max(15));
+        let bitrate_limit = if resolution == Resolution::P720 { 3500 } else { 9000 };
+        let bitrate_kbps = if choice.bitrate_kbps == 0 {
+            0
+        } else {
+            choice.bitrate_kbps.clamp(500, bitrate_limit)
         };
         StreamQuality {
             resolution,
             fps,
+            bitrate_kbps,
             ..choice
         }
     }
@@ -169,8 +172,11 @@ impl StreamLimits {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct StreamQuality {
     pub resolution: Resolution,
-    /// Frames a second: 15, 30 or 60.
+    /// Frames per second, between 15 and the negotiated limit.
     pub fps: u32,
+    /// Video bitrate ceiling in kbit/s. Zero keeps adaptive auto.
+    #[serde(default)]
+    pub bitrate_kbps: u32,
     /// A sharper picture from more of the encoder's work, at about twice
     /// the CPU.
     #[serde(default)]
@@ -182,6 +188,7 @@ impl Default for StreamQuality {
         Self {
             resolution: Resolution::P1080,
             fps: 30,
+            bitrate_kbps: 0,
             high_quality: false,
         }
     }
@@ -784,6 +791,7 @@ mod tests {
         let choice = StreamQuality {
             resolution: Source,
             fps: 60,
+            bitrate_kbps: 0,
             high_quality: true,
         };
         for (premium, boost, resolution, fps) in [
@@ -818,6 +826,11 @@ mod tests {
             60
         );
         assert_eq!(basic.constrain(StreamQuality { fps: 15, ..choice }).fps, 15);
+        let custom = StreamQuality { fps: 24, bitrate_kbps: 8000, ..choice };
+        let limited = StreamLimits::default().constrain(custom);
+        assert_eq!((limited.resolution, limited.fps, limited.bitrate_kbps), (P720, 24, 3500));
+        let premium = StreamLimits::discord(2, 0).constrain(custom);
+        assert_eq!((premium.resolution, premium.fps, premium.bitrate_kbps), (Source, 24, 8000));
     }
     use super::*;
 
@@ -835,6 +848,7 @@ mod tests {
             quality: StreamQuality {
                 resolution: Resolution::Source,
                 fps: 60,
+                bitrate_kbps: 1800,
                 high_quality: true,
             },
             ..Default::default()

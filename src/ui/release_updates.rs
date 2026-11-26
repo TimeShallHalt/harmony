@@ -97,12 +97,12 @@ fn show(a: &Adapter, window: &YapfastWindow) {
             .into(),
     );
     view.set_can_download(
-        harmony_updates::WINDOWS_INSTALLER
-            && state.offered.as_ref().is_some_and(|r| r.has_installer)
+        state.offered.as_ref().is_some_and(Release::downloadable)
             && state.pending.is_none()
             && state.staged.is_none(),
     );
     view.set_windows_installer(harmony_updates::WINDOWS_INSTALLER);
+    view.set_can_install(harmony_updates::can_install());
     view.set_ready(state.staged.is_some());
     view.set_install_on_quit(state.armed);
 }
@@ -164,10 +164,10 @@ fn check(adapter: &Rc<RefCell<Adapter>>) {
         match result {
             Ok(Ok(Some(release))) => {
                 a.updates.status = format!("{} is available.", release.tag);
-                if !release.has_installer && harmony_updates::WINDOWS_INSTALLER {
+                if !release.downloadable() && harmony_updates::can_install() {
                     a.updates
                         .status
-                        .push_str(" This release has no signed installer.");
+                        .push_str(" This release has no signed package for this installation.");
                 }
                 if a.layout.harmony_release_checks {
                     let message = format!(
@@ -186,7 +186,10 @@ fn check(adapter: &Rc<RefCell<Adapter>>) {
             Err(_) => a.updates.status = "Update check interrupted.".into(),
         }
         let automatic = a.layout.harmony_release_downloads
-            && a.updates.offered.as_ref().is_some_and(|r| r.has_installer);
+            && a.updates
+                .offered
+                .as_ref()
+                .is_some_and(Release::downloadable);
         refresh(&a);
         drop(a);
         if automatic {
@@ -198,14 +201,10 @@ fn check(adapter: &Rc<RefCell<Adapter>>) {
 
 fn download(adapter: &Rc<RefCell<Adapter>>) {
     let mut a = adapter.borrow_mut();
-    if !harmony_updates::WINDOWS_INSTALLER
-        || !a.updates.active
-        || a.updates.pending.is_some()
-        || a.updates.staged.is_some()
-    {
+    if !a.updates.active || a.updates.pending.is_some() || a.updates.staged.is_some() {
         return;
     }
-    let Some(release) = a.updates.offered.clone().filter(|r| r.has_installer) else {
+    let Some(release) = a.updates.offered.clone().filter(Release::downloadable) else {
         return;
     };
     let profile = a.root.clone();
@@ -215,7 +214,7 @@ fn download(adapter: &Rc<RefCell<Adapter>>) {
     });
     let worker = task.abort_handle();
     a.updates.downloading = true;
-    a.updates.status = "Downloading and verifying Harmony Setup…".into();
+    a.updates.status = "Downloading and verifying the Harmony update…".into();
     let weak = Rc::downgrade(adapter);
     a.updates.watch(worker.clone(), async move {
         let result = task.await;
@@ -230,8 +229,7 @@ fn download(adapter: &Rc<RefCell<Adapter>>) {
         match result {
             Ok(Ok(staged)) => {
                 a.updates.staged = Some(staged);
-                a.updates.status =
-                    "Signature verified. You can run Setup the next time you quit Harmony.".into();
+                a.updates.status = "Signature verified. The update is ready to install.".into();
             }
             Ok(Err(error)) => a.updates.status = format!("Could not prepare this update. {error}"),
             Err(_) => a.updates.status = "Download interrupted.".into(),

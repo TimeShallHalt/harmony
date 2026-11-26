@@ -1865,9 +1865,18 @@ fn the_share_menu_fits_a_short_window_and_keeps_its_button() {
     }])));
     window.set_share_windows(titles("Window", 12));
     window.set_share_cameras(titles("Camera", 4));
+    // The test opens the popup directly, without the call's source button
+    // seeding the frame-rate field.
+    window.on_parse_volume(|text| {
+        if text.is_empty() {
+            30
+        } else {
+            yapfast_core::volume::parse_percentage(&text).unwrap_or(-1)
+        }
+    });
     let went = Rc::new(Cell::new(None));
     let seen = went.clone();
-    window.on_go_live(move |source, _, _, _| seen.set(Some(source)));
+    window.on_go_live(move |source, _, fps, bitrate, _| seen.set(Some((source, fps, bitrate))));
     window.invoke_show_share_menu();
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     // The menu ends 8px above the window's bottom, and Go Live is its last
@@ -1883,7 +1892,7 @@ fn the_share_menu_fits_a_short_window_and_keeps_its_button() {
     window
         .window()
         .dispatch_event(WindowEvent::PointerReleased { position, button });
-    assert_eq!(went.get(), Some(0), "Go Live is in the window");
+    assert_eq!(went.get(), Some((0, 30, 0)), "Go Live is in the window");
     window.hide().unwrap();
 }
 
@@ -10912,7 +10921,13 @@ fn yapfast_dm_heading_keeps_friend_and_new_message_actions() {
 
 #[test]
 fn yapfast_settings_navigation_and_header_keep_the_existing_actions() {
+    use i_slint_core::{
+        accessibility::{AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction},
+        item_tree::ItemRc,
+        window::WindowInner,
+    };
     use slint::platform::{Key, PointerEventButton, WindowEvent};
+    use std::ops::ControlFlow;
     i_slint_backend_testing::init_no_event_loop();
     let window = YapfastWindow::new().unwrap();
     window.set_own_title_bar(true);
@@ -10944,14 +10959,30 @@ fn yapfast_settings_navigation_and_header_keep_the_existing_actions() {
                 button: PointerEventButton::Left,
             });
     };
-    // Reference geometry: a 1400px card, 72px outer inset, 266px navigation.
-    click(350., 500.);
+    let choose_page = |label: &str| {
+        let inner = WindowInner::from_pub(window.window());
+        inner.ensure_tree_instantiated();
+        let row = ItemRc::new_root(inner.component())
+            .visit_descendants(|item| {
+                if item.is_visible()
+                    && item.accessible_string_property(AccessibleStringProperty::Label).as_deref() == Some(label)
+                    && item.supported_accessibility_actions().contains(SupportedAccessibilityAction::Default)
+                {
+                    ControlFlow::Break(item.clone())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .expect("actionable settings navigation row");
+        row.accessible_action(&AccessibilityAction::Default);
+    };
+    choose_page("Appearance");
     assert_eq!(
         window.get_settings_section(),
         7,
         "Appearance remains reachable"
     );
-    click(350., 340.);
+    choose_page("Voice & Video");
     assert_eq!(window.get_settings_section(), 1);
     assert_eq!(refreshed.get(), 1, "Voice still refreshes the device list");
     click(350., 180.);

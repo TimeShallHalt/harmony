@@ -13,6 +13,7 @@ export global LocalProfile {
     in property <bool> has-banner;
     in property <bool> has-decoration;
     in property <bool> can-save;
+    in property <bool> can-export;
     in property <string> status;
     callback editing(bool);
     callback choose-font(int);
@@ -21,12 +22,13 @@ export global LocalProfile {
     callback clear-image(bool);
     callback reset();
     callback save();
+    callback export-look();
 }
 
 export component LocalProfileSettings inherits VerticalLayout {
     spacing: 12px;
     SettingsTitle { text: "Local profile"; }
-    Label { text: "Only you see these changes in Harmony on this device. Everyone else sees your Discord profile."; }
+    Label { text: "Your changes are saved on this device. You can share an exported appearance file with other Harmony users."; }
     if LocalProfile.available: VerticalLayout {
         spacing: 12px;
         SettingsHeading { text: "Preview"; }
@@ -64,6 +66,11 @@ export component LocalProfileSettings inherits VerticalLayout {
             spacing: 8px; alignment: start;
             ActionButton { text: "Save on this device"; primary: true; enabled: LocalProfile.can-save; clicked => { LocalProfile.save(); } }
             ActionButton { text: "Restore profile defaults"; clicked => { LocalProfile.reset(); } }
+        }
+        ActionButton {
+            text: "Export saved appearance…"; enabled: LocalProfile.can-export;
+            horizontal-stretch: 0;
+            clicked => { LocalProfile.export-look(); }
         }
     }
     if LocalProfile.status != "": Label { text: LocalProfile.status; }

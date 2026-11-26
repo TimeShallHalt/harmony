@@ -70,6 +70,29 @@ cargo build --locked --profile fast --no-default-features --features desktop,dis
 
 Do not distribute this native development build as a production release; upstream's packaging documentation requires its supported cross-build route for releases.
 
+## Windows build storage cleanup
+
+On 2026-11-23 the Harmony workspace occupied 227.2 GiB on disk. Earlier test runs retained 112.3 GiB under `.local/evidence`, native builds retained 54.2 GiB under `.local/native-cache`, and Cargo's `fast` profile retained 53.3 GiB under `target/fast`, including incremental compiler data. After the targeted cleanup, C: went from 24.3 GiB free to 181.8 GiB free, a gain of about 157.5 GiB.
+
+The cleanup removed the `fast` build directory, cached executables and Rust libraries from `urgent-combined`, and compiled libraries and symbols from the `update4` and `urgent-fixes` test runs. The old test-run folders still contain their handoff reports.
+
+Run the relevant steps from the `Harmony-App` root after builds and tests finish. Add `--dry-run` to `cargo clean` or `-WhatIf` to `Remove-Item` to preview that step.
+
+```powershell
+cargo clean --profile fast --target-dir target
+
+Get-ChildItem -LiteralPath '.local\native-cache\urgent-combined' -File -Recurse -Force |
+    Where-Object { $_.Extension -in '.exe', '.rlib' } |
+    Remove-Item -Force
+
+$oldRuns = '.local\evidence\update4', '.local\evidence\urgent-fixes'
+Get-ChildItem -LiteralPath $oldRuns -File -Recurse -Force |
+    Where-Object { $_.Extension -in '.rlib', '.rmeta', '.pdb' } |
+    Remove-Item -Force
+```
+
+The next `fast` build recompiles dependencies, and deleting the `.pdb` files removes the symbols for those specific old builds. Follow [AGENTS.md](AGENTS.md) for routine cleanup after future updates.
+
 ## Verified first milestone
 
 Harmony is installed alongside the stock rollback app at `%LOCALAPPDATA%\Programs\Harmony\yapfast.exe`. Start menu shortcuts are `Harmony` (normal mode, isolated `%LOCALAPPDATA%\Harmony\data`) and `Harmony Preview` (account-free, isolated preview data). The installed development executable SHA-256 is `7bbe8b57ca09616626e08e629da52b906593d67505ef721d366175f02d37504f`; installed/source-build hashes matched and Defender reported no threats. It launched and rendered as Harmony.

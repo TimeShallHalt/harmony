@@ -14,7 +14,7 @@ The call origin follows received connected/reconnecting voice transitions, befor
 
 ## Independent voice and stream volume
 
-The native per-person volume menu retains the existing independent voice/stream gains and Discord-compatible 0–200% slider curve. Exact whole-percentage entry uses the same bounded scale, and commits with Enter or Set. Invalid entries and invalid callback values are rejected; non-finite gains cannot poison the in-memory audio settings. Committed gains are stored locally and restored across window recreation. The ordinary voice and stream defaults remain distinct; resetting one does not reset the other. These are local gains, not remote account settings.
+The native per-person volume menu keeps independent voice and stream gains, with Discord's curve through the slider's 200% endpoint. The exact field accepts higher whole percentages and commits with Enter or Set. Harmony rejects invalid entries and non-finite gains. It stores committed gains locally and restores them across window recreation. Voice and stream have separate defaults.
 
 ## Device-local contact timezones
 

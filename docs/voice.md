@@ -198,11 +198,13 @@ ComboBox sets its own index as it's used, which undoes a one-way binding
 and left it showing another device once the list changed. Yapfast calls'
 own audio goes through WebRTC's device module, which these don't cover.
 
-Right-clicking someone in a call, in the sidebar or on their tile, sets how
-loud they sound from 0% to 200%, and their stream's sound too while they're
-live. A drag snaps to 100% near it. The sliders follow Discord's, read from its
+Right-click someone in a call to change their voice volume and, while they are
+live, their stream volume and sharpness. The sliders run from 0% to 200% and
+snap to 100%. Enter a higher whole percentage in the exact field and press
+Enter or Set. Output can clip at high gains. The sliders follow Discord's, read from its
 web client: below 100% the gain is `(slider / 100)^2.8`, so 50% is about −17 dB
-and 40% a gain of 0.077; above it each 100% adds 6 dB (`volume::from_slider`).
+and 40% a gain of 0.077. Between 100% and 200%, each 100% adds 6 dB
+(`volume::from_slider`). Above 200%, the gain rises proportionally.
 A linear slider had a music bot at 4% to sound as Discord's 40% did. A
 stream's sound plays at Discord's default gain of 0.18, about 54% on the
 slider, and voices at 1.0. Yapfast remembers the gains by Discord or Matrix
@@ -214,8 +216,8 @@ track's volume through WebRTC's `SetVolume` by track id.
 
 Settings › Voice & video has a volume under each device, as Discord's
 does: "Microphone volume" sets how loud every call sends you, and "Speaker
-volume" how loud every call plays, both from 0% to 200% on the same curve
-as a person's volume, with 100% marked. Dragging plays each step at once,
+volume" how loud every call plays. Both use the same slider and exact
+entry as per-person volume. Dragging plays each step at once,
 and letting go saves the value in `layout.json` (`microphone_volume`,
 `speaker_volume`). Everyone in a call, and their stream's sound, plays at
 their own volume times the speakers' (`volume::heard`), so Yapfast calls
@@ -224,7 +226,7 @@ microphone's volume applies with leveling, as one gain ramped across each
 10 ms block, and like leveling it never pushes a peak past 90% of full
 scale, so a boosted microphone doesn't clip on a shout; leveling hears the
 voice before the volume, so changing it doesn't move your usual level.
-Yapfast's own sounds keep their volume in Settings › Sounds.
+Harmony's own sounds have a separate slider and exact entry in Settings › Sounds.
 
 Settings' "Even out your voice", on unless turned off, levels the microphone
 after WebRTC's processing. Yapfast follows your usual speaking level over the last

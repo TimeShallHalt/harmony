@@ -1,21 +1,16 @@
 # Packaging and releases
 
-Harmony is independently versioned as `1.1.0`, based on
+Harmony is independently versioned, based on
 [Yapfast 0.4.1](https://github.com/yapfast/yapfast) by wiredtenshi and contributors.
 The Cargo package remains `yapfast`; its explicit binary target is `Harmony`.
 Windows produces `Harmony.exe`; native Linux builds produce
 `target/<profile>/Harmony`, and Linux packages install the command as `harmony`.
 Development instructions are in [building](building.md).
 
-**Updates are manual.** The stock Yapfast updater is disconnected from the
-application and UI. These packaging tools do not upload, install or launch the
-app or configure an upstream update feed. Keep the exact corresponding source,
-original GPL license, upstream credits and dependency notices with distributed
-builds. Local packaging is not evidence of a published release or signature.
-
-Windows and Linux are first-class targets, but these instructions are not build
-receipts. The merged fork's full Linux/Nix/AppImage build and optional native MSI
-compilation still need validation in their respective environments.
+Harmony checks its stable GitHub releases in **Settings → About**. Publish
+the signed update files and their matching packages on the same release. Keep
+the corresponding source, GPL license, upstream credits and dependency notices
+with distributed builds.
 
 ## Windows portable package
 
@@ -65,6 +60,17 @@ Existing data and credential identifiers keep legacy Yapfast names for compatibi
 `nix/appimage.nix` leaves update information empty and clears the runtime's
 `.upd_info` section. `scripts/package-linux.py` rejects nonempty update metadata
 before packing and from `--appimage-updateinformation` on the finished file.
+
+For a build-stamped release, build the clean checkout with a positive
+`HARMONY_BUILD_ID` and `YAPFAST_RELEASE=1` in the native Nix development
+shell. Source `scripts/release-env x86_64-unknown-linux-gnu` for the path
+remaps, then build with `cargo build --locked --release --no-default-features
+--features desktop,discord --bin Harmony`. Pass `--exe PATH`, `--stamp PATH`
+and `--runtime PATH` to `scripts/package-linux.py` in that environment with
+patchelf, readelf, rsvg-convert and mksquashfs available. Use the build's
+`harmony-build-info.json` and the runtime pinned in
+`packaging/linux/appimage-policy.json`. Both producers enforce the same ABI
+floors and host-library allowlist.
 
 Nix builds `nix/package.nix`'s Discord-only release configuration.
 `nix/appimage.nix` puts the unwrapped binary in an AppDir with the desktop file,
@@ -171,24 +177,18 @@ a clean candidate nor a validated release.
 
 ## Newer releases
 
-Harmony does not check GitHub for stock releases, announce, download or apply
-them, or offer **Update and restart**. About says the updater is not included.
-Legacy saved updater preferences do not enable a fork update service. Update
-manually from a trusted, verified Harmony build, quitting only when convenient.
+The feed reads the latest stable release of `TimeShallHalt/harmony` and
+orders canonical `harmony-vMAJOR.MINOR.PATCH-bBUILD` tags by version and build
+number. Use a positive, increasing build ID when releasing a new build at the
+same version. Drafts, prereleases and unrelated tags stay outside the feed.
+The About page provides release notes and the release page link.
 
-### What's new
-
-Read reviewed fork change notes and matching source. The inherited release-note
-parser in `src/update.rs` is disconnected, not an active release-description feed.
-
-### Updating itself
-
-Retained `src/update.rs`, `src/update/install.rs`, `src/update/signature.rs` and
-`ui/about_updates.slint` are upstream machinery, not active fork self-install
-support. Upstream's design compared SemVer, verified minisign-signed checksums,
-smoke-tested writable AppImages before atomic replacement, or ran a Windows
-installer after shutdown. None is a supported Harmony update route. Do not
-reconnect upstream repositories, keys or artifact patterns as a fork updater.
+On Windows x64, Harmony verifies the publisher's manifest and installer
+before offering to run Setup on full quit. On Linux x86_64, a running
+AppImage in a writable user-owned folder can download and verify its
+replacement. Full quit applies the replacement atomically when enabled, and
+the next launch runs the new version. Other Linux installation types can
+open the release page to get the update.
 
 ### New tags
 
@@ -205,17 +205,18 @@ before assigning new introduction versions.
 
 ## Signing releases
 
-Local producers write SHA-256 checksums, **not signatures or authenticated
-transport**. Do not call an artifact signed without a real verification receipt.
-No Harmony signing identity or signing service is established by these docs.
+Use `scripts/sign-harmony-update.ps1` on the Windows publisher account with
+the existing Harmony CNG key. The desktop updater pins
+`packaging/keys/harmony-update.pub`. The signature authenticates the platform,
+tag, filename, SHA-256 and length in the manifest. It is used by the Harmony
+updater and is separate from Windows Authenticode.
 
-`packaging/keys/*.pub`, `scripts/sign-release` and signature fixtures are retained
-from upstream. The inherited trusted-comment format is `yapfast TAG SHA256SUMS.txt`;
-its stable, backup and nightly keys are Yapfast trust material, not Harmony's.
-Their presence does not authenticate a fork build, and the disconnected updater
-does not use them. A future fork policy needs separately provisioned keys,
-provenance and validation; do not assume possession of upstream private keys or
-reuse upstream signatures.
+For Windows run the [Setup signing command](../packaging/windows-installer.md)
+and attach `harmony-update.json` and `harmony-update.json.sig`. For Linux
+pass `-Platform linux-x64 -AppImage PATH` together with the same tag and
+output directory. Attach `harmony-update-linux-x64.json` and
+`harmony-update-linux-x64.json.sig`. Upload both packages, the source
+archives and checksums before publishing the release as latest stable.
 
 ## The app icon
 

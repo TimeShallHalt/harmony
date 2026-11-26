@@ -1,5 +1,9 @@
 # UI fonts
 
+The system24-v2 theme embeds DM Mono Light, Regular, Italic and Medium from
+[Google Fonts](https://github.com/google/fonts/tree/986a8089ce76db1064d1baf745dcde8cde756f45/ofl/dmmono)
+under the [SIL Open Font License 1.1](LICENSE-OFL-DMMono.txt).
+
 The default presentation uses DM Sans, an open-source
 alternative to Discord's custom gg sans. The unmodified variable TTF files
 `DMSans[opsz,wght].ttf` and `DMSans-Italic[opsz,wght].ttf` come from
