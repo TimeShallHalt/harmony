@@ -216,6 +216,10 @@ impl<'a> Video<'a> {
 
     /// Decodes up to the next picture or sound, in the order the file has them.
     pub fn decode(&mut self) -> Result<Next> {
+        // An audio-only source has no video decoder to call.
+        if self.width == 0 {
+            return Ok(self.decode_sound()?.map_or(Next::End, Next::Sound));
+        }
         self.next(true).map(|next| next.expect("pictures come"))
     }
 
