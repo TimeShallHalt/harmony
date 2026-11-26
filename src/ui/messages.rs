@@ -960,7 +960,7 @@ fn card_row<'a>(
                 _ => None,
             };
             let button = match beside {
-                Some(Beside::Button(button)) => Some(card_button(button, &message.emoji)),
+                Some(Beside::Button(button)) => Some(card_button(button, message)),
                 _ => None,
             };
             CardRow {
@@ -1007,7 +1007,7 @@ fn card_row<'a>(
             buttons: ModelRc::new(VecModel::from(
                 buttons
                     .iter()
-                    .map(|button| card_button(button, &message.emoji))
+                    .map(|button| card_button(button, message))
                     .collect::<Vec<_>>(),
             )),
             ..Default::default()
@@ -1043,11 +1043,12 @@ const EMBED_THUMBNAIL: i32 = 96;
 
 fn card_button(
     button: &yapfast_core::chat::CardButton,
-    emoji: &[yapfast_core::chat::CustomEmoji],
+    message: &ChatMessage,
 ) -> CardButton {
     use yapfast_core::chat::ButtonStyle;
     CardButton {
-        label: custom_emoji::text(&button.label, emoji).into(),
+        label: custom_emoji::text(&button.label, &message.emoji).into(),
+        opens_activity: button.opens_hosted_activity(message.bot || message.application_id.is_some()),
         style: match button.style {
             ButtonStyle::Primary => CardButtonStyle::Primary,
             ButtonStyle::Secondary => CardButtonStyle::Secondary,

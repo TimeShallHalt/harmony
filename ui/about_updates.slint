@@ -1,6 +1,6 @@
 import { Theme, Label, Middle } from "theme.slint";
 import { SettingsTitle, SettingsHeading, SettingsSwitch, Choices } from "settings.slint";
-import { ActionButton, Avatar, StatusText } from "controls.slint";
+import { ActionButton, Avatar, StatusText, TextField } from "controls.slint";
 import { BuildInfo } from "yapfast/build-info.slint";
 
 export global HarmonyAbout {
@@ -15,6 +15,10 @@ export global HarmonyAbout {
     in-out property <bool> can-download;
     in-out property <bool> ready;
     in-out property <bool> install-on-quit;
+    in-out property <bool> idle-restart;
+    in-out property <string> idle-minutes;
+    in-out property <bool> can-restart;
+    in-out property <bool> update-restart-ready;
     in-out property <string> update-status;
     in-out property <string> release-page;
     in-out property <string> release-notes;
@@ -22,6 +26,8 @@ export global HarmonyAbout {
     callback download-release;
     callback cancel-update;
     callback arm-install(bool);
+    callback save-idle-options(bool, string) -> string;
+    callback restart-update;
     callback save-update-options(bool, bool, int);
 }
 export component AboutUpdatesSettings inherits VerticalLayout {
@@ -84,9 +90,33 @@ export component AboutUpdatesSettings inherits VerticalLayout {
             chosen(index) => { HarmonyAbout.save-update-options(true, HarmonyAbout.download-automatically, index); }
         }
         if HarmonyAbout.can-install: SettingsSwitch {
-            text: "Download signed updates automatically"; description: "Keep the verified update ready for your next full quit.";
+            text: "Download signed updates automatically"; description: "Prepare updates in the background and apply them on your next full quit.";
             checked: HarmonyAbout.download-automatically; controlled: true;
             toggled(on) => { HarmonyAbout.save-update-options(HarmonyAbout.check-automatically, on, HarmonyAbout.interval-index); }
+        }
+        if HarmonyAbout.can-restart: SettingsSwitch {
+            text: "Restart when idle";
+            description: "Wait until Harmony is unfocused and there are no calls or unfinished drafts.";
+            checked: HarmonyAbout.idle-restart; controlled: true;
+            toggled(on) => { HarmonyAbout.save-idle-options(on, HarmonyAbout.idle-minutes); }
+        }
+        if HarmonyAbout.can-restart && HarmonyAbout.idle-restart: idle-settings := VerticalLayout {
+            property <string> warning;
+            spacing: 6px;
+            Label { text: "Idle minutes (0 waits for a manual restart)"; }
+            HorizontalLayout {
+                alignment: start; spacing: 8px;
+                idle-field := TextField {
+                    text: HarmonyAbout.idle-minutes; label: "Idle minutes";
+                    max-width: 120px; min-height: 32px;
+                    accepted => { idle-settings.warning = HarmonyAbout.save-idle-options(true, self.text); }
+                }
+                ActionButton {
+                    text: "Save idle time"; small: true;
+                    clicked => { idle-settings.warning = HarmonyAbout.save-idle-options(true, idle-field.text); }
+                }
+            }
+            if idle-settings.warning != "": Text { text: idle-settings.warning; color: Theme.danger; wrap: word-wrap; }
         }
         if HarmonyAbout.update-status != "": Text {
             text: HarmonyAbout.update-status; color: Theme.text; font-size: 14px; wrap: word-wrap;
@@ -97,6 +127,10 @@ export component AboutUpdatesSettings inherits VerticalLayout {
             if HarmonyAbout.busy: ActionButton { text: "Cancel"; clicked => { HarmonyAbout.cancel-update(); } }
             if HarmonyAbout.can-download: ActionButton { primary: true; text: "Download update"; clicked => { HarmonyAbout.download-release(); } }
             if HarmonyAbout.release-page != "": ActionButton { text: "View release"; clicked => { root.open-link(HarmonyAbout.release-page); } }
+        }
+        if HarmonyAbout.update-restart-ready: ActionButton {
+            text: "Restart to update"; primary: true;
+            clicked => { HarmonyAbout.restart-update(); }
         }
         if HarmonyAbout.ready: SettingsSwitch {
             text: HarmonyAbout.windows-installer ? "Run Setup when I quit Harmony" : "Install when I quit Harmony";

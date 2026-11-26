@@ -1,3 +1,5 @@
+import { TimezoneEditor } from "personal-controls.slint";
+export { CallWindow } from "call-window.slint";
 import { AccountPopover } from "yapfast/account-popover.slint";
 import { VoiceNotes, VoiceNoteDialog } from "voice_notes.slint";
 export { VoiceNotes } from "voice_notes.slint";
@@ -7,7 +9,7 @@ import { ClipConversion, ClipConversionDialog } from "clip-conversion.slint";
 export { ClipConversion } from "clip-conversion.slint";
 export { DmCategories } from "dm-categories.slint";
 export { CameraBackground } from "settings.slint";
-import { OrbsSettings } from "orbs.slint";
+import { QuestsScreen } from "orbs.slint";
 export { Orbs, QuestRow, OrbItemRow } from "orbs.slint";
 export { LocalProfile } from "local-profile.slint";
 import { ClientStyle } from "yapfast/style.slint";
@@ -16,7 +18,7 @@ import { TerminalPanelOutline } from "controls.slint";
 import { WindowBar } from "yapfast/window-bar.slint";
 import { AboutUpdatesSettings } from "about_updates.slint";
 import { Palette } from "std-widgets.slint";
-import { ListView, Autoscroll, AutoscrollMarker } from "scrollview.slint";
+import { ScrollView, ListView, Autoscroll, AutoscrollMarker } from "scrollview.slint";
 // The UI's typeface, Atkinson Hyperlegible Next; ExtraBold serves weight 900.
 import "fonts/DMSans[opsz,wght].ttf";
 import "fonts/DMSans-Italic[opsz,wght].ttf";
@@ -62,7 +64,7 @@ import { InboxRow, InboxPopout } from "yapfast/inbox.slint";
 import { GifPicker, GifTile, PickerTab } from "gifs.slint";
 import { StickerPicker, StickerGridTile } from "stickers.slint";
 import { ServerTags, ActionButton, IconButton, Motion, PingToggle, DeviceToggle, Avatar, TextField, MessagesSkeleton, ContextMenu, MenuItem, MenuRow, QuickDeviceMenu, HeaderToggle, Banner, StatusText, Nameplate, AccountLook, PictureStore } from "controls.slint";
-import { PersonRow, VoiceCard, CallLink, CallLinkCard, LinkTouch, SignalIcon, VoiceDock, StreamPip, CallInvite, JoinVoice, ParticipantGrid, CallControls, IncomingCall, SwitchDialog, InputLevel, ShareMenu, ShareScreen, VolumeMenu, Soundboard, SoundRow } from "voice.slint";
+import { PersonRow, VoiceCard, CallLink, CallLinkCard, LinkTouch, SignalIcon, VoiceDock, StreamPip, CallInvite, JoinVoice, ParticipantGrid, CallControls, IncomingCall, SwitchDialog, InputLevel, ShareMenu, ShareScreen, ShareSize, VolumeMenu, Soundboard, SoundRow } from "voice.slint";
 import { ServerRow, RoomRow, StatusDot, ServerRail, ServerHeader, RoomList, VoiceCardView } from "rail.slint";
 import { StagedFile, StagedTile, Composer, MentionRow, MentionList, EmojiSuggestions, RequestBar, TypingPrivacy } from "composer.slint";
 import { InlineEdit, EmojiCell, EmojiRow, EmojiTile, EmojiSection, RailSection, EmojiCard, EmojiCardView, MessageStickerCard, MessageStickerCardView, MessageRow, ReactionToggle, EmojiButton, EmojiPicker, MessageMenu, MessageGallery, MessageStickers, FileCard, MessageContent, EmbedView, BotTag, NoConversation, ConversationStart, HistoryEdge, UnreadBar, PresentBar, ImageViewer, VideoViewer, VideoPlayer, VoicePlayer, Polls } from "messages.slint";
@@ -97,7 +99,7 @@ export { NewTags } from "yapfast/new-tags.slint";
 export { InboxRow } from "yapfast/inbox.slint";
 export { Theme, Badges, Popup, Twemoji, Looks } from "theme.slint";
 export { Autoscroll } from "scrollview.slint";
-export { PersonRow, CallLink, ShareScreen, VoiceCard } from "voice.slint";
+export { PersonRow, CallLink, ShareScreen, ShareSize, VoiceCard } from "voice.slint";
 export { ServerRow, RoomRow, FolderServer } from "rail.slint";
 export { PictureStore, EmojiAnimations, Motion, AccountLook, NameStyleRow, NameLetter, EffectLayer, NameStyles, ActivityClock, ServerTags } from "controls.slint";
 export { ServerTagRow } from "server.slint";
@@ -1008,7 +1010,10 @@ export component YapfastWindow inherits Window {
     callback choose-entrance-sound(string);
     /// The call's grid of tiles is on screen, in its conversation or over
     /// the whole window.
-    out property <bool> grid-shown: root.stage-full || (root.voice-here && (root.voice-panel || root.call-shown));
+    in property <bool> call-popped;
+    callback pop-out-call;
+    public function exit-call-fullscreen() { root.stage-full = false; }
+    out property <bool> grid-shown: root.call-popped || root.stage-full || (root.voice-here && (root.voice-panel || root.call-shown));
     /// The streams of those who film too, in tiles of their own, as indexes of
     /// `participants`; see ParticipantGrid.
     in property <[int]> stream-tiles;
@@ -1027,7 +1032,7 @@ export component YapfastWindow inherits Window {
     in property <int> pip-kind;
     in property <int> pip-person: -1;
     in property <int> pip-slot: -1;
-    out property <bool> pip-shown: root.workspace && root.voice-active && root.pip-kind != 0 && !root.call-on-screen && !root.stage-full;
+    out property <bool> pip-shown: root.workspace && root.voice-active && root.pip-kind != 0 && !root.call-on-screen && !root.stage-full && !root.call-popped;
     /// Sharing a screen is offered in Discord calls.
     in property <bool> can-share;
     in property <bool> sharing;
@@ -1036,6 +1041,8 @@ export component YapfastWindow inherits Window {
     /// screen's own size; frames a second; and whether the encoder works
     /// harder for a sharper picture.
     in property <int> share-resolution: 1;
+    in property <string> share-size;
+    in property <bool> share-cursor: true;
     in property <int> share-fps: 30;
     in property <int> share-bitrate;
     in property <int> share-max-resolution: 0;
@@ -1073,6 +1080,7 @@ export component YapfastWindow inherits Window {
     /// The Discord friends list, the friends around in it, and how many
     /// friends there are before its search.
     in property <bool> friends-open;
+    in property <bool> quests-open;
     in property <[FriendRow]> friends;
     in property <[FriendRow]> friends-online;
     /// Active Now beside the friends list, when the window is wide enough.
@@ -1083,6 +1091,7 @@ export component YapfastWindow inherits Window {
     in-out property <bool> friends-all;
     callback friend-filter-edited;
     callback open-friends;
+    callback open-quests;
     /// Open the DM with a friend, by user id.
     callback message-friend(string);
     /// A Community server's channel list opens Browse Channels, which is on
@@ -1315,11 +1324,10 @@ export component YapfastWindow inherits Window {
     property <bool> editing-local-profile: root.settings-open && root.settings-section == 11;
     changed editing-local-profile => { LocalProfile.editing(self.editing-local-profile); }
     callback orbs-page(bool);
-    property <bool> viewing-orbs: root.settings-open && root.settings-section == 12;
     property <bool> returning-to-orbs;
-    changed viewing-orbs => { root.returning-to-orbs = false; root.orbs-page(self.viewing-orbs); }
+    changed quests-open => { root.returning-to-orbs = false; root.orbs-page(self.quests-open); }
     changed window-focused => {
-        if self.window-focused && root.returning-to-orbs && root.viewing-orbs {
+        if self.window-focused && root.returning-to-orbs && root.quests-open {
             root.returning-to-orbs = false;
             root.orbs-page(true);
         }
@@ -1567,7 +1575,8 @@ export component YapfastWindow inherits Window {
     /// in share-resolution, frame rate, and quality, as in share-high-quality.
     /// Where the system's dialog picks a screen or window (!share-lists), a
     /// choice of it comes before the cameras.
-    callback go-live(int, int, int, int, bool);
+    callback go-live(int, int, string, int, int, bool, bool);
+    pure callback parse-share-size(string) -> ShareSize;
     /// While sharing, share what the share menu lists at this index in place
     /// of what's shared, as go-live counts them.
     callback switch-live(int);
@@ -1579,10 +1588,15 @@ export component YapfastWindow inherits Window {
     in property <[string]> share-windows;
     in property <[string]> share-cameras;
     callback list-share-sources();
+    in-out property <bool> share-picker-in-call-window;
+    in-out property <int> share-source-request;
+    callback popout-share-sources-ready;
     /// Opens the share menu once its lists are in. Switching where the
     /// system's dialog picks and there's no camera goes straight to the dialog.
     public function show-share-menu() {
-        if root.pick-switch && !root.share-lists && root.share-cameras.length == 0 {
+        if root.share-picker-in-call-window {
+            root.popout-share-sources-ready();
+        } else if root.pick-switch && !root.share-lists && root.share-cameras.length == 0 {
             root.switch-live(0);
         } else {
             share-menu.show();
@@ -2054,6 +2068,8 @@ export component YapfastWindow inherits Window {
     // The quality picked in the share menu, from the last choice each time it opens.
     property <int> pick-source;
     property <int> pick-resolution;
+    property <string> pick-size;
+    property <bool> pick-cursor;
     property <string> pick-fps;
     property <string> pick-bitrate;
     property <bool> pick-high-quality;
@@ -2061,8 +2077,11 @@ export component YapfastWindow inherits Window {
     property <bool> pick-switch;
     function open-share-menu(x: length, y: length) {
         root.menu-x = x; root.menu-y = y;
+        root.share-picker-in-call-window = false;
         root.pick-source = 0;
         root.pick-resolution = root.share-resolution;
+        root.pick-size = root.share-size;
+        root.pick-cursor = root.share-cursor;
         root.pick-fps = root.share-fps;
         root.pick-bitrate = root.share-bitrate == 0 ? "" : root.share-bitrate + "";
         root.pick-high-quality = root.share-high-quality;
@@ -2089,28 +2108,33 @@ export component YapfastWindow inherits Window {
         }
     }
     share-menu := PopupWindow {
-        x: max(8px, min(root.width - self.width - 8px, root.menu-x - 6px));
-        y: max(8px, root.menu-y - self.height - 6px);
-        // Wider for the screens' pictures.
-        width: root.share-screens.length > 0 ? 336px : 240px;
-        // No taller than the window has room for: with many windows and
-        // cameras listed, or the window short or zoomed, its choices scroll.
+        property <length> main-width: min(root.width - 16px, root.share-screens.length > 0 ? 336px : 260px);
+        property <length> side-width: 248px;
+        property <bool> cascades: root.width >= self.main-width + self.side-width + 16px;
+        property <bool> flip: self.cascades && root.menu-x + self.width > root.width - 8px;
+        x: max(8px, min(root.width - self.width - 8px, root.menu-x - 6px - (self.flip ? self.side-width : 0px)));
+        y: max(8px, root.menu-y - min(share-content.full-height, root.height - 16px) - 6px);
+        width: self.main-width + (self.cascades ? self.side-width : 0px);
         height: min(share-content.full-height, root.height - 16px);
         close-policy: PopupClosePolicy.close-on-click-outside;
         share-content := ShareMenu {
+            panel-width: share-menu.main-width; secondary-width: share-menu.side-width;
+            cascades: share-menu.cascades; flip: share-menu.flip;
             screens: root.share-screens; windows: root.share-windows; cameras: root.share-cameras;
             dialog: !root.share-lists; switching: root.pick-switch;
             max-resolution: root.share-max-resolution;
             fps-720: root.share-fps-720; fps-hd: root.share-fps-hd;
             pick-source <=> root.pick-source; pick-resolution <=> root.pick-resolution; pick-fps <=> root.pick-fps;
-            pick-high-quality <=> root.pick-high-quality;
-            pick-bitrate <=> root.pick-bitrate;
+            pick-high-quality <=> root.pick-high-quality; pick-cursor <=> root.pick-cursor;
+            pick-size <=> root.pick-size; pick-bitrate <=> root.pick-bitrate;
             parse-whole(text) => { return root.parse-volume(text); }
-            go-live(source, resolution, fps, bitrate, high-quality) => {
+            parse-size(text) => { return root.parse-share-size(text); }
+            close => { share-menu.close(); }
+            go-live(source, resolution, size, fps, bitrate, high-quality, show-cursor) => {
                 if root.pick-switch {
                     root.switch-live(source);
                 } else {
-                    root.go-live(source, resolution, fps, bitrate, high-quality);
+                    root.go-live(source, resolution, size, fps, bitrate, high-quality, show-cursor);
                 }
                 share-menu.close();
             }
@@ -2885,7 +2909,7 @@ export component YapfastWindow inherits Window {
                                 open-add-friend => { root.open-add-friend(); }
                                 open-new-dm => { root.open-new-dm(); }
                                 rooms: root.rooms; dms-selected: root.dms-selected; discord-linked: root.discord-linked; preview: root.preview;
-                                friends-open: root.friends-open; requests-current: root.requests-current; requests-badge: root.requests-badge;
+                                friends-open: root.friends-open; quests-open: root.quests-open; requests-current: root.requests-current; requests-badge: root.requests-badge;
                                 browse-offered: root.browse-offered && !ClientStyle.enabled; browsing: root.browse-open;
                                 open-browse => { root.open-browse(); }
                                 voice-channel: root.voice-channel; participants: root.participants; sidebar-empty: root.sidebar-empty;
@@ -2894,6 +2918,7 @@ export component YapfastWindow inherits Window {
                                 wave(user) => { root.message-from-profile(user, "\u{1F44B}"); }
                                 open-chat(id) => { root.open-chat(id); }
                                 open-friends => { root.open-friends(); }
+                                open-quests => { root.open-quests(); }
                                 open-requests => { root.open-requests(); }
                                 open-room-menu(id, x, y) => { root.open-context-menu(id, false, x, y); }
                                 open-voice-menu(room, person, x, y) => { root.open-voice-menu(room, person, x, y); }
@@ -2956,6 +2981,8 @@ export component YapfastWindow inherits Window {
                     open-soundboard(x, y) => { root.open-soundboard(x, y); }
                     open-call-link(x, y, width, height) => { root.open-call-link(x, y, width, height); }
                     open-call => { root.open-call(); }
+                    call-popped: root.call-popped;
+                    pop-out => { root.pop-out-call(); }
                 }
                 // Inset the account card while preserving the inherited controls.
                 VerticalLayout {
@@ -3101,11 +3128,12 @@ export component YapfastWindow inherits Window {
                         if root.room-parent != "" && root.room-selected: Image { source: @image-url("icons/chevron-right.svg"); width: 16px; image-fit: contain; colorize: Theme.faint; }
                         if !root.room-direct && root.room-selected: Image { source: root.room-icon; width: 22px; image-fit: contain; colorize: Theme.muted; }
                         if root.requests-open: Image { source: @image-url("icons/inbox.svg"); width: 22px; image-fit: contain; colorize: Theme.muted; }
+                        if root.quests-open: Image { source: @image-url("icons/gem.svg"); width: 22px; image-fit: contain; colorize: Theme.muted; }
                         if root.friends-open: Image { source: @image-url("icons/users.svg"); width: 22px; image-fit: contain; colorize: Theme.muted; }
                         if root.browse-open: Image { source: @image-url("icons/hash.svg"); width: 22px; image-fit: contain; colorize: Theme.muted; }
                         Text {
-                            text: root.room-selected ? root.room-name : root.requests-open ? "Requests" : root.friends-open ? "Friends" : root.browse-open ? "Browse Channels" : root.sidebar-title;
-                            color: root.room-selected || root.requests-open || root.friends-open || root.browse-open ? Theme.text : Theme.secondary;
+                            text: root.room-selected ? root.room-name : root.requests-open ? "Requests" : root.friends-open ? "Friends" : root.quests-open ? "Quests" : root.browse-open ? "Browse Channels" : root.sidebar-title;
+                            color: root.room-selected || root.requests-open || root.friends-open || root.quests-open || root.browse-open ? Theme.text : Theme.secondary;
                             font-size: 16px; font-weight: 700; overflow: elide; vertical-alignment: center;
                             // The name gives way to what follows it, and fills the bar when nothing does.
                             horizontal-stretch: (root.room-has-activity && root.room-direct) || root.friends-open || root.has-topic ? 0 : 1;
@@ -3367,7 +3395,12 @@ export component YapfastWindow inherits Window {
                                 call-encrypted: root.call-encrypted; voice-active: root.voice-active; can-join: root.can-join;
                                 join-voice => { root.join-voice(); }
                             }
-                            if root.voice-here: VerticalLayout {
+                            if root.voice-here && root.call-popped: ActionButton {
+                                text: "Show call window";
+                                icon: @image-url("icons/external-link.svg");
+                                clicked => { root.pop-out-call(); }
+                            }
+                            if root.voice-here && !root.call-popped: VerticalLayout {
                                 spacing: 0px;
                                 HorizontalLayout {
                                     padding: 16px; padding-bottom: 0px;
@@ -3395,6 +3428,7 @@ export component YapfastWindow inherits Window {
                                     can-share: root.can-share; sharing: root.sharing;
                                     can-film: root.can-film; camera-on: root.camera-on; camera-starting: root.camera-starting;
                                     can-soundboard: root.can-soundboard;
+                                    can-pop-out: true; pop-out => { root.pop-out-call(); }
                                     toggle-camera => { root.toggle-camera(); }
                                     toggle-mute => { root.toggle-mute(); }
                                     toggle-deafen => { root.toggle-deafen(); }
@@ -3896,6 +3930,11 @@ export component YapfastWindow inherits Window {
                                 remove(id) => { root.remove-friend-request(id); }
                                 open(id) => { root.select-room(id); }
                             }
+                            if root.quests-open: QuestsScreen {
+                                width: parent.width; height: parent.height;
+                                refresh => { root.orbs-page(true); }
+                                visit(url) => { root.returning-to-orbs = true; root.open-link(url); }
+                            }
                             if root.friends-open: FriendsScreen {
                                 // At the left, with Active Now at the right.
                                 x: 0px; y: 0px;
@@ -3924,7 +3963,7 @@ export component YapfastWindow inherits Window {
                                 follow(id, on) => { root.browse-follow(id, on); }
                                 view(id) => { root.select-room(id); }
                             }
-                            if !root.room-selected && !root.requests-open && !root.friends-open && !root.browse-open: NoConversation {
+                            if !root.room-selected && !root.requests-open && !root.friends-open && !root.quests-open && !root.browse-open: NoConversation {
                                 width: parent.width; height: parent.height;
                             }
                             if root.room-selected && root.messages.length == 0 && !root.room-ready: MessagesSkeleton {
@@ -4419,6 +4458,7 @@ export component YapfastWindow inherits Window {
         stop-label: root.pip-kind == 1 ? "Stop watching" : root.pip-kind == 2 ? "Stop sharing" : "";
         viewers: root.pip-kind == 1 ? root.watch-viewers : root.pip-kind == 2 ? root.share-viewers : [];
         viewer-names: root.pip-kind == 1 ? root.watch-viewer-names : root.pip-kind == 2 ? root.share-viewer-names : "";
+        pop-out => { root.focus-tile(root.pip-slot); root.pop-out-call(); }
         open-call => {
             root.focus-tile(root.pip-slot);
             root.open-conversation(root.voice-channel);
@@ -4551,10 +4591,6 @@ export component YapfastWindow inherits Window {
             sign-out => { root.settings-open = false; root.logout(); }
         }
         if root.settings-section == 11: LocalProfileSettings {}
-        if root.settings-section == 12: OrbsSettings {
-            refresh => { root.orbs-page(true); }
-            visit(url) => { root.returning-to-orbs = true; root.open-link(url); }
-        }
         if root.settings-section == 9: AboutUpdatesSettings {
             preview: root.preview;
             account-name: root.account-name; account-initial: root.account-initial;
@@ -4862,10 +4898,10 @@ export component YapfastWindow inherits Window {
         }
         ProfileCard {
             opacity: Popup.opacity(profile-motion.amount); transform-scale: Popup.scale(profile-motion.amount);
-            width: 300px; limit: root.height - root.title-height - 16px;
+            width: min(340px, root.width - 16px); limit: root.height - root.title-height - 16px;
             x: root.profile-at-pointer
                 ? root.beside(root.anchor-x, root.anchor-width, self.width)
-                : root.width - root.members-shown - 8px - self.width;
+                : max(8px, root.width - root.members-shown - 8px - self.width);
             y: max(root.title-height + 8px, min(root.height - self.height - 8px, (root.profile-at-pointer ? root.anchor-y - 8px : root.profile-y - 16px)));
             data: root.profile;
             enlarge => { root.profile-start-tab = -1; root.enlarge-profile(); }
@@ -4915,6 +4951,47 @@ export component YapfastWindow inherits Window {
             // The tab a card asked for is used as it opens, and only then.
             tab-opened(page) => { root.profile-start-tab = -1; root.profile-tab-opened(page); }
             edit-profile => { root.close-profile(); root.edit-profile(); }
+        }
+    }
+    private property <string> timezone-contact;
+    private property <ProfileData> timezone-data: root.profile-open && root.profile.id == root.timezone-contact
+        ? root.profile : root.panel-profile;
+    out property <bool> timezone-editor-open: root.timezone-contact != "" && root.timezone-data.id == root.timezone-contact
+        && root.timezone-data.local-timezone-owner != "" && (root.profile-open || root.profile-docked);
+    changed timezone-editor-open => { if !root.timezone-editor-open { root.timezone-contact = ""; } }
+    public function edit-contact-timezone(contact: string) { root.timezone-contact = contact; }
+    if root.timezone-editor-open: Rectangle {
+        background: #00000066;
+        TouchArea { clicked => { root.timezone-contact = ""; } }
+        FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if event.text == Key.Escape { root.timezone-contact = ""; return accept; }
+                return reject;
+            }
+            Rectangle {
+                width: min(416px, root.width - 24px);
+                height: min(editor-content.preferred-height, root.height - 24px);
+                background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 12px;
+                accessible-role: groupbox; accessible-label: "Local time";
+                TouchArea { }
+                ScrollView {
+                    editor-content := VerticalLayout {
+                        padding: 16px; spacing: 12px;
+                        HorizontalLayout {
+                            Text { text: "Local time"; color: Theme.text; font-size: 18px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                            IconButton { icon: @image-url("icons/x.svg"); label: "Close local time"; clicked => { root.timezone-contact = ""; } }
+                        }
+                        TimezoneEditor {
+                            owner: root.timezone-data.local-timezone-owner;
+                            contact: root.timezone-contact;
+                            saved: root.timezone-data.local-timezone;
+                            clock: root.timezone-data.local-time;
+                            saved-change => { root.timezone-contact = ""; }
+                        }
+                    }
+                }
+            }
         }
     }
     // A mutual server's card, over the profile that lists it. Clicking

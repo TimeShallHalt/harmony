@@ -449,22 +449,26 @@ impl Application {
         if self.state.interactions.busy(&item) {
             return vec![];
         }
-        let known = self.state.message(&item).is_some_and(|message| {
-            message.cards.iter().any(|card| {
-                card.rows.iter().any(|row| match row {
-                    chat::CardRow::Buttons(buttons) => buttons.iter().any(|button| {
-                        button.custom_id.as_deref() == Some(&custom_id) && !button.disabled
-                    }),
-                    chat::CardRow::Text {
-                        beside: Some(chat::Beside::Button(button)),
-                        ..
-                    } => button.custom_id.as_deref() == Some(&custom_id) && !button.disabled,
-                    _ => false,
-                })
-            })
-        });
-        if !known {
+        let Some(message) = self.state.message(&item).filter(|message| !message.deleted) else {
             return vec![];
+        };
+        let Some(button) = message.cards.iter()
+            .flat_map(|card| &card.rows)
+            .find_map(|row| {
+                let buttons = match row {
+                    chat::CardRow::Buttons(buttons) => buttons.as_slice(),
+                    chat::CardRow::Text { beside: Some(chat::Beside::Button(button)), .. } => std::slice::from_ref(button),
+                    _ => &[],
+                };
+                buttons.iter().find(|button| button.custom_id.as_deref() == Some(&custom_id) && !button.disabled)
+            })
+        else {
+            return vec![];
+        };
+        if button.opens_hosted_activity(message.bot || message.application_id.is_some()) {
+            return self.state.message_link(&item)
+                .map(|(link, _)| vec![Effect::OpenPage(link)])
+                .unwrap_or_default();
         }
         self.component(item, 2, custom_id, None)
     }
@@ -1175,6 +1179,17 @@ mod tests {
             "components": [{"type": 18, "label": "Answer", "component": component}]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn activity_button_opens_the_original_message_on_the_discord_host() {
+        let mut app = Application::default();
+        with_buttons(&mut app, "d:900", &["Play now!"]);
+        assert!(matches!(
+            app.use_button("d:900".into(), "Play now!".into()).as_slice(),
+            [Effect::OpenPage(url)] if url == "https://discord.com/channels/10/7/900"
+        ));
+        assert!(app.state.interactions.pending.is_empty());
     }
 
     #[test]

@@ -74,7 +74,9 @@ class PackagingIdentityTests(unittest.TestCase):
         self.assertIn('RestartApplications=no', recipe)
         self.assertNotIn('19FF8D53-8D7E-4E66-91BB-E2F5BE307E9A', recipe)
         sections = {line.strip() for line in recipe.splitlines() if line.startswith('[')}
-        self.assertFalse(sections & {'[Registry]', '[Run]', '[UninstallRun]'})
+        self.assertFalse(sections & {'[Registry]', '[UninstallRun]'})
+        self.assertIn('Flags: nowait runasoriginaluser; Check: ReopenHarmony', recipe)
+        self.assertIn('WizardSilent and not IsAdminInstallMode and not RepairOnly', recipe)
         self.assertFalse((ROOT / 'packaging/windows/yapfast.rc').exists())
         self.assertFalse((ROOT / 'packaging/windows/yapfast.iss').exists())
 

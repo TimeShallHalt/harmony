@@ -44,6 +44,7 @@ mod appearance;
 mod away;
 mod browser;
 mod call_link;
+mod call_window;
 mod call_timer;
 mod callbacks;
 #[cfg(feature = "discord")]
@@ -138,6 +139,8 @@ pub enum Exit {
     UseSoftware(String),
     /// The renderer setting changed; restart to use it.
     Restart,
+    /// Restart from the AppImage that was just replaced.
+    RestartInstalled(PathBuf),
 }
 
 /// Slint releases the first window after at most 500 ms of desktop appearance
@@ -315,10 +318,17 @@ pub fn run(
             "the window did not appear".into(),
             "Harmony's window did not appear",
         ),
-        Ok(()) if restart => Ok(Exit::Restart),
         Ok(()) => {
-            adapter.updates.finish()?;
-            Ok(Exit::Closed)
+            let update_restart = adapter.updates.restarting()
+                || (restart && adapter.updates.can_restart());
+            if restart && !update_restart {
+                return Ok(Exit::Restart);
+            }
+            let root = adapter.root.clone();
+            match adapter.updates.finish(update_restart.then_some(root.as_path()))? {
+                Some(program) => Ok(Exit::RestartInstalled(program)),
+                None => Ok(Exit::Closed),
+            }
         }
     }
 }
@@ -413,6 +423,7 @@ fn watch_window(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
         }
     }
     let saved = zoom::saved(adapter.borrow().layout.zoom);
+    let update_input = adapter.borrow().updates.input_clock();
     let adapter = Rc::downgrade(adapter);
     let (to, weak) = (adapter.clone(), window.as_weak());
     DRAGGED.set(Some(Box::new(move |drag| {
@@ -461,6 +472,7 @@ fn watch_window(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
         window
             .window()
             .on_winit_window_event(move |slint_window, event| {
+                release_updates::record_input(&update_input, event);
                 // Slint gives the window its display's scale as winit makes it,
                 // which can come after the zoom above, so the zoom goes back on
                 // top with the window's first event. On Wayland a scale other
@@ -1246,9 +1258,11 @@ struct KeptStickerUse {
 #[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct Layout {
-    harmony_release_checks: bool,
-    harmony_release_downloads: bool,
+    harmony_release_checks: Option<bool>,
+    harmony_release_downloads: Option<bool>,
     harmony_check_hours: Option<u64>,
+    harmony_idle_restart: bool,
+    harmony_idle_minutes: u32,
     sidebar_width: Option<f32>,
     /// The width of a Discord thread shown beside its channel.
     aside_width: Option<f32>,
@@ -2133,6 +2147,7 @@ struct Icons {
 
 struct Adapter {
     updates: release_updates::Updates,
+    call_window: Option<call_window::Popout>,
     // Cancel the UI event receiver before releasing the actor and runtime.
     events: Option<slint::JoinHandle<()>>,
     backend: Option<Backend>,
@@ -2570,6 +2585,7 @@ impl Adapter {
         Ok(Rc::new_cyclic(|weak| {
             RefCell::new(Self {
                 updates: Default::default(),
+                call_window: None,
                 events: None,
                 backend: None,
                 #[cfg(test)]
@@ -3121,7 +3137,14 @@ impl Adapter {
                         continue;
                     }
                     let result = match &self.backend {
-                        Some(backend) => backend.send(command),
+                        Some(backend) => {
+                            let message = release_updates::sends_message(&command);
+                            let result = backend.send(command);
+                            if message && result.is_ok() {
+                                self.updates.message_sent();
+                            }
+                            result
+                        }
                         None => Err(command),
                     };
                     if let Err(command) = result {

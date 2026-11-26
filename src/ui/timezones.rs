@@ -2,7 +2,7 @@
 use super::*;
 use yapfast_core::local_timezones;
 
-fn owner(state: &AppState, contact: &str) -> Option<String> {
+pub(super) fn owner(state: &AppState, contact: &str) -> Option<String> {
     if state.preview || contact.is_empty() {
         return None;
     }
@@ -24,7 +24,23 @@ fn owner(state: &AppState, contact: &str) -> Option<String> {
 }
 
 pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
-    for reset in [false, true] {
+    let ui = window.global::<LocalTimezones>();
+    ui.set_zones(ModelRc::new(VecModel::from(
+        yapfast_core::scheduled::timezone_choices()
+            .into_iter()
+            .skip(1)
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+    ui.on_lookup(|country, city| {
+        ModelRc::new(VecModel::from(
+            local_timezones::lookup(country.as_str(), city.as_str())
+                .into_iter()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        ))
+    });
+    for method in 0..3 {
         let state = adapter.clone();
         let weak = window.as_weak();
         let commit = move |account: SharedString,
@@ -49,7 +65,12 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
             }
             let mut next = a.layout.clone();
             if let Some(name) = name {
-                if let Err(error) = next.local_timezones.set(&account, &contact, &name) {
+                let result = if method == 2 {
+                    next.local_timezones.set_observed(&account, &contact, &name)
+                } else {
+                    next.local_timezones.set(&account, &contact, &name)
+                };
+                if let Err(error) = result {
                     return error.into();
                 }
             } else {
@@ -64,14 +85,12 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
             }
             SharedString::default()
         };
-        if reset {
-            window
-                .global::<LocalTimezones>()
-                .on_reset(move |account, contact| commit(account, contact, None));
-        } else {
-            window
-                .global::<LocalTimezones>()
-                .on_save(move |account, contact, name| commit(account, contact, Some(name)));
+        match method {
+            0 => ui.on_save(move |account, contact, name| commit(account, contact, Some(name))),
+            1 => ui.on_reset(move |account, contact| commit(account, contact, None)),
+            _ => {
+                ui.on_save_time(move |account, contact, time| commit(account, contact, Some(time)))
+            }
         }
     }
 }

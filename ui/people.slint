@@ -1,8 +1,8 @@
-import { PlatformIndicators, TimezoneEditor } from "personal-controls.slint";
+import { PlatformIndicators } from "personal-controls.slint";
 import { ClientStyle } from "yapfast/style.slint";
 import { ScrollView, ListView } from "scrollview.slint";
 import { Theme, Middle, Label, Tip, BadgeTip, Looks } from "theme.slint";
-import { ActionButton, IconButton, Avatar, Skeleton, Nameplate, StatusText, StyledName, NameStyleRow, EffectLayer, ProfileEffect, PictureStore, Picture, Motion, TextField, ServerTagChip, TipIcon, ActivityClock } from "controls.slint";
+import { ActionButton, IconButton, Avatar, Skeleton, Nameplate, StatusText, StyledName, NameStyleRow, EffectLayer, ProfileEffect, PictureStore, Picture, Motion, TextField, ServerTagChip, TipIcon, ActivityClock, MenuItem } from "controls.slint";
 import { ProfileMediaTarget } from "profile-media.slint";
 import { StatusDot } from "rail.slint";
 import { BotTag } from "messages.slint";
@@ -1473,9 +1473,12 @@ export component ProfileCard inherits Rectangle {
                             }
                             if root.data.platforms != "": PlatformIndicators { received: root.data.platforms; }
                         }
-                        if !root.preview && root.data.id != "": TimezoneEditor {
-                            owner: root.data.local-timezone-owner; contact: root.data.id;
-                            saved: root.data.local-timezone; clock: root.data.local-time;
+                        if !root.preview && root.data.local-timezone != "": HorizontalLayout {
+                            padding-left: root.pad; padding-right: root.pad;
+                            Text {
+                                text: root.data.local-time; color: root.ink2;
+                                font-size: 12px; wrap: word-wrap;
+                            }
                         }
                         // The full profile's actions: the friend button, the message
                         // button and the menu, as Discord sets them under the name.
@@ -1764,11 +1767,11 @@ export component ProfileCard inherits Rectangle {
             }
             // The friend request and the person's menu sit over the banner's
             // top right corner, as in Discord.
-            if !root.preview && !root.large && (root.data.friend > 0 || root.data.id != ""): HorizontalLayout {
+            if !root.preview && (root.data.friend > 0 || root.data.id != ""): HorizontalLayout {
                 x: parent.width - self.preferred-width - (root.large && !root.side ? 54px : 10px); y: 10px;
                 height: 32px; spacing: 8px;
                 // Avatars open media, so the full profile keeps its own keyboard-accessible action.
-                if !root.docked: IconButton {
+                if !root.docked && !root.large: IconButton {
                     icon: @image-url("icons/user.svg"); label: "View full profile";
                     size: 32px; glyph: 18px; radius: 16px; fill: Theme.panel; tint: Theme.text;
                     clicked => { root.enlarge(); }
@@ -1933,13 +1936,38 @@ export component ProfileModal inherits Rectangle {
     border-radius: 8px; border-width: root.themed ? 0px : 1px; border-color: Theme.edge;
     drop-shadow-blur: 24px; drop-shadow-color: #00000080; drop-shadow-offset-y: 8px;
     accessible-role: groupbox;
+    private property <bool> fold-tabs: root.width < 1060px;
+    private property <[{ label: string, page: int, shows: bool }]> tab-options: [
+                    { label: "Board", page: 3, shows: root.data.board-tab },
+                    { label: "Activity", page: 0, shows: true },
+                    { label: "Wishlist", page: 4, shows: root.data.wishlist-tab },
+                    { label: root.data.friends-label, page: 1, shows: root.data.friends-tab },
+                    { label: root.data.servers-label, page: 2, shows: root.data.servers-tab },
+                ];
+    profile-tabs := PopupWindow {
+        x: min(root.width * 0.53 + 16px, root.width - self.width);
+        y: 48px; width: 210px;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        Rectangle {
+            background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 8px;
+            VerticalLayout {
+                padding: 6px;
+                for entry in root.tab-options: VerticalLayout {
+                    if entry.shows: MenuItem {
+                        text: entry.label; checked: root.page == entry.page;
+                        clicked => { root.chosen = entry.page; profile-tabs.close(); }
+                    }
+                }
+            }
+        }
+    }
     accessible-label: root.data.name + "'s full profile";
     TouchArea { }
     HorizontalLayout {
         padding: 8px; spacing: 8px;
         ProfileCard {
             large: true; side: true; show-frame: root.show-frame;
-            width: max(340px, parent.width * 0.4 - 8px); height: parent.height - 16px;
+            width: min(max(280px, parent.width * 0.4 - 8px), parent.width * 0.52); height: parent.height - 16px;
             data: root.data;
             close => { root.close(); }
             view-media(kind) => { root.view-media(kind); }
@@ -1954,17 +1982,11 @@ export component ProfileModal inherits Rectangle {
             padding-left: 12px; padding-right: 12px; padding-top: 4px; spacing: 12px;
             // The tabs, with the close button at the end.
             HorizontalLayout {
-                height: 40px; spacing: 20px;
+                height: 40px; spacing: 12px;
                 // Discord's order: Board, Activity, Wishlist, then what's mutual,
                 // which one's own doesn't have, and a bot's has servers of.
-                for entry in [
-                    { label: "Board", page: 3, shows: root.data.board-tab },
-                    { label: "Activity", page: 0, shows: true },
-                    { label: "Wishlist", page: 4, shows: root.data.wishlist-tab },
-                    { label: root.data.friends-label, page: 1, shows: root.data.friends-tab },
-                    { label: root.data.servers-label, page: 2, shows: root.data.servers-tab },
-                ]: Rectangle {
-                    width: entry.shows ? tab-text.preferred-width : 0px; height: 40px; visible: entry.shows;
+                for entry in root.tab-options: Rectangle {
+                    width: entry.shows && !root.fold-tabs ? tab-text.preferred-width : 0px; height: 40px; visible: entry.shows && !root.fold-tabs;
                     accessible-role: tab;
                     accessible-label: entry.label;
                     accessible-checkable: true;
@@ -1977,6 +1999,13 @@ export component ProfileModal inherits Rectangle {
                     }
                     Rectangle { y: parent.height - 2px; height: 2px; border-radius: 1px; background: root.ink; visible: root.page == entry.page; }
                     tab-touch := TouchArea { enabled: entry.shows; mouse-cursor: MouseCursor.pointer; clicked => { root.chosen = entry.page; } }
+                }
+                if root.fold-tabs: ActionButton {
+                    text: root.page == 3 ? "Board" : root.page == 4 ? "Wishlist" : root.page == 1 ? root.data.friends-label
+                        : root.page == 2 ? root.data.servers-label : "Activity";
+                    icon: @image-url("icons/chevron-down.svg");
+                    small: true;
+                    clicked => { profile-tabs.show(); }
                 }
                 Rectangle { horizontal-stretch: 1; }
                 Rectangle {

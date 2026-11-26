@@ -595,7 +595,7 @@ export struct EmbedCard {
     video: bool,
 }
 export enum CardButtonStyle { primary, secondary, success, danger, link, premium }
-export struct CardButton { label: string, style: CardButtonStyle, url: string, custom-id: string, sku-id: string, enabled: bool }
+export struct CardButton { label: string, style: CardButtonStyle, url: string, custom-id: string, sku-id: string, enabled: bool, opens-activity: bool }
 export enum CardRowKind { text, media, separator, buttons, select, unknown }
 /// A row of a Discord app's card, of one `kind`, with the fields it uses:
 /// text and what a section shows beside it; pictures in a gallery and file
@@ -2260,8 +2260,9 @@ component CardButtonView inherits ActionButton {
     // A link or a store page opens all the same.
     property <bool> busy: root.button.custom-id != "" && root.message-busy;
     // A purchase is made in Discord, which its store page opens.
-    text: root.button.style == CardButtonStyle.premium ? "Open in Discord" : root.button.label;
-    icon: root.button.style == CardButtonStyle.link ? @image-url("icons/external-link.svg")
+    text: root.button.opens-activity ? root.button.label + " · Discord"
+        : root.button.style == CardButtonStyle.premium ? "Open in Discord" : root.button.label;
+    icon: root.button.opens-activity || root.button.style == CardButtonStyle.link ? @image-url("icons/external-link.svg")
         : root.button.style == CardButtonStyle.premium ? @image-url("icons/shop.svg") : root.no-icon;
     primary: root.button.style == CardButtonStyle.primary;
     success: root.button.style == CardButtonStyle.success;

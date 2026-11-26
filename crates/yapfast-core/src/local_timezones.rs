@@ -2,6 +2,13 @@
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, FixedOffset, NaiveTime, Timelike, Utc};
+
+// Public-domain IANA tzdb tables. zone.tab preserves the country-to-zone
+// mapping even when two countries currently use the same rules.
+const COUNTRIES: &str = include_str!("timezone_data/iso3166.tab");
+const LOCATIONS: &str = include_str!("timezone_data/zone.tab");
+
 /// Nested by provider-qualified owning account, then the exact contact ID.
 /// Only the desktop Layout stores this; it is never a provider setting.
 #[derive(Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -32,16 +39,108 @@ impl Preferences {
     }
 
     pub fn set(&mut self, account: &str, contact: &str, name: &str) -> Result<(), &'static str> {
+        zone(name).ok_or("Choose a time zone or enter an IANA name such as Europe/London.")?;
+        self.store(account, contact, name.into())
+    }
+
+    pub fn set_observed(
+        &mut self,
+        account: &str,
+        contact: &str,
+        time: &str,
+    ) -> Result<(), &'static str> {
+        let now = chrono::Local::now();
+        let offset = observed_offset(time, now.with_timezone(&Utc), *now.offset())
+            .ok_or("Enter their current time as HH:MM, or a difference such as +05:30.")?;
+        self.store(
+            account,
+            contact,
+            format!("offset:{}", offset.local_minus_utc() / 60),
+        )
+    }
+
+    fn store(&mut self, account: &str, contact: &str, value: String) -> Result<(), &'static str> {
         if account.is_empty() || contact.is_empty() {
             return Err("A signed-in owning account and contact are required.");
         }
-        zone(name).ok_or("Enter an exact IANA timezone, for example Europe/London or UTC.")?;
         self.0
             .entry(account.into())
             .or_default()
-            .insert(contact.into(), name.into());
+            .insert(contact.into(), value);
         Ok(())
     }
+}
+
+pub fn lookup(country: &str, city: &str) -> Vec<String> {
+    let clean = |value: &str| {
+        value
+            .chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    let country = clean(country);
+    let city = clean(city);
+    if country.is_empty() && city.is_empty() {
+        return Vec::new();
+    }
+    let code = COUNTRIES
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| line.split_once('\t'))
+        .find(|(code, name)| clean(code) == country || clean(name) == country)
+        .map(|(code, _)| code);
+    let mut matches = LOCATIONS
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| {
+            let mut columns = line.split('\t');
+            let region = columns.next()?;
+            columns.next()?;
+            let zone_name = columns.next()?;
+            let name = zone_name.rsplit('/').next()?;
+            ((country.is_empty() || code == Some(region))
+                && (city.is_empty() || clean(name) == city)
+                && zone(zone_name).is_some())
+            .then(|| zone_name.to_owned())
+        })
+        .collect::<Vec<_>>();
+    matches.sort();
+    matches
+}
+
+/// A wall clock without a date is interpreted on the nearest local day.
+/// The observation is rounded to a civil 15-minute offset. An explicit
+/// difference is kept to the minute and disambiguates distant time zones.
+fn observed_offset(input: &str, now: DateTime<Utc>, here: FixedOffset) -> Option<FixedOffset> {
+    let input = input.trim();
+    let delta = if let Some(value) = input.strip_prefix(['+', '-']) {
+        let (hours, minutes) = value.split_once(':').unwrap_or((value, "0"));
+        let hours = hours.parse::<u16>().ok()?;
+        let minutes = minutes.parse::<u16>().ok()?;
+        if hours > 26 || minutes > 59 {
+            return None;
+        }
+        let sign = if input.starts_with('-') { -1 } else { 1 };
+        (60 * i32::from(hours) + i32::from(minutes)) * sign
+    } else {
+        let time = NaiveTime::parse_from_str(input, "%H:%M").ok()?;
+        let local = now.with_timezone(&here).time();
+        let minutes = (time.num_seconds_from_midnight() as i32 / 60)
+            - (local.num_seconds_from_midnight() as i32 / 60);
+        let nearest = (minutes + 720).rem_euclid(1440) - 720;
+        let utc_minutes = here.local_minus_utc() / 60;
+        (nearest + utc_minutes + 7).div_euclid(15) * 15 - utc_minutes
+    };
+    let minutes = here.local_minus_utc() / 60 + delta;
+    fixed_offset(minutes)
+}
+
+fn fixed_offset(minutes: i32) -> Option<FixedOffset> {
+    (-720..=840)
+        .contains(&minutes)
+        .then(|| FixedOffset::east_opt(minutes * 60))
+        .flatten()
 }
 
 /// Convert an instant, never an ambiguous local wall time. Re-evaluate the
@@ -50,6 +149,16 @@ pub fn display(saved: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Strin
     let Some(saved) = saved else {
         return "Timezone not set (local only)".into();
     };
+    if let Some(offset) = saved
+        .strip_prefix("offset:")
+        .and_then(|value| value.parse().ok())
+        .and_then(fixed_offset)
+    {
+        return format!(
+            "{} · fixed offset",
+            now.with_timezone(&offset).format("%Y-%m-%d %H:%M (UTC%:z)")
+        );
+    }
     let Some(zone) = zone(saved) else {
         return "Invalid saved timezone — edit or reset (local only)".into();
     };
@@ -74,6 +183,30 @@ pub fn at_system_time(saved: Option<&str>, now: std::time::SystemTime) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn location_and_observed_clock_handle_country_filters_and_midnight() {
+        assert_eq!(lookup("Canada", "Toronto"), ["America/Toronto"]);
+        assert!(lookup("US", "Toronto").is_empty());
+        assert!(lookup("Canada", "").len() > 1);
+        let now = DateTime::parse_from_rfc3339("2026-11-27T04:50:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let local = FixedOffset::west_opt(5 * 3600).unwrap();
+        assert_eq!(
+            observed_offset("00:50", now, local)
+                .unwrap()
+                .local_minus_utc(),
+            -4 * 3600
+        );
+        assert_eq!(
+            observed_offset("+10:45", now, local)
+                .unwrap()
+                .local_minus_utc(),
+            5 * 3600 + 45 * 60
+        );
+        assert!(observed_offset("+99:00", now, local).is_none());
+    }
 
     #[test]
     fn display_tracks_dst_transitions_and_fractional_zones_from_utc() {

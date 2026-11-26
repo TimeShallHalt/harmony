@@ -117,6 +117,9 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
         return events(adapter, server);
     }
     let shared_appearance = super::local_profile::share_menu(adapter, id);
+    let profile_timezone = id.strip_prefix(PROFILE_MORE).is_some_and(|contact| {
+        super::timezones::owner(&adapter.app.state, contact).is_some()
+    }) && !adapter.app.state.preview;
     let (id, _) = relationship_place(id);
     let icons = &adapter.icons;
     let app = &adapter.app;
@@ -396,6 +399,16 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
     if let Some((row, submenu)) = super::dm_groups::room_menu(adapter, id, person) {
         rows.push(row);
         submenus.push(submenu);
+    }
+    if profile_timezone {
+        rows.push(MenuRow {
+            id: "contact-timezone".into(),
+            text: "Local time…".into(),
+            plain: true,
+            separated: !rows.is_empty(),
+            ..Default::default()
+        });
+        submenus.push(Vec::new());
     }
     for row in shared_appearance {
         rows.push(row);
@@ -897,6 +910,12 @@ pub(super) fn choose(
     }
     // The events popout only lists them.
     if target.starts_with(EVENTS) {
+        return;
+    }
+    if id == "contact-timezone" {
+        if let Some(contact) = target.strip_prefix(PROFILE_MORE) {
+            window.invoke_edit_contact_timezone(contact.into());
+        }
         return;
     }
     // A profile's More menu is its person's, said to come from the profile.

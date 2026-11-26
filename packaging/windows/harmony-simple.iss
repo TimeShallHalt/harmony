@@ -61,6 +61,9 @@ Source: "{#RepairTool}"; Flags: dontcopy noencryption
 [Icons]
 Name: "{code:ProgramsDirectory}\Harmony"; Filename: "{app}\Harmony.exe"; WorkingDir: "{app}"; Check: MayCreateShortcut
 
+[Run]
+Filename: "{app}\Harmony.exe"; Parameters: "{code:ReopenArguments}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: ReopenHarmony
+
 [Code]
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{{#HarmonyId}}_is1';
@@ -239,6 +242,32 @@ end;
 
 function GetCustomSetupExitCode: Integer;
 begin if FinishError <> '' then Result := 11 else Result := 0; end;
+
+function ReopenArguments(Param: String): String;
+var DataDir, Trailing: String; I: Integer;
+begin
+  DataDir := ExpandConstant('{param:HARMONYREOPEN|}');
+  if (DataDir = '') or (Pos('"', DataDir) <> 0) then begin
+    Result := '';
+    Exit;
+  end;
+  Trailing := '';
+  I := Length(DataDir);
+  while (I > 0) and (DataDir[I] = '\') do begin
+    Trailing := Trailing + '\';
+    I := I - 1;
+  end;
+  Result := '--data-dir "' + DataDir + Trailing + '"';
+end;
+
+function ReopenHarmony: Boolean;
+var Previous: String;
+begin
+  Previous := ExpandConstant('{param:HARMONYINSTALLED|}');
+  Result := WizardSilent and not IsAdminInstallMode and not RepairOnly and (FinishError = '') and
+    (Previous <> '') and (CompareText(Previous, ExpandConstant('{app}')) = 0) and
+    (ReopenArguments('') <> '');
+end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin

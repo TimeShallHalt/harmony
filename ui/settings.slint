@@ -385,7 +385,6 @@ export component SettingsScreen inherits Rectangle {
         { heading: true, text: "SETTINGS" },
         { text: "My account", icon: @image-url("icons/user.svg"), id: 0 },
         { text: "Local profile", icon: @image-url("icons/user-pen.svg"), id: 11 },
-        { text: "Quests & Orbs", icon: @image-url("icons/gem.svg"), id: 12 },
         { text: "Appearance", icon: @image-url("icons/palette.svg"), id: 7 },
         { text: "Voice & video", icon: @image-url("icons/headphones.svg"), id: 1 },
         { text: "Keybinds", icon: @image-url("icons/keyboard.svg"), id: 10 },
@@ -401,7 +400,6 @@ export component SettingsScreen inherits Rectangle {
         { heading: true, text: "SETTINGS" },
         { text: "My account", icon: @image-url("icons/user.svg"), id: 0 },
         { text: "Local profile", icon: @image-url("icons/user-pen.svg"), id: 11 },
-        { text: "Quests & Orbs", icon: @image-url("icons/gem.svg"), id: 12 },
         { text: "Appearance", icon: @image-url("icons/palette.svg"), id: 7 },
         { text: "Voice & video", icon: @image-url("icons/headphones.svg"), id: 1 },
         { text: "Keybinds", icon: @image-url("icons/keyboard.svg"), id: 10 },
@@ -422,7 +420,7 @@ export component SettingsScreen inherits Rectangle {
                 : root.settings-section == 4 ? "Discord" : root.settings-section == 5 ? "Sounds"
                 : root.settings-section == 6 ? "Advanced" : root.settings-section == 7 ? "Appearance"
                 : root.settings-section == 9 ? "About" : root.settings-section == 10 ? "Keybinds"
-                : root.settings-section == 11 ? "Local profile" : root.settings-section == 12 ? "Quests & Orbs" : "Game Activity";
+                : root.settings-section == 11 ? "Local profile" : "Game Activity";
             account-name: root.account-name; account-initial: root.account-initial;
             account-tint: root.account-tint; account-picture: root.account-picture;
             with-discord: root.discord-build && !root.preview;

@@ -1245,6 +1245,7 @@ impl Adapter {
                 .collect(),
         );
         window.set_friends_open(direct && state.dm_screen == Some(DmScreen::Friends));
+        window.set_quests_open(direct && state.dm_screen == Some(DmScreen::Quests));
         // Browse Channels, at the top of a Community server's channel list;
         // its rows only while it shows, filtered by its search.
         window.set_browse_offered(
@@ -4614,6 +4615,7 @@ impl Adapter {
             voice::Resolution::P720 => 0,
             voice::Resolution::P1080 => 1,
             voice::Resolution::Source => 2,
+            voice::Resolution::Custom { .. } => 3,
         };
         let limits = voice.stream_limits;
         window.set_share_max_resolution(resolution_index(limits.resolution));
@@ -4621,6 +4623,11 @@ impl Adapter {
         window.set_share_fps_hd(limits.fps_hd as i32);
         let choice = limits.constrain(voice.quality);
         window.set_share_resolution(resolution_index(choice.resolution));
+        window.set_share_size(match choice.resolution {
+            voice::Resolution::Custom { width, height } => format!("{width} × {height}").into(),
+            _ => "".into(),
+        });
+        window.set_share_cursor(choice.show_cursor);
         window.set_share_fps(choice.fps as i32);
         window.set_share_bitrate(choice.bitrate_kbps as i32);
         window.set_share_high_quality(voice.quality.high_quality);
@@ -4963,6 +4970,7 @@ impl Adapter {
         let (rows, index) = device_rows(&voice.cameras, voice.camera.as_deref(), names);
         update_model(&self.models.cameras, rows);
         window.set_camera_index(index);
+        self.sync_call_window(window);
     }
 
     /// The call's soundboard, its rows made again only when its sounds

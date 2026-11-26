@@ -233,6 +233,7 @@ pub(super) fn dispatch_toggle(action: KeyAction) {
     let Some(owner) = OWNER.with_borrow(std::rc::Weak::upgrade) else {
         return;
     };
+    owner.borrow().updates.user_interacted();
     let window = owner.borrow().window.upgrade();
     if let Some(window) = window {
         toggled(&window, action);

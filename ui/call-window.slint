@@ -1,0 +1,145 @@
+import { ActionButton } from "controls.slint";
+import { Theme } from "theme.slint";
+import { CallControls, ParticipantGrid, PersonRow, ShareMenu, ShareScreen, ShareSize } from "voice.slint";
+
+export component CallWindow inherits Window {
+    in property <string> call-name;
+    in property <string> status;
+    in property <[PersonRow]> participants;
+    in property <[image]> frames;
+    in property <bool> camera-starting;
+    in property <bool> camera-on;
+    in property <bool> can-film;
+    in property <bool> muted;
+    in property <bool> deafened;
+    in property <bool> ready;
+    in property <bool> leaving;
+    in property <bool> can-share;
+    in property <bool> sharing;
+    in property <bool> share-live;
+    in property <string> share-status;
+    in property <image> share-frame;
+    in property <[PersonRow]> share-viewers;
+    in property <string> share-viewer-names;
+    in property <[int]> stream-tiles;
+    in property <string> watch-user;
+    in property <image> watch-frame;
+    in property <string> watch-status;
+    in property <[PersonRow]> watch-viewers;
+    in property <string> watch-viewer-names;
+    in property <int> focused-tile: -1;
+    in property <bool> portal;
+    in property <[ShareScreen]> screens;
+    in property <[string]> windows;
+    in property <[string]> cameras;
+    in property <int> max-resolution;
+    in property <int> fps-720;
+    in property <int> fps-hd;
+    in-out property <int> resolution;
+    in-out property <string> size-choice;
+    in-out property <string> fps;
+    in-out property <string> bitrate;
+    in-out property <bool> cursor;
+    in-out property <bool> high-quality;
+    private property <int> source;
+    private property <length> picker-y;
+    private property <bool> full;
+    changed focused-tile => { if root.focused-tile < 0 { root.full = false; } }
+    callback return-call;
+    callback toggle-mute;
+    callback toggle-deafen;
+    callback toggle-camera;
+    callback toggle-share;
+    callback list-sources;
+    callback go-live(int, int, string, int, int, bool, bool);
+    pure callback parse-whole(string) -> int;
+    pure callback parse-size(string) -> ShareSize;
+    callback leave;
+    callback focus-tile(int);
+    callback watch-stream(string);
+    callback stop-watching;
+    callback tiles(int, length, length, length, length, length, length, int, length, length);
+
+    title: root.call-name == "" ? "Harmony Call" : root.call-name + " · Harmony";
+    min-width: 440px; min-height: 280px;
+    preferred-width: 760px; preferred-height: 500px;
+    background: Theme.stage;
+    public function show-picker() {
+        root.source = 0;
+        share-picker.show();
+    }
+
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape && root.full { root.full = false; return accept; }
+            return reject;
+        }
+        VerticalLayout {
+            if !root.full: Rectangle {
+                background: Theme.panel;
+                HorizontalLayout {
+                    padding: 12px; spacing: 12px;
+                    VerticalLayout {
+                        alignment: center; horizontal-stretch: 1; spacing: 2px;
+                        Text { text: root.call-name; color: Theme.text; font-size: 16px; font-weight: 700; overflow: elide; }
+                        Text { text: root.status; color: Theme.secondary; font-size: 13px; overflow: elide; }
+                    }
+                    ActionButton { text: "Return to Harmony"; small: true; clicked => { root.return-call(); } }
+                }
+            }
+            ParticipantGrid {
+                full: root.full;
+                participants: root.participants; frames: root.frames;
+                camera-starting: root.camera-starting; sharing: root.sharing; share-live: root.share-live;
+                share-status: root.share-status; share-frame: root.share-frame;
+                share-viewers: root.share-viewers; share-viewer-names: root.share-viewer-names;
+                stream-tiles: root.stream-tiles; watch-user: root.watch-user; watch-frame: root.watch-frame;
+                watch-status: root.watch-status; watch-viewers: root.watch-viewers; watch-viewer-names: root.watch-viewer-names;
+                focused: root.focused-tile;
+                focus-tile(slot) => { root.focus-tile(slot); }
+                full-screen(on) => { root.full = on; }
+                watch-stream(id) => { root.watch-stream(id); }
+                stop-watching => { root.stop-watching(); }
+                tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height) => {
+                    root.tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height);
+                }
+            }
+            if !root.full: CallControls {
+                muted: root.muted; deafened: root.deafened; voice-ready: root.ready; voice-leaving: root.leaving;
+                can-share: root.can-share; sharing: root.sharing;
+                can-film: root.can-film; camera-on: root.camera-on; camera-starting: root.camera-starting;
+                toggle-camera => { root.toggle-camera(); }
+                toggle-mute => { root.toggle-mute(); }
+                toggle-deafen => { root.toggle-deafen(); }
+                toggle-share => { root.toggle-share(); }
+                open-share-menu(x, y) => { root.picker-y = y; root.list-sources(); }
+                leave-voice => { root.leave(); }
+            }
+        }
+    }
+
+    share-picker := PopupWindow {
+        property <length> panel-width: root.screens.length > 0 ? 336px : 260px;
+        property <bool> cascades: root.width >= self.panel-width + 264px;
+        width: self.panel-width + (self.cascades ? 248px : 0px);
+        height: min(root.height - 16px, share-content.full-height);
+        x: (root.width - self.width) / 2;
+        y: max(8px, root.picker-y - self.height - 6px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        share-content := ShareMenu {
+            panel-width: share-picker.panel-width; cascades: share-picker.cascades;
+            screens: root.screens; windows: root.windows; cameras: root.cameras; dialog: root.portal;
+            max-resolution: root.max-resolution; fps-720: root.fps-720; fps-hd: root.fps-hd;
+            pick-source <=> root.source; pick-resolution <=> root.resolution; pick-size <=> root.size-choice;
+            pick-fps <=> root.fps; pick-bitrate <=> root.bitrate;
+            pick-cursor <=> root.cursor; pick-high-quality <=> root.high-quality;
+            parse-whole(text) => { return root.parse-whole(text); }
+            parse-size(text) => { return root.parse-size(text); }
+            close => { share-picker.close(); }
+            go-live(source, resolution, size, fps, bitrate, effort, cursor) => {
+                root.go-live(source, resolution, size, fps, bitrate, effort, cursor);
+                share-picker.close();
+            }
+        }
+    }
+}

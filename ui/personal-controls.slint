@@ -1,3 +1,4 @@
+import { ComboBox } from "std-widgets.slint";
 import { TextField, ActionButton, VolumeSlider } from "controls.slint";
 import { Theme } from "theme.slint";
 
@@ -5,6 +6,9 @@ export global LocalTimezones {
     // Empty means a confirmed local commit; errors keep the old preference.
     callback save(string, string, string) -> string;
     callback reset(string, string) -> string;
+    callback save-time(string, string, string) -> string;
+    pure callback lookup(string, string) -> [string];
+    in property <[string]> zones;
 }
 
 export component TimezoneEditor inherits VerticalLayout {
@@ -12,31 +16,105 @@ export component TimezoneEditor inherits VerticalLayout {
     in property <string> contact;
     in property <string> saved;
     in property <string> clock;
-    in-out property <string> entry: root.saved;
+    in-out property <string> entry: root.saved.starts-with("offset:") ? "" : root.saved;
+    private property <int> mode;
+    private property <string> city;
+    private property <string> country;
+    private property <string> observed;
+    private property <[string]> matches;
+    private property <int> match-index;
+    private property <int> zone-index: -1;
+    callback saved-change;
+    function search() {
+        root.matches = LocalTimezones.lookup(root.country, root.city);
+        root.match-index = root.matches.length == 1 ? 0 : -1;
+        root.error = root.matches.length == 0 ? "No matching city in the time-zone list. Choose a named zone or enter their time." : "";
+    }
+    function reset-fields() {
+        root.entry = root.saved.starts-with("offset:") ? "" : root.saved;
+        root.mode = root.saved.starts-with("offset:") ? 2 : 0;
+        root.city = ""; root.country = ""; root.observed = "";
+        root.matches = []; root.match-index = -1; root.zone-index = -1;
+        root.error = "";
+    }
     out property <string> error;
     spacing: 6px;
     public function focus-entry() { field.focus-input(); }
     public function submit() {
         if root.owner != "" && root.contact != "" {
-            root.error = LocalTimezones.save(root.owner, root.contact, root.entry);
+            if root.mode == 1 && root.match-index < 0 {
+                root.error = "Look up the city and select a matching time zone.";
+            } else {
+                root.error = root.mode == 2
+                    ? LocalTimezones.save-time(root.owner, root.contact, root.observed)
+                    : LocalTimezones.save(root.owner, root.contact,
+                        root.mode == 1 ? root.matches[root.match-index] : root.entry);
+            }
+            if root.error == "" { root.saved-change(); }
         } else { root.error = "Sign in to save a local timezone for this contact."; }
     }
     public function reset() {
         if root.owner != "" && root.contact != "" {
             root.error = LocalTimezones.reset(root.owner, root.contact);
-            if root.error == "" { root.entry = ""; }
+            if root.error == "" { root.entry = ""; root.saved-change(); }
         }
     }
-    changed owner => { root.entry = root.saved; root.error = ""; }
-    changed contact => { root.entry = root.saved; root.error = ""; }
-    changed saved => { root.entry = root.saved; root.error = ""; }
-    Text { text: "Local timezone · only on this device"; color: Theme.secondary; font-size: 12px; wrap: word-wrap; }
-    Text { text: root.clock; color: Theme.text; font-size: 12px; wrap: word-wrap; accessible-label: root.clock; }
-    field := TextField {
-        text <=> root.entry; label: "Contact's local IANA timezone";
-        placeholder: "Europe/London"; text-size: 13px; min-height: 32px;
-        enabled: root.owner != "";
-        accepted => { root.submit(); }
+    init => { root.reset-fields(); }
+    changed owner => { root.reset-fields(); }
+    changed contact => { root.reset-fields(); }
+    changed saved => { root.reset-fields(); }
+    if root.saved != "" && root.clock != "": Text {
+        text: root.clock; color: Theme.text; font-size: 13px; wrap: word-wrap;
+    }
+    ComboBox {
+        accessible-label: "Time zone entry method";
+        model: ["Time zone", "City and country", "Their time or offset"];
+        current-index <=> root.mode;
+        selected => { root.error = ""; }
+    }
+    named := VerticalLayout {
+        visible: root.mode == 0;
+        max-height: root.mode == 0 ? 500px : 0px;
+        spacing: 6px;
+        ComboBox {
+            accessible-label: "Choose a time zone"; model: LocalTimezones.zones;
+            current-index <=> root.zone-index;
+            selected => { root.entry = self.current-value; }
+        }
+        field := TextField {
+            text <=> root.entry; label: "Contact's local IANA timezone";
+            placeholder: "Europe/London"; text-size: 13px; min-height: 32px;
+            enabled: root.owner != "";
+            accepted => { root.submit(); }
+        }
+    }
+    if root.mode == 1: VerticalLayout {
+        spacing: 6px;
+        TextField {
+            text <=> root.city; label: "City"; placeholder: "City"; min-height: 32px;
+            edited => { root.matches = []; root.match-index = -1; }
+            accepted => { root.search(); }
+        }
+        TextField {
+            text <=> root.country; label: "Country or two-letter country code";
+            placeholder: "Country or code"; min-height: 32px;
+            edited => { root.matches = []; root.match-index = -1; }
+            accepted => { root.search(); }
+        }
+        ActionButton { text: "Find time zone"; small: true; clicked => { root.search(); } }
+        if root.matches.length > 0: ComboBox {
+            model: root.matches; current-index <=> root.match-index;
+            accessible-label: "Matching time zones";
+        }
+    }
+    if root.mode == 2: VerticalLayout {
+        spacing: 6px;
+        TextField {
+            text <=> root.observed; label: "Their current time or difference from your local time";
+            placeholder: "18:30 or +05:30"; min-height: 32px;
+            accepted => { root.submit(); }
+        }
+        Text { text: "Use a 24-hour clock or enter how far ahead (+) or behind (−) they are. This saves a fixed offset."; color: Theme.secondary; font-size: 13px; wrap: word-wrap; }
     }
     HorizontalLayout {
         spacing: 6px;

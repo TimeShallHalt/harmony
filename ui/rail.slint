@@ -1097,9 +1097,11 @@ export component ServerRail inherits Rectangle {
 // open on their own screens, at the top of the DM list.
 component DmScreenLinks inherits VerticalLayout {
     in property <bool> friends-open;
+    in property <bool> quests-open;
     in property <bool> requests-current;
     in property <string> requests-badge;
     callback open-friends;
+    callback open-quests;
     callback open-requests;
     padding-top: 6px; padding-bottom: 6px; spacing: 2px;
     ChannelRow {
@@ -1114,6 +1116,12 @@ component DmScreenLinks inherits VerticalLayout {
         icon: @image-url("icons/inbox.svg");
         selected: root.requests-current; badge: root.requests-badge;
         clicked => { root.open-requests(); }
+    }
+    ChannelRow {
+        text: "Quests";
+        icon: @image-url("icons/gem.svg");
+        selected: root.quests-open;
+        clicked => { root.open-quests(); }
     }
 }
 
@@ -1137,6 +1145,7 @@ export component RoomList inherits Rectangle {
     in property <bool> discord-linked;
     in property <bool> preview;
     in property <bool> friends-open;
+    in property <bool> quests-open;
     /// The requests screen, or a request from it, is on screen.
     in property <bool> requests-current;
     /// Requests waiting for an answer, as a badge.
@@ -1156,6 +1165,7 @@ export component RoomList inherits Rectangle {
     callback open-add-friend;
     callback open-new-dm;
     callback open-friends;
+    callback open-quests;
     callback open-requests;
     /// A Community server's list opens Browse Channels, which is on screen
     /// while `browsing`.
@@ -1303,9 +1313,10 @@ export component RoomList inherits Rectangle {
         if root.rooms.length == 0 && (root.screens || root.browse-offered || root.sidebar-empty != ""): VerticalLayout {
             padding-left: 8px; padding-right: 8px; spacing: 2px;
             if root.screens: DmScreenLinks {
-                friends-open: root.friends-open; requests-current: root.requests-current; requests-badge: root.requests-badge;
+                friends-open: root.friends-open; quests-open: root.quests-open; requests-current: root.requests-current; requests-badge: root.requests-badge;
                 open-friends => { root.open-friends(); }
                 open-requests => { root.open-requests(); }
+                open-quests => { root.open-quests(); }
             }
             if ClientStyle.enabled && root.dms-selected && !root.preview: DmHeading {
                 discord-linked: root.discord-linked;
@@ -1328,9 +1339,10 @@ export component RoomList inherits Rectangle {
                 padding-bottom: index == root.rooms.length - 1 ? 12px : 2px;
                 spacing: 2px;
                 if index == 0 && root.screens: DmScreenLinks {
-                    friends-open: root.friends-open; requests-current: root.requests-current; requests-badge: root.requests-badge;
+                    friends-open: root.friends-open; quests-open: root.quests-open; requests-current: root.requests-current; requests-badge: root.requests-badge;
                     open-friends => { root.open-friends(); }
                     open-requests => { root.open-requests(); }
+                    open-quests => { root.open-quests(); }
                 }
                 if index == 0 && ClientStyle.enabled && root.dms-selected && !root.preview: DmHeading {
                     discord-linked: root.discord-linked;

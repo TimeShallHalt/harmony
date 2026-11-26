@@ -431,6 +431,8 @@ pub enum DmScreen {
     Friends,
     /// Friend requests, message requests and spam.
     Requests,
+    /// Quests and the Orbs shop.
+    Quests,
 }
 
 /// Somewhere the main area shows, which the title bar's back and forward
@@ -874,6 +876,20 @@ impl AppState {
     /// The draft of the room with this id, such as the thread beside's.
     pub fn draft_in(&self, room: &str) -> &str {
         self.drafts.get(room).map_or("", String::as_str)
+    }
+
+    /// Unfinished work can be in a room that isn't visible right now.
+    pub fn has_unfinished_content(&self) -> bool {
+        self.drafts.values().any(|draft| !draft.is_empty())
+            || self.staged.values().any(|files| !files.is_empty())
+            || !self.compose.is_empty()
+            || self.edit.is_some()
+            || self.new_post.is_some()
+            || self.new_thread.is_some()
+            || self.dialog_open()
+            || self.messages.iter()
+                .chain(self.aside.iter().flat_map(|aside| aside.messages.iter()))
+                .any(|message| message.delivery == chat::Delivery::Sending)
     }
 
     /// The files waiting in the selected room's composer.

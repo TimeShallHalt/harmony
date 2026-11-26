@@ -1970,6 +1970,17 @@ pub struct CardButton {
 }
 
 /// An option of a select menu in an app's message.
+impl CardButton {
+    /// Discord's hosted activity cards use ordinary app buttons. Open the
+    /// message on the supported host when the button advertises an Activity.
+    pub fn opens_hosted_activity(&self, from_application: bool) -> bool {
+        from_application && self.custom_id.is_some()
+            && matches!(self.style, ButtonStyle::Primary | ButtonStyle::Secondary)
+            && matches!(self.label.trim().trim_end_matches('!').to_ascii_lowercase().as_str(),
+                "play now" | "join activity" | "launch activity")
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CardOption {
     pub label: String,

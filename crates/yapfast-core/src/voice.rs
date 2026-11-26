@@ -97,6 +97,19 @@ pub enum Resolution {
     P1080,
     /// The screen's own size, up to 4K.
     Source,
+    /// A user-specified bounding box. Capture preserves the source's aspect ratio.
+    Custom { width: u32, height: u32 },
+}
+
+impl Resolution {
+    pub fn bounds(self) -> (u32, u32) {
+        match self {
+            Self::P720 => (1280, 720),
+            Self::P1080 => (1920, 1080),
+            Self::Source => (3840, 2160),
+            Self::Custom { width, height } => (width, height),
+        }
+    }
 }
 
 /// Screen-share ceilings for the connected Discord account and voice channel.
@@ -143,17 +156,26 @@ impl StreamLimits {
 
     pub fn constrain(self, choice: StreamQuality) -> StreamQuality {
         let resolution = match (choice.resolution, self.resolution) {
+            (Resolution::Custom { width, height }, max) => {
+                let (max_width, max_height) = max.bounds();
+                Resolution::Custom {
+                    width: width.clamp(2, max_width) & !1,
+                    height: height.clamp(2, max_height) & !1,
+                }
+            }
             (Resolution::P720, _) | (_, Resolution::P720) => Resolution::P720,
             (Resolution::P1080, _) | (_, Resolution::P1080) => Resolution::P1080,
             _ => Resolution::Source,
         };
-        let max = if resolution == Resolution::P720 {
+        let (width, height) = resolution.bounds();
+        let hd = width > 1280 || height > 720;
+        let max = if !hd {
             self.fps_720
         } else {
             self.fps_hd
         };
         let fps = choice.fps.clamp(15, max.max(15));
-        let bitrate_limit = if resolution == Resolution::P720 { 3500 } else { 9000 };
+        let bitrate_limit = if hd { 9000 } else { 3500 };
         let bitrate_kbps = if choice.bitrate_kbps == 0 {
             0
         } else {
@@ -181,6 +203,12 @@ pub struct StreamQuality {
     /// the CPU.
     #[serde(default)]
     pub high_quality: bool,
+    #[serde(default = "show_cursor_by_default")]
+    pub show_cursor: bool,
+}
+
+pub(crate) fn show_cursor_by_default() -> bool {
+    true
 }
 
 impl Default for StreamQuality {
@@ -190,6 +218,7 @@ impl Default for StreamQuality {
             fps: 30,
             bitrate_kbps: 0,
             high_quality: false,
+            show_cursor: show_cursor_by_default(),
         }
     }
 }
@@ -793,6 +822,7 @@ mod tests {
             fps: 60,
             bitrate_kbps: 0,
             high_quality: true,
+            show_cursor: false,
         };
         for (premium, boost, resolution, fps) in [
             (0, 0, P720, 30),
@@ -831,6 +861,16 @@ mod tests {
         assert_eq!((limited.resolution, limited.fps, limited.bitrate_kbps), (P720, 24, 3500));
         let premium = StreamLimits::discord(2, 0).constrain(custom);
         assert_eq!((premium.resolution, premium.fps, premium.bitrate_kbps), (Source, 24, 8000));
+        let high = StreamQuality {
+            resolution: Custom { width: 2560, height: 1440 },
+            fps: 120,
+            ..choice
+        };
+        let supported = StreamLimits::discord(2, 0).constrain(high);
+        assert_eq!(supported.resolution, high.resolution);
+        assert_eq!(supported.fps, 60);
+        assert!(!supported.show_cursor);
+        assert_eq!(StreamLimits::default().constrain(high).resolution.bounds(), (1280, 720));
     }
     use super::*;
 
@@ -850,6 +890,7 @@ mod tests {
                 fps: 60,
                 bitrate_kbps: 1800,
                 high_quality: true,
+                show_cursor: false,
             },
             ..Default::default()
         };

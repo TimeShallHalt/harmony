@@ -184,6 +184,14 @@ impl Shell {
             let _ = slint::quit_event_loop();
             return;
         }
+        // The call window uses the main window's frame pump and controls.
+        if self.adapter.borrow().call_window.is_some() {
+            if let Some(window) = self.window() {
+                let _ = window.hide();
+            }
+            FOCUSED.set(false);
+            return;
+        }
         self.drop_window();
         // Slint lets go of the window's last pieces as the event loop goes on.
         slint::Timer::single_shot(Duration::from_millis(500), release_memory);
@@ -339,6 +347,14 @@ pub(super) fn remake_window() {
     }
 }
 
+pub(super) fn return_to_call() {
+    if let Some(shell) = SHELL.with(|shell| shell.borrow().upgrade())
+        && let Some(window) = shell.open()
+    {
+        window.invoke_open_call();
+    }
+}
+
 /// Yapfast started again on this folder, and the new start asked for the
 /// window: shows it, taking the focus with the token the desktop gave that
 /// start.
@@ -379,6 +395,9 @@ fn chosen(choice: Choice) {
     let Some(shell) = SHELL.with(|shell| shell.borrow().upgrade()) else {
         return;
     };
+    if !matches!(choice, Choice::Available) {
+        shell.adapter.borrow().updates.user_interacted();
+    }
     match choice {
         Choice::Open => open_with(&shell, crate::tray::take_activation_token()),
         Choice::Disconnect => shell.act(Action::Voice(voice::Command::Leave)),

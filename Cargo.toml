@@ -1,7 +1,7 @@
 [package]
 name = "yapfast"
 # Harmony is independently versioned; its upstream baseline is Yapfast 0.4.1.
-version = "1.3.0"
+version = "1.4.0"
 autobins = false
 edition = "2024"
 rust-version = "1.97"

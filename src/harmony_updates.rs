@@ -268,6 +268,16 @@ pub fn can_install() -> bool {
     false
 }
 
+/// An idle restart must be able to finish without a wizard or elevation.
+pub fn can_restart() -> bool {
+    #[cfg(windows)]
+    return std::env::current_exe()
+        .ok()
+        .is_some_and(|program| installed_scope(&program) == Some("/CURRENTUSER"));
+    #[cfg(not(windows))]
+    can_install()
+}
+
 #[cfg(windows)]
 fn hold_update_directories(path: &Path) -> Result<Vec<fs::File>> {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
@@ -535,10 +545,11 @@ fn installed_scope(program: &Path) -> Option<&'static str> {
 }
 
 impl Staged {
-    pub fn launch(&self) -> Result<()> {
+    pub fn launch(&self, reopen_data_dir: Option<&Path>) -> Result<Option<PathBuf>> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         if let Some(appimage) = &self.appimage {
-            return appimage.replace(&self.path, &self.manifest);
+            appimage.replace(&self.path, &self.manifest)?;
+            return Ok(reopen_data_dir.map(|_| appimage.path.clone()));
         }
         ensure!(WINDOWS_INSTALLER, "Installer requires Windows x64");
         #[cfg(windows)]
@@ -558,9 +569,14 @@ impl Staged {
             let mut arg = std::ffi::OsString::from("/HARMONYINSTALLED=");
             arg.push(folder);
             setup.args([scope, "/SILENT"]).arg(arg);
+            if let Some(root) = reopen_data_dir.filter(|_| scope == "/CURRENTUSER") {
+                let mut restart = std::ffi::OsString::from("/HARMONYREOPEN=");
+                restart.push(std::path::absolute(root)?);
+                setup.args(["/VERYSILENT", "/SUPPRESSMSGBOXES"]).arg(restart);
+            }
         }
         setup.spawn().context("Could not start Harmony Setup")?;
-        Ok(())
+        Ok(None)
     }
 }
 

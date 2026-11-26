@@ -31,7 +31,7 @@ macro_rules! theme {
         impl Theme {
             /// Sets only the colours that differ from those the window
             /// shows: nothing when it starts in Yap, its defaults.
-            fn set(&self, tokens: &yapfast_ui::Theme<'_>) {
+            pub(super) fn set(&self, tokens: &yapfast_ui::Theme<'_>) {
                 if tokens.get_dark() != self.dark {
                     tokens.set_dark(self.dark);
                 }
@@ -53,8 +53,7 @@ macro_rules! theme {
             }
 
             /// The colours the window shows now.
-            #[cfg(test)]
-            pub fn shown(window: &YapfastWindow) -> Self {
+            pub(super) fn shown(window: &YapfastWindow) -> Self {
                 let tokens = window.global::<yapfast_ui::Theme>();
                 Self { dark: tokens.get_dark(), $($name: tokens.$get(),)* }
             }

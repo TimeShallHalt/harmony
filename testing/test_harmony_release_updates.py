@@ -15,13 +15,14 @@ class ReleaseUpdates(unittest.TestCase):
 
     def test_update_consent_uses_the_desktop_settings_and_full_quit(self):
         about = (ROOT / 'ui/about_updates.slint').read_text(encoding='utf8')
-        for label in ('Check now', 'Download update', 'Run Setup when I quit Harmony', 'Copy diagnostics'):
+        for label in ('Check now', 'Download update', 'Run Setup when I quit Harmony', 'Copy diagnostics', 'Restart when idle'):
             self.assertIn(label, about)
         main = (ROOT / 'src/ui.rs').read_text(encoding='utf8')
-        self.assertIn('adapter.updates.finish()', main)
+        self.assertIn('adapter.updates.finish(', main)
         setup = (ROOT / 'packaging/windows/harmony-simple.iss').read_text(encoding='utf8')
         self.assertIn('{param:HARMONYWAITPID|}', setup)
         self.assertIn('{param:HARMONYINSTALLED|}', setup)
+        self.assertIn('{param:HARMONYREOPEN|}', setup)
 
 if __name__ == '__main__':
     unittest.main()

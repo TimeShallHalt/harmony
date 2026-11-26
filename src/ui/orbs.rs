@@ -6,6 +6,9 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
         let (Some(adapter), Some(w)) = (weak.upgrade(), win.upgrade()) else {
             return;
         };
+        if w.get_quests_open() != open {
+            return;
+        }
         let mut a = adapter.borrow_mut();
         #[cfg(feature = "discord")]
         a.action(
@@ -27,10 +30,11 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
 impl Adapter {
     pub(super) fn show_orbs(&mut self, window: &YapfastWindow) {
         let ui = window.global::<Orbs>();
-        if !window.get_settings_open() || window.get_settings_section() != 12 {
+        if !window.get_quests_open() {
             #[cfg(feature = "discord")]
             if self.orbs_shown.take().is_some() {
                 ui.set_items(Default::default());
+                ui.set_claimed(Default::default());
                 ui.set_quests(Default::default());
                 ui.set_balance(Default::default());
                 ui.set_quest_note(Default::default());
@@ -75,34 +79,34 @@ impl Adapter {
                     notes.push(format!("New enrollments open {until}."));
                 }
                 ui.set_quest_note(notes.join(" ").into());
-                ui.set_quests(ModelRc::new(VecModel::from(
-                    report
-                        .quests
-                        .iter()
-                        .flatten()
-                        .map(|q| {
-                            let mut details = q.progress.clone();
-                            if let Some(expires) = &q.expires {
-                                details.push(format!("Ends {expires}"));
-                            }
-                            if let Some(until) = &q.claim_by {
-                                details.push(format!("Claim deadline {until}"));
-                            }
-                            if !q.reward.is_empty() {
-                                details.push(format!("Reward · {}", q.reward));
-                            }
-                            if let Some(orbs) = q.claimed_orbs {
-                                details.push(format!("Claimed {orbs} Orbs"));
-                            }
-                            QuestRow {
-                                id: q.id.to_string().into(),
-                                name: q.name.as_str().into(),
-                                state: q.status.into(),
-                                details: details.join(" · ").into(),
-                            }
-                        })
-                        .collect::<Vec<_>>(),
-                )));
+                let mut available = Vec::new();
+                let mut claimed = Vec::new();
+                for q in report.quests.iter().flatten() {
+                    let mut details = q.progress.clone();
+                    if let Some(expires) = &q.expires {
+                        details.push(format!("Ends {expires}"));
+                    }
+                    if let Some(until) = &q.claim_by {
+                        details.push(format!("Claim by {until}"));
+                    }
+                    let row = QuestRow {
+                        id: q.id.to_string().into(),
+                        name: q.name.as_str().into(),
+                        state: q.status.into(),
+                        reward: q
+                            .claimed_orbs
+                            .map_or_else(|| q.reward.clone(), |orbs| format!("{orbs} Orbs claimed"))
+                            .into(),
+                        details: details.join(" · ").into(),
+                    };
+                    if q.status == "Reward claimed" {
+                        claimed.push(row);
+                    } else {
+                        available.push(row);
+                    }
+                }
+                ui.set_quests(ModelRc::new(VecModel::from(available)));
+                ui.set_claimed(ModelRc::new(VecModel::from(claimed)));
                 ui.set_shop_note(
                     match &report.items {
                         None => "Shop catalog unavailable.",
@@ -140,6 +144,7 @@ impl Adapter {
             }
             if self.orbs_shown.take().is_some() {
                 ui.set_items(Default::default());
+                ui.set_claimed(Default::default());
                 ui.set_quests(Default::default());
             }
             if page.is_some() {
@@ -189,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn update7_settings_navigation_and_hosted_checkout_reconcile_without_spending() {
+    fn quests_navigation_and_hosted_checkout_reconcile_without_spending() {
         i_slint_backend_testing::init_no_event_loop();
         let dir = tempfile::tempdir().unwrap();
         let w = YapfastWindow::new().unwrap();
@@ -218,7 +223,16 @@ mod tests {
             .invoke_edit_color(true, "#448899".into());
         press(&w, "Save on this device");
         assert!(dir.path().join("local-profiles/preview.json").is_file());
-        press(&w, "Quests & Orbs");
+        w.set_settings_open(false);
+        {
+            let mut a = adapter.borrow_mut();
+            a.app.state.preview = false;
+            a.app.state.discord_linked = true;
+            a.app.state.discord_user = Some("42".into());
+            a.refresh(&w);
+        }
+        press(&w, "Quests");
+        assert!(w.get_quests_open());
         let ui = w.global::<Orbs>();
         assert!(!ui.get_can_refresh());
         assert!(ui.get_balance().contains("unavailable"));
@@ -258,6 +272,7 @@ mod tests {
         assert_eq!(ui.get_balance(), "200 Orbs");
         let outbound = a.backend_command_count;
         drop(a);
+        press(&w, "Orbs Shop");
         press(&w, "Night sky · 150 Orbs");
         press(&w, "Review in Discord Shop");
         assert_eq!(*link.borrow(), "https://discord.com/shop#itemSkuId=903");

@@ -385,6 +385,8 @@ export component VoiceDock inherits Rectangle {
     callback open-call-link(length, length, length, length);
     /// Shows the call's channel or DM.
     callback open-call;
+    in property <bool> call-popped;
+    callback pop-out;
     background: Theme.panel;
     VerticalLayout {
         padding-top: 10px; padding-bottom: 8px; padding-right: 8px; spacing: 6px;
@@ -458,6 +460,11 @@ export component VoiceDock inherits Rectangle {
                 label: root.noise-on ? "Turn off noise suppression" : "Turn on noise suppression";
                 alert: !root.noise-on;
                 clicked => { root.toggle-noise(); }
+            }
+            if root.voice-active: IconButton {
+                icon: @image-url("icons/external-link.svg");
+                label: root.call-popped ? "Show call window" : "Pop out call";
+                clicked => { root.pop-out(); }
             }
             if root.voice-active: IconButton {
                 icon: @image-url("icons/phone-off.svg"); label: "Leave voice"; danger: true;
@@ -606,6 +613,7 @@ export component StreamPip inherits Rectangle {
     in-out property <length> drag-y;
     out property <bool> dragging;
     callback open-call;
+    callback pop-out;
     callback stop;
     callback dropped;
     width: 320px; height: 180px; border-radius: 8px; clip: true;
@@ -649,6 +657,13 @@ export component StreamPip inherits Rectangle {
                 x: 12px; y: parent.height - 34px; width: parent.width - 60px; height: 24px;
                 text: root.title; color: #ffffff; font-size: 14px; font-weight: 700;
                 vertical-alignment: center; overflow: elide;
+            }
+            IconButton {
+                x: parent.width - (root.stop-label == "" ? 1 : 2) * (self.size + 8px);
+                y: parent.height - self.size - 8px; height: self.size;
+                icon: @image-url("icons/external-link.svg"); label: "Pop out call"; tint: #ffffff;
+                fill: #000000a6; radius: 16px;
+                clicked => { root.pop-out(); }
             }
             if root.stop-label != "": IconButton {
                 x: parent.width - self.width - 8px; y: parent.height - self.size - 8px; height: self.size;
@@ -1022,6 +1037,8 @@ export component CallControls inherits HorizontalLayout {
     /// The soundboard, opened above this point in the window.
     callback open-soundboard(length, length);
     callback leave-voice;
+    in property <bool> can-pop-out;
+    callback pop-out;
     alignment: center; spacing: 12px; padding: 16px; padding-top: 8px;
     IconButton {
         size: 52px; glyph: 22px; radius: 26px;
@@ -1066,6 +1083,12 @@ export component CallControls inherits HorizontalLayout {
                 root.open-share-menu(self.absolute-position.x, self.absolute-position.y);
             }
         }
+    }
+    if root.can-pop-out: IconButton {
+        size: 52px; glyph: 22px; radius: 26px;
+        icon: @image-url("icons/external-link.svg"); label: "Pop out call"; tint: Theme.text;
+        fill: Theme.raised;
+        clicked => { root.pop-out(); }
     }
     Rectangle {
         width: 76px; height: 52px; border-radius: 26px;
@@ -1270,153 +1293,252 @@ component ScreenCard inherits Rectangle {
     }
 }
 
-// Going live: what to share, where Yapfast lists it, and the resolution, frame
-// rate and quality to share it at; or while sharing, what to share instead.
-export component ShareMenu inherits Rectangle {
-    /// The screens, then the windows, then the cameras, to share; a pick
-    /// counts the screens first.
+export struct ShareSize { width: int, height: int }
+
+// Screen cards stay visible while the secondary menu opens alongside them.
+export component ShareMenu inherits FocusScope {
     in property <[ShareScreen]> screens;
     in property <[string]> windows;
     in property <[string]> cameras;
-    /// The system's dialog picks a screen or window: with cameras listed, a
-    /// choice of it comes before them.
     in property <bool> dialog;
-    /// Switching what's shared, at the stream's quality.
     in property <bool> switching;
+    in property <bool> cascades;
+    in property <bool> flip;
+    in property <length> panel-width;
+    in property <length> secondary-width: 248px;
     property <int> dialog-index: root.screens.length + root.windows.length;
     property <int> first-camera: root.dialog-index + (root.dialog ? 1 : 0);
-    property <bool> asks-dialog: root.dialog && root.cameras.length > 0;
-    property <bool> lists: root.screens.length + root.windows.length + root.cameras.length > 0;
     in-out property <int> pick-source;
     in-out property <int> pick-resolution;
+    in-out property <string> pick-size;
     in-out property <string> pick-fps;
     in-out property <string> pick-bitrate;
+    in-out property <bool> pick-high-quality;
+    in-out property <bool> pick-cursor;
     in property <int> max-resolution;
     in property <int> fps-720: 30;
     in property <int> fps-hd: 30;
-    property <int> max-fps: root.pick-resolution == 0 ? root.fps-720 : root.fps-hd;
-    property <int> max-bitrate: root.pick-resolution == 0 ? 3500 : 9000;
-    changed max-resolution => { root.pick-resolution = min(root.pick-resolution, root.max-resolution); }
-    changed max-fps => { if root.selected-fps > root.max-fps { root.pick-fps = root.max-fps; } }
-    changed max-bitrate => { if root.selected-bitrate > root.max-bitrate { root.pick-bitrate = root.max-bitrate; } }
-    property <int> selected-fps: root.parse-whole(root.pick-fps);
-    property <int> selected-bitrate: root.pick-bitrate == "" ? 0 : root.parse-whole(root.pick-bitrate);
-    property <bool> valid-fps: root.selected-fps >= 15 && root.selected-fps <= root.max-fps;
-    property <bool> valid-bitrate: root.selected-bitrate == 0
+    private property <int> section: 0;
+    private property <length> section-top;
+    private property <ShareSize> size: root.parse-size(root.pick-size);
+    private property <int> max-frame-width: root.max-resolution == 0 ? 1280 : root.max-resolution == 1 ? 1920 : 3840;
+    private property <int> max-frame-height: root.max-resolution == 0 ? 720 : root.max-resolution == 1 ? 1080 : 2160;
+    private property <bool> hd: root.pick-resolution == 3 ? root.size.width > 1280 || root.size.height > 720 : root.pick-resolution > 0;
+    private property <int> max-fps: root.hd ? root.fps-hd : root.fps-720;
+    private property <int> max-bitrate: root.hd ? 9000 : 3500;
+    private property <int> selected-fps: root.parse-whole(root.pick-fps);
+    private property <int> selected-bitrate: root.pick-bitrate == "" ? 0 : root.parse-whole(root.pick-bitrate);
+    private property <bool> valid-size: root.pick-resolution != 3 ? root.pick-resolution <= root.max-resolution
+        : root.size.width >= 2 && root.size.height >= 2 && root.size.width <= root.max-frame-width && root.size.height <= root.max-frame-height;
+    private property <bool> valid-fps: root.selected-fps >= 15 && root.selected-fps <= root.max-fps;
+    private property <bool> valid-bitrate: root.selected-bitrate == 0
         || (root.selected-bitrate >= 500 && root.selected-bitrate <= root.max-bitrate);
-    /// The encoder's slower preset: a sharper picture for more CPU.
-    in-out property <bool> pick-high-quality;
+    private property <[string]> titles: ["", "Windows", "Cameras", "Resolution", "Frame rate", "Bitrate"];
+    private property <string> resolution-label: root.pick-resolution == 0 ? "720p"
+        : root.pick-resolution == 1 ? "1080p" : root.pick-resolution == 2 ? "Source"
+        : root.valid-size ? root.size.width + " × " + root.size.height : "Enter a size";
     pure callback parse-whole(string) -> int;
-    callback go-live(int, int, int, int, bool);
-    /// The menu's height with every choice showing. In a window too short for
-    /// it, the menu is as tall as it gets and the choices scroll, above the
-    /// button that starts the stream, which stays.
-    out property <length> full-height: choices.preferred-height + start.preferred-height + 12px;
-    background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 8px;
-    drop-shadow-blur: 24px; drop-shadow-color: #00000080; drop-shadow-offset-y: 8px;
-    VerticalLayout {
-        padding: 6px; spacing: 0px;
-        ScrollView {
-            min-height: 0px; preferred-height: choices.preferred-height;
-            choices := VerticalLayout {
-                spacing: 2px;
-                if root.screens.length > 0: HorizontalLayout {
-                    padding-left: 8px; padding-top: 4px; padding-bottom: 4px;
-                    Text { text: "SCREENS"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
-                }
-                // Two to a row; one alone sits in the middle.
-                if root.screens.length > 0: Rectangle {
-                    property <length> gap: 4px;
-                    property <length> card: (self.width - self.gap) / 2;
-                    property <length> card-height: self.card * 9 / 16 + 30px;
-                    height: ceil(root.screens.length / 2) * (self.card-height + self.gap) - self.gap;
-                    for screen[index] in root.screens: ScreenCard {
-                        x: root.screens.length == 1 ? (parent.width - parent.card) / 2 : mod(index, 2) * (parent.card + parent.gap);
-                        y: floor(index / 2) * (parent.card-height + parent.gap);
-                        width: parent.card; height: parent.card-height;
-                        text: screen.title; picture: screen.picture; checked: index == root.pick-source;
-                        clicked => { root.pick-source = index; }
+    pure callback parse-size(string) -> ShareSize;
+    callback go-live(int, int, string, int, int, bool, bool);
+    callback close;
+    out property <length> full-height: max(
+        choices.preferred-height + start.preferred-height + 12px,
+        root.switching ? min(300px, 50px + max(root.windows.length, root.cameras.length) * 32px) : 300px
+    );
+    init => { root.focus(); }
+    key-pressed(event) => {
+        if event.text == Key.Escape {
+            if root.section != 0 { root.section = 0; } else { root.close(); }
+            return accept;
+        }
+        return reject;
+    }
+    function open-section(which: int, row-y: length) {
+        root.section = which;
+        root.section-top = row-y - root.absolute-position.y;
+    }
+    function choose-source(index: int) {
+        root.pick-source = index;
+        root.section = 0;
+    }
+
+    if root.cascades && root.section == 0: TouchArea {
+        x: root.flip ? 0px : root.panel-width;
+        width: root.secondary-width;
+        clicked => { root.close(); }
+    }
+    Rectangle {
+        x: root.cascades && root.flip ? root.secondary-width : 0px;
+        width: root.panel-width;
+        height: min(root.height, choices.preferred-height + start.preferred-height + 12px);
+        visible: root.cascades || root.section == 0;
+        background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 8px;
+        VerticalLayout {
+            padding: 6px;
+            ScrollView {
+                min-height: 0px; preferred-height: choices.preferred-height;
+                choices := VerticalLayout {
+                    spacing: 2px;
+                    if root.screens.length > 0: HorizontalLayout {
+                        padding-left: 8px; padding-top: 4px; padding-bottom: 4px;
+                        Text { text: "SCREENS"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
+                    }
+                    // Two to a row; one alone sits in the middle.
+                    if root.screens.length > 0: Rectangle {
+                        property <length> gap: 4px;
+                        property <length> card: (self.width - self.gap) / 2;
+                        property <length> card-height: self.card * 9 / 16 + 30px;
+                        height: ceil(root.screens.length / 2) * (self.card-height + self.gap) - self.gap;
+                        for screen[index] in root.screens: ScreenCard {
+                            x: root.screens.length == 1 ? (parent.width - parent.card) / 2 : mod(index, 2) * (parent.card + parent.gap);
+                            y: floor(index / 2) * (parent.card-height + parent.gap);
+                            width: parent.card; height: parent.card-height;
+                            text: screen.title; picture: screen.picture; checked: index == root.pick-source;
+                            clicked => { root.choose-source(index); }
+                        }
+                    }
+                    if root.windows.length > 0: MenuItem {
+                        text: "Windows"; submenu: true; highlighted: root.section == 1;
+                        checked: root.pick-source >= root.screens.length && root.pick-source < root.dialog-index;
+                        hovered => { if root.cascades { root.open-section(1, self.absolute-position.y); } }
+                        clicked => { root.open-section(1, self.absolute-position.y); }
+                    }
+                    if root.dialog && root.cameras.length > 0: MenuItem {
+                        text: "Screen or window"; subtitle: "Picked in the system’s dialog";
+                        checked: root.dialog-index == root.pick-source;
+                        clicked => { root.choose-source(root.dialog-index); }
+                    }
+                    if root.cameras.length > 0: MenuItem {
+                        text: "Cameras"; submenu: true; highlighted: root.section == 2;
+                        checked: root.pick-source >= root.first-camera;
+                        hovered => { if root.cascades { root.open-section(2, self.absolute-position.y); } }
+                        clicked => { root.open-section(2, self.absolute-position.y); }
+                    }
+                    if !root.switching: MenuItem {
+                        text: "Resolution · " + root.resolution-label; submenu: true; highlighted: root.section == 3;
+                        hovered => { if root.cascades { root.open-section(3, self.absolute-position.y); } }
+                        clicked => { root.open-section(3, self.absolute-position.y); }
+                    }
+                    if !root.switching: MenuItem {
+                        text: "Frame rate · " + (root.valid-fps ? root.selected-fps + " fps" : "Enter a rate");
+                        submenu: true; highlighted: root.section == 4;
+                        hovered => { if root.cascades { root.open-section(4, self.absolute-position.y); } }
+                        clicked => { root.open-section(4, self.absolute-position.y); }
+                    }
+                    if !root.switching: MenuItem {
+                        text: "Bitrate · " + (!root.valid-bitrate ? "Enter a limit"
+                            : root.selected-bitrate == 0 ? "Automatic" : root.selected-bitrate + " kbps");
+                        submenu: true; highlighted: root.section == 5;
+                        hovered => { if root.cascades { root.open-section(5, self.absolute-position.y); } }
+                        clicked => { root.open-section(5, self.absolute-position.y); }
+                    }
+                    if !root.switching: MenuItem {
+                        text: "Show cursor"; checkbox: true; checked: root.pick-cursor;
+                        clicked => { root.pick-cursor = !root.pick-cursor; }
+                    }
+                    if !root.switching: MenuItem {
+                        text: "Higher quality"; subtitle: "Sharper, at twice the CPU";
+                        checkbox: true; checked: root.pick-high-quality;
+                        clicked => { root.pick-high-quality = !root.pick-high-quality; }
                     }
                 }
-                if root.windows.length > 0: HorizontalLayout {
-                    padding-left: 8px; padding-top: root.screens.length > 0 ? 8px : 4px; padding-bottom: 4px;
-                    Text { text: "WINDOWS"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
+            }
+            start := HorizontalLayout {
+                padding: 4px; padding-top: 10px;
+                ActionButton {
+                    text: root.switching ? "Switch" : "Go Live";
+                    icon: @image-url("icons/screen-share.svg"); primary: true; horizontal-stretch: 1;
+                    enabled: root.switching || (root.valid-size && root.valid-fps && root.valid-bitrate);
+                    clicked => {
+                        root.go-live(root.pick-source, root.pick-resolution, root.pick-size,
+                            root.selected-fps, root.selected-bitrate, root.pick-high-quality, root.pick-cursor);
+                    }
                 }
-                // Every window, and every camera below: the menu scrolls as
-                // one, since a list scrolling inside it kept the wheel at its
-                // end, and the choices under it out of reach from there.
-                if root.windows.length > 0: VerticalLayout {
+            }
+        }
+    }
+    Rectangle {
+        x: root.cascades && !root.flip ? root.panel-width : 0px;
+        y: root.cascades ? max(0px, min(root.section-top, root.height - self.height)) : 0px;
+        width: root.cascades ? root.secondary-width : root.panel-width;
+        height: min(root.height, secondary.preferred-height + 12px);
+        visible: root.section != 0;
+        background: Theme.raised; border-color: Theme.edge; border-width: 1px; border-radius: 8px;
+        ScrollView {
+            min-height: 0px;
+            secondary := VerticalLayout {
+                padding: 6px; spacing: 2px;
+                MenuItem {
+                    text: root.titles[root.section]; icon: @image-url("icons/chevron-left.svg");
+                    clicked => { root.section = 0; }
+                }
+                if root.section == 1: VerticalLayout {
                     for window[index] in root.windows: MenuItem {
                         text: window; checked: root.screens.length + index == root.pick-source;
-                        clicked => { root.pick-source = root.screens.length + index; }
+                        clicked => { root.choose-source(root.screens.length + index); }
                     }
                 }
-                if root.asks-dialog: HorizontalLayout {
-                    padding-left: 8px; padding-top: 4px; padding-bottom: 4px;
-                    Text { text: "SCREEN"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
-                }
-                if root.asks-dialog: MenuItem {
-                    text: "Screen or window"; subtitle: "Picked in the system's dialog";
-                    checked: root.dialog-index == root.pick-source;
-                    clicked => { root.pick-source = root.dialog-index; }
-                }
-                if root.cameras.length > 0: HorizontalLayout {
-                    padding-left: 8px; padding-top: root.dialog-index > 0 || root.asks-dialog ? 8px : 4px; padding-bottom: 4px;
-                    Text { text: "CAMERAS"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
-                }
-                if root.cameras.length > 0: VerticalLayout {
+                if root.section == 2: VerticalLayout {
                     for camera[index] in root.cameras: MenuItem {
                         text: camera; checked: root.first-camera + index == root.pick-source;
-                        clicked => { root.pick-source = root.first-camera + index; }
+                        clicked => { root.choose-source(root.first-camera + index); }
                     }
                 }
-                if !root.switching: HorizontalLayout {
-                    padding-left: 8px; padding-top: root.lists ? 8px : 4px; padding-bottom: 4px;
-                    Text { text: "RESOLUTION"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
-                }
-                if !root.switching: VerticalLayout {
-                    spacing: 2px;
+                if root.section == 3: VerticalLayout {
+                    spacing: 3px;
                     for choice[index] in ["720p", "1080p", "Source"]: MenuItem {
                         text: choice; checked: index == root.pick-resolution;
                         disabled: index > root.max-resolution;
                         clicked => { if !self.disabled { root.pick-resolution = index; } }
                     }
-                }
-                if !root.switching: HorizontalLayout {
-                    padding-left: 8px; padding-top: 8px; padding-bottom: 4px;
-                    Text { text: "FRAME RATE"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
-                }
-                if !root.switching: VerticalLayout {
-                    padding-left: 8px; padding-right: 8px; spacing: 4px;
-                    TextField { label: "Frame rate in fps"; text <=> root.pick-fps; min-height: 30px; }
-                    Text { text: "15–" + root.max-fps + " fps"; color: root.valid-fps ? Theme.muted : Theme.danger; font-size: 12px; }
-                }
-                if !root.switching: VerticalLayout {
-                    padding-left: 8px; padding-right: 8px; padding-top: 8px; spacing: 4px;
-                    Text { text: "BITRATE LIMIT"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
-                    TextField {
-                        label: "Video bitrate limit in kilobits per second"; placeholder: "Automatic";
-                        text <=> root.pick-bitrate; min-height: 30px;
+                    if root.max-resolution == 2: MenuItem {
+                        text: "1440p"; checked: root.pick-resolution == 3 && root.pick-size == "2560 × 1440";
+                        clicked => { root.pick-resolution = 3; root.pick-size = "2560 × 1440"; }
                     }
-                    Text { text: "500–" + root.max-bitrate + " kbps, or 0 for auto"; color: root.valid-bitrate ? Theme.muted : Theme.danger; font-size: 12px; }
+                    if root.max-resolution == 2: MenuItem {
+                        text: "2160p"; checked: root.pick-resolution == 3 && root.pick-size == "3840 × 2160";
+                        clicked => { root.pick-resolution = 3; root.pick-size = "3840 × 2160"; }
+                    }
+                    TextField {
+                        label: "Custom resolution, width by height"; placeholder: "Width × height";
+                        text: root.pick-resolution == 3 ? root.pick-size : "";
+                        edited(text) => { root.pick-resolution = 3; root.pick-size = text; }
+                    }
+                    Text {
+                        text: "Even dimensions up to " + root.max-frame-width + " × " + root.max-frame-height;
+                        color: root.valid-size ? Theme.muted : Theme.danger;
+                        font-size: 12px; wrap: word-wrap;
+                    }
                 }
-                if !root.switching: HorizontalLayout {
-                    padding-left: 8px; padding-top: 8px; padding-bottom: 4px;
-                    Text { text: "ENCODING"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
+                if root.section == 4: VerticalLayout {
+                    spacing: 3px;
+                    for fps in [15, 24, 30, 48, 60]: MenuItem {
+                        text: fps + " fps"; checked: fps == root.selected-fps; disabled: fps > root.max-fps;
+                        clicked => { if !self.disabled { root.pick-fps = fps; } }
+                    }
+                    TextField { label: "Custom frame rate in fps"; placeholder: "Custom FPS"; text <=> root.pick-fps; }
+                    Text {
+                        text: "15–" + root.max-fps + " fps for this call";
+                        color: root.valid-fps ? Theme.muted : Theme.danger; font-size: 12px;
+                    }
                 }
-                if !root.switching: MenuItem {
-                    text: "Higher quality"; subtitle: "Sharper, at twice the CPU";
-                    checkbox: true; checked: root.pick-high-quality;
-                    clicked => { root.pick-high-quality = !root.pick-high-quality; }
+                if root.section == 5: VerticalLayout {
+                    spacing: 3px;
+                    MenuItem {
+                        text: "Automatic"; checked: root.selected-bitrate == 0;
+                        clicked => { root.pick-bitrate = ""; }
+                    }
+                    for bitrate in [1000, 2500, 3500, 6000, 9000]: MenuItem {
+                        text: bitrate + " kbps"; checked: bitrate == root.selected-bitrate;
+                        disabled: bitrate > root.max-bitrate;
+                        clicked => { if !self.disabled { root.pick-bitrate = bitrate; } }
+                    }
+                    TextField { label: "Custom video bitrate in kbps"; placeholder: "Custom kbps"; text <=> root.pick-bitrate; }
+                    Text {
+                        text: "500–" + root.max-bitrate + " kbps, or 0 for auto";
+                        color: root.valid-bitrate ? Theme.muted : Theme.danger; font-size: 12px;
+                    }
                 }
-            }
-        }
-        start := HorizontalLayout {
-            padding: 4px; padding-top: 10px;
-            ActionButton {
-                text: root.switching ? "Switch" : "Go Live"; icon: @image-url("icons/screen-share.svg"); primary: true; horizontal-stretch: 1;
-                enabled: root.switching || (root.valid-fps && root.valid-bitrate);
-                clicked => { root.go-live(root.pick-source, root.pick-resolution, root.selected-fps, root.selected-bitrate, root.pick-high-quality); }
             }
         }
     }

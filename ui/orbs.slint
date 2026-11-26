@@ -1,70 +1,141 @@
 import { Theme, Label } from "theme.slint";
 import { ActionButton } from "controls.slint";
-import { SettingsHeading, SettingsTitle } from "settings.slint";
+import { ScrollView } from "scrollview.slint";
+import { HeaderTab } from "friends.slint";
 
-export struct QuestRow { id: string, name: string, state: string, details: string }
+export struct QuestRow { id: string, name: string, state: string, reward: string, details: string }
 export struct OrbItemRow { id: string, name: string, summary: string, price: string, ownership: string }
 export global Orbs {
     in property <string> balance;
     in property <string> quest-note;
     in property <string> shop-note;
     in property <[QuestRow]> quests;
+    in property <[QuestRow]> claimed;
     in property <[OrbItemRow]> items;
     in property <bool> can-refresh;
 }
 
-export component OrbsSettings inherits VerticalLayout {
+component QuestCard inherits Rectangle {
+    in property <QuestRow> quest;
+    callback visit(string);
+    background: Theme.raised;
+    border-radius: 12px;
+    border-color: Theme.line; border-width: 1px;
+    VerticalLayout {
+        padding: 16px; spacing: 8px;
+        Text {
+            text: root.quest.state;
+            color: root.quest.state == "Completed" ? Theme.live : Theme.secondary;
+            font-size: 13px; font-weight: 700;
+        }
+        Text {
+            text: root.quest.name; color: Theme.text; font-size: 19px; font-weight: 700;
+            wrap: word-wrap; overflow: elide; max-height: 48px;
+            accessible-role: text; accessible-label: root.quest.name;
+        }
+        if root.quest.reward != "": Text {
+            text: root.quest.reward; color: Theme.accent; font-weight: 600;
+            wrap: word-wrap; overflow: elide; max-height: 40px;
+        }
+        if root.quest.details != "": Text {
+            text: root.quest.details; color: Theme.secondary;
+            font-size: 13px; wrap: word-wrap; overflow: elide; max-height: 58px;
+            accessible-role: text; accessible-label: root.quest.details;
+        }
+        Rectangle { vertical-stretch: 1; }
+        ActionButton {
+            text: root.quest.state == "Completed" ? "Review reward in Discord" : "View Quest in Discord";
+            primary: root.quest.state == "Completed";
+            clicked => { root.visit("https://discord.com/quests/" + root.quest.id); }
+        }
+    }
+}
+
+export component QuestsScreen inherits Rectangle {
     callback refresh;
     callback visit(string);
-    property <string> selected;
-    property <[OrbItemRow]> offers: Orbs.items;
+    private property <int> tab;
+    private property <string> selected;
+    private property <[OrbItemRow]> offers: Orbs.items;
+    private property <[QuestRow]> cards: root.tab == 1 ? Orbs.claimed : Orbs.quests;
     changed offers => { root.selected = ""; }
-    spacing: 12px;
-    SettingsTitle { text: "Quests & Orbs"; }
-    HorizontalLayout {
-        alignment: start; spacing: 12px;
-        Text { text: Orbs.balance; vertical-alignment: center; color: Theme.text; font-weight: 700; }
-        ActionButton { text: "Refresh"; enabled: Orbs.can-refresh; clicked => { root.refresh(); } }
-    }
-    SettingsHeading { text: "Quests"; }
-    if Orbs.quest-note != "": Label { text: Orbs.quest-note; }
-    for quest in Orbs.quests: VerticalLayout {
-        spacing: 4px;
-        Text { text: quest.name + " · " + quest.state; color: Theme.text; font-weight: 600; wrap: word-wrap; }
-        if quest.details != "": Label { text: quest.details; }
+    changed tab => { body.content-y = 0px; }
+    background: Theme.chat;
+    VerticalLayout {
+        spacing: 0px;
         HorizontalLayout {
-            alignment: start;
-            ActionButton {
-                text: quest.state == "Completed" ? "Review reward in Discord" : "View Quest in Discord";
-                clicked => { root.visit("https://discord.com/quests/" + quest.id); }
+            padding: 12px; spacing: 6px;
+            HeaderTab { text: "Available"; selected: root.tab == 0; clicked => { root.tab = 0; } }
+            HeaderTab { text: "Claimed"; selected: root.tab == 1; clicked => { root.tab = 1; } }
+            HeaderTab { text: "Orbs Shop"; selected: root.tab == 2; clicked => { root.tab = 2; } }
+            Rectangle { horizontal-stretch: 1; }
+            if root.width >= 530px: Text {
+                text: Orbs.balance; color: Theme.text; font-weight: 700; vertical-alignment: center;
+            }
+            ActionButton { text: "Refresh"; small: true; enabled: Orbs.can-refresh; clicked => { root.refresh(); } }
+        }
+        Rectangle { height: 1px; background: Theme.edge; }
+        body := ScrollView {
+            min-height: 0px; vertical-stretch: 1;
+            VerticalLayout {
+                padding: 18px; spacing: 12px;
+                if root.width < 530px: Label { text: Orbs.balance; }
+                if root.tab != 2: VerticalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: root.tab == 1 ? "Claimed rewards" : "Available Quests";
+                        color: Theme.text; font-size: 22px; font-weight: 700;
+                    }
+                    if Orbs.quest-note != "": Label { text: Orbs.quest-note; }
+                    if root.tab == 1 && root.cards.length == 0 && Orbs.quest-note == "": Label { text: "No claimed rewards yet."; }
+                    if root.cards.length > 0: Rectangle {
+                        property <int> columns: self.width >= 940px ? 3 : self.width >= 565px ? 2 : 1;
+                        property <length> gap: 14px;
+                        property <length> card-width: (self.width - (self.columns - 1) * self.gap) / self.columns;
+                        property <length> card-height: 236px;
+                        height: ceil(root.cards.length / self.columns) * (self.card-height + self.gap) - self.gap;
+                        for quest[index] in root.cards: QuestCard {
+                            x: mod(index, parent.columns) * (parent.card-width + parent.gap);
+                            y: floor(index / parent.columns) * (parent.card-height + parent.gap);
+                            width: parent.card-width; height: parent.card-height;
+                            quest: quest;
+                            visit(url) => { root.visit(url); }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        ActionButton {
+                            text: "Open Discord Quest Home";
+                            clicked => { root.visit("https://discord.com/discovery/quests"); }
+                        }
+                    }
+                }
+                if root.tab == 2: VerticalLayout {
+                    spacing: 10px;
+                    Label { text: "Review the item, final Orbs price, and confirmation in Discord’s Shop."; }
+                    if Orbs.shop-note != "": Label { text: Orbs.shop-note; }
+                    for item in root.offers: VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: start; spacing: 8px;
+                            ActionButton { text: item.name + " · " + item.price; clicked => { root.selected = root.selected == item.id ? "" : item.id; } }
+                        }
+                        if root.selected == item.id: VerticalLayout {
+                            spacing: 4px;
+                            if item.summary != "": Label { text: item.summary; }
+                            if item.ownership != "": Label { text: item.ownership; }
+                            HorizontalLayout {
+                                alignment: start;
+                                ActionButton { text: "Review in Discord Shop"; clicked => { root.visit("https://discord.com/shop#itemSkuId=" + item.id); } }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        ActionButton { text: "Open Discord Orbs Shop"; clicked => { root.visit("https://discord.com/shop?tab=orbs"); } }
+                    }
+                }
             }
         }
-    }
-    HorizontalLayout {
-        alignment: start;
-        ActionButton { text: "Open Discord Quest Home"; clicked => { root.visit("https://discord.com/discovery/quests"); } }
-    }
-    SettingsHeading { text: "Orbs Shop"; }
-    Label { text: "Review the item, final Orbs price, and confirmation in Discord’s Shop."; }
-    if Orbs.shop-note != "": Label { text: Orbs.shop-note; }
-    for item in root.offers: VerticalLayout {
-        spacing: 4px;
-        HorizontalLayout {
-            alignment: start; spacing: 8px;
-            ActionButton { text: item.name + " · " + item.price; clicked => { root.selected = root.selected == item.id ? "" : item.id; } }
-        }
-        if root.selected == item.id: VerticalLayout {
-            spacing: 4px;
-            if item.summary != "": Label { text: item.summary; }
-            if item.ownership != "": Label { text: item.ownership; }
-            HorizontalLayout {
-                alignment: start;
-                ActionButton { text: "Review in Discord Shop"; clicked => { root.visit("https://discord.com/shop#itemSkuId=" + item.id); } }
-            }
-        }
-    }
-    HorizontalLayout {
-        alignment: start;
-        ActionButton { text: "Open Discord Orbs Shop"; clicked => { root.visit("https://discord.com/shop?tab=orbs"); } }
     }
 }

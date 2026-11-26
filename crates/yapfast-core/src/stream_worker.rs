@@ -44,7 +44,7 @@ use crate::{
     encode::{self, Effort, Encoder},
     frames::{Frames, Writer},
     stream_audio,
-    voice::{Resolution, StreamQuality, StreamStats},
+    voice::{StreamQuality, StreamStats, show_cursor_by_default},
 };
 
 /// The argument that starts Harmony as a stream worker.
@@ -109,6 +109,8 @@ pub enum Job {
         width: u32,
         height: u32,
         fps: u32,
+        #[serde(default = "show_cursor_by_default")]
+        show_cursor: bool,
         /// User's adaptive encoder cap, or zero for automatic.
         #[serde(default)]
         bitrate_kbps: u32,
@@ -445,6 +447,7 @@ fn serve(mut input: Box<dyn BufRead + Send>, report: &mut dyn FnMut(Report)) {
             width,
             height,
             fps,
+            show_cursor,
             bitrate_kbps,
             effort,
             hardware,
@@ -469,7 +472,7 @@ fn serve(mut input: Box<dyn BufRead + Send>, report: &mut dyn FnMut(Report)) {
             report(Report::Ready);
             match source {
                 Source::TestPattern => test_pattern(sink, width, height, &stop, report),
-                source => capture_screen(source, sink, width, height, &stop, report),
+                source => capture_screen(source, sink, width, height, show_cursor, &stop, report),
             }
         }
         Job::Watch {
@@ -1049,16 +1052,6 @@ fn test_pattern(
     Ok(())
 }
 
-/// The largest frame shared at `resolution`; screens of another shape fit
-/// inside it.
-fn bounds(resolution: Resolution) -> (u32, u32) {
-    match resolution {
-        Resolution::P720 => (1280, 720),
-        Resolution::P1080 => (SHARE_WIDTH, SHARE_HEIGHT),
-        Resolution::Source => (3840, 2160),
-    }
-}
-
 /// The size `width` by `height` takes when scaled down to fit `max_width`
 /// by `max_height`, keeping its shape. Codecs want even sizes.
 pub fn fit(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
@@ -1129,12 +1122,13 @@ fn capture_screen(
     sink: Sink,
     max_width: u32,
     max_height: u32,
+    show_cursor: bool,
     stop: &AtomicBool,
     report: &mut dyn FnMut(Report),
 ) -> Result<()> {
     let fps = sink.fps;
     let sink = Arc::new(Mutex::new(sink));
-    let mut capture = Capture::start(source, &sink, max_width, max_height)?;
+    let mut capture = Capture::start(source, &sink, max_width, max_height, show_cursor)?;
     // A screen, window or camera to share in its place, until it gives a
     // picture.
     let mut switching: Option<Capture> = None;
@@ -1187,7 +1181,7 @@ fn capture_screen(
         if let Some(source) = switch {
             // A switch asked for while another waits replaces it.
             switching = None;
-            match Capture::start(source, &sink, max_width, max_height) {
+            match Capture::start(source, &sink, max_width, max_height, show_cursor) {
                 Ok(next) => switching = Some(next),
                 Err(error) => tracing::warn!(
                     error = format!("{error:#}"),
@@ -1217,6 +1211,7 @@ impl Capture {
         sink: &Arc<Mutex<Sink>>,
         max_width: u32,
         max_height: u32,
+        show_cursor: bool,
     ) -> Result<Self> {
         if let Source::Camera(id) = &source {
             return Self::camera(id, sink, max_width, max_height);
@@ -1235,7 +1230,7 @@ impl Capture {
             _ => DesktopCaptureSourceType::Screen,
         };
         let mut options = DesktopCapturerOptions::new(kind);
-        options.set_include_cursor(true);
+        options.set_include_cursor(show_cursor);
         let mut capturer = DesktopCapturer::new(options)
             .context("Screen sharing isn't available on this system.")?;
         let captured = Arc::new(Mutex::new(Captured::default()));
@@ -1518,13 +1513,14 @@ impl Worker {
     ) -> Result<(Self, Frames, mpsc::UnboundedReceiver<Report>)> {
         let source = picked(source);
         let frames = Frames::create(PREVIEW_WIDTH, PREVIEW_HEIGHT)?;
-        let (width, height) = bounds(quality.resolution);
+        let (width, height) = quality.resolution.bounds();
         let job = Job::Share {
             source,
             frames: frames.path().context("the video frames file has no name")?,
             width,
             height,
             fps: quality.fps,
+            show_cursor: quality.show_cursor,
             bitrate_kbps: quality.bitrate_kbps,
             effort: if quality.high_quality {
                 Effort::High
@@ -2129,6 +2125,7 @@ mod tests {
             width: PREVIEW_WIDTH,
             height: PREVIEW_HEIGHT,
             fps: 60,
+            show_cursor: true,
             bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
@@ -2179,6 +2176,7 @@ mod tests {
             width: PREVIEW_WIDTH,
             height: PREVIEW_HEIGHT,
             fps: 30,
+            show_cursor: true,
             bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
@@ -2315,6 +2313,7 @@ mod tests {
                 width: PREVIEW_WIDTH,
                 height: PREVIEW_HEIGHT,
                 fps: 30,
+                show_cursor: true,
                 bitrate_kbps: 0,
                 effort: Effort::Light,
                 hardware: false,
@@ -2369,6 +2368,7 @@ mod tests {
             width: PREVIEW_WIDTH,
             height: PREVIEW_HEIGHT,
             fps: 30,
+            show_cursor: true,
             bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,
@@ -2405,6 +2405,7 @@ mod tests {
             width: 16,
             height: 16,
             fps: 1,
+            show_cursor: true,
             bitrate_kbps: 0,
             effort: Effort::Light,
             hardware: false,

@@ -276,6 +276,7 @@ fn launch(
             relaunch(start.arguments, Some(&reason), start.open_link.as_deref())
         }
         ui::Exit::Restart => relaunch(start.arguments, None, None),
+        ui::Exit::RestartInstalled(program) => relaunch_program(&program, start.arguments, None, None),
     }
 }
 

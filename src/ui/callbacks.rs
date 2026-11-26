@@ -682,6 +682,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     super::title_bar::bind(window, adapter);
     super::about::bind(window);
     super::release_updates::bind(window, adapter);
+    super::call_window::bind(window, adapter);
     // A server tag opens its server's card beside it, showing what's known
     // at once, and asks Discord for the rest.
     window.global::<ServerTags>().on_open({
@@ -1425,6 +1426,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     bind!(on_go_back, Action::NavigateBack);
     bind!(on_go_forward, Action::NavigateForward);
     bind!(on_open_friends, Action::OpenDmScreen(DmScreen::Friends));
+    bind!(on_open_quests, Action::OpenDmScreen(DmScreen::Quests));
     bind!(on_open_browse, Action::BrowseChannels);
     bind_item!(on_message_friend, Action::MessagePerson);
     bind!(on_link_discord, Action::LinkDiscord);
@@ -3318,6 +3320,9 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     #[cfg(feature = "discord")]
     window.on_list_share_sources(move || {
         use yapfast_core::stream_worker::{Report, Source, Worker};
+        let Some(window) = weak.upgrade() else { return };
+        let request = window.get_share_source_request().wrapping_add(1);
+        window.set_share_source_request(request);
         // A picture fills a card in the share menu, in pixels.
         let scale = weak
             .upgrade()
@@ -3346,6 +3351,9 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
                 })
                 .collect();
             let opened = weak.upgrade_in_event_loop(move |window| {
+                if window.get_share_source_request() != request || !window.get_voice_active() {
+                    return;
+                }
                 let rows: Vec<ShareScreen> = screens
                     .iter()
                     .map(|listed| ShareScreen {
@@ -3402,6 +3410,9 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
                                 &rgba, width, height,
                             );
                         let _ = weak.upgrade_in_event_loop(move |window| {
+                            if window.get_share_source_request() != request {
+                                return;
+                            }
                             let at = SHAREABLE.with_borrow(|shareable| {
                                 shareable
                                     .iter()
@@ -3437,9 +3448,10 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
             window.invoke_show_share_menu();
         }
     });
+    window.on_parse_share_size(|text| share_size(text.as_str()));
     let state = adapter.clone();
     let weak = window.as_weak();
-    window.on_go_live(move |source, resolution, fps, bitrate, high_quality| {
+    window.on_go_live(move |source, resolution, size, fps, bitrate, high_quality, show_cursor| {
         if let Some(window) = weak.upgrade() {
             #[cfg(feature = "discord")]
             {
@@ -3454,6 +3466,16 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
             let resolution = match resolution {
                 0 => voice::Resolution::P720,
                 2 => voice::Resolution::Source,
+                3 => {
+                    let size = share_size(size.as_str());
+                    if size.width < 2 || size.height < 2 {
+                        return;
+                    }
+                    voice::Resolution::Custom {
+                        width: size.width as u32,
+                        height: size.height as u32,
+                    }
+                }
                 _ => voice::Resolution::P1080,
             };
             let quality = voice::StreamQuality {
@@ -3461,6 +3483,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
                 fps: fps.clamp(1, 60) as u32,
                 bitrate_kbps: bitrate.clamp(0, 9000) as u32,
                 high_quality,
+                show_cursor,
             };
             state
                 .borrow_mut()
@@ -3563,6 +3586,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         {
             window.set_watch_frame(frame);
         }
+        adapter.sync_call_frames(&window);
         let video = adapter.app.state.video.as_ref();
         let taken =
             video.and_then(|video| Some((video, video.frames.as_ref()?.take_timed(image)?)));
@@ -4281,10 +4305,13 @@ fn start_camera_test(adapter: &mut Adapter, window: &YapfastWindow) {
 /// so pictures are made only for tiles in sight, at their size, and
 /// whether it's the tile in focus. With the call off screen, the camera in
 /// the corner shows there.
-fn place_videos(adapter: &Adapter, window: &YapfastWindow) {
+pub(super) fn place_videos(adapter: &Adapter, window: &YapfastWindow) {
     let voice = &adapter.app.state.voice;
     let shown = window.get_grid_shown() && voice.active();
-    let scale = window.window().scale_factor();
+    let (tiles, scale) = adapter.call_window.as_ref().map_or_else(
+        || (adapter.tiles, window.window().scale_factor()),
+        |popout| (popout.tiles, popout.view.window().scale_factor()),
+    );
     let corner = usize::try_from(window.get_pip_person())
         .ok()
         .filter(|_| window.get_pip_shown() && voice.active());
@@ -4300,16 +4327,12 @@ fn place_videos(adapter: &Adapter, window: &YapfastWindow) {
             let at = if corner == Some(index) {
                 Some((pixels(PIP_WIDTH), pixels(PIP_HEIGHT)))
             } else {
-                adapter
-                    .tiles
-                    .filter(|_| shown)
+                tiles.filter(|_| shown)
                     .and_then(|tiles| tiles.shown_at(index + before, scale))
             };
             let large = corner != Some(index)
                 && shown
-                && adapter
-                    .tiles
-                    .is_some_and(|tiles| tiles.focused == Some(index + before));
+                && tiles.is_some_and(|tiles| tiles.focused == Some(index + before));
             feed.show_at(at);
             feed.show_large(large);
         }
@@ -4411,5 +4434,16 @@ mod tests {
         assert!(busy > Duration::from_millis(40) && busy <= REPORT_SPACING);
         last.set(Some(Instant::now() - REPORT_SPACING));
         assert_eq!(report_delay(&last), Duration::ZERO);
+    }
+}
+
+pub(super) fn share_size(text: &str) -> ShareSize {
+    let Some((width, height)) = text.split_once(['x', 'X', '×']) else {
+        return ShareSize::default();
+    };
+    let even = |value: &str| value.trim().parse::<i32>().ok().filter(|n| *n >= 2 && n % 2 == 0);
+    match (even(width), even(height)) {
+        (Some(width), Some(height)) => ShareSize { width, height },
+        _ => ShareSize::default(),
     }
 }

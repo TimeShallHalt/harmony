@@ -1,11 +1,17 @@
 use super::*;
 use crate::harmony_updates::{self, Release, Staged};
+use slint::winit_030::winit::event::WindowEvent;
+use std::{path::Path, time::Instant};
 use yapfast_core::runtime::AbortHandle;
 
 #[derive(Default)]
 pub(super) struct Updates {
     active: bool,
     timer: slint::Timer,
+    idle_timer: slint::Timer,
+    last_input: Rc<Cell<Option<Instant>>>,
+    last_message: Option<Instant>,
+    restarting: bool,
     pending: Option<AbortHandle>,
     downloading: bool,
     offered: Option<Release>,
@@ -50,13 +56,33 @@ impl Updates {
         self.status = "Canceled.".into();
     }
 
-    pub(super) fn finish(&mut self) -> anyhow::Result<()> {
+    pub(super) fn input_clock(&self) -> Rc<Cell<Option<Instant>>> {
+        self.last_input.clone()
+    }
+
+    pub(super) fn user_interacted(&self) {
+        self.last_input.set(Some(Instant::now()));
+    }
+
+    pub(super) fn message_sent(&mut self) {
+        self.last_message = Some(Instant::now());
+    }
+
+    pub(super) fn restarting(&self) -> bool {
+        self.restarting
+    }
+
+    pub(super) fn can_restart(&self) -> bool {
+        self.armed && self.staged.is_some() && harmony_updates::can_restart()
+    }
+
+    pub(super) fn finish(&mut self, reopen: Option<&Path>) -> anyhow::Result<Option<PathBuf>> {
         if self.armed
             && let Some(staged) = self.staged.take()
         {
-            staged.launch()?;
+            return staged.launch(reopen);
         }
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -68,11 +94,133 @@ impl Drop for Updates {
     }
 }
 
+pub(super) fn record_input(clock: &Cell<Option<Instant>>, event: &WindowEvent) {
+    if matches!(
+        event,
+        WindowEvent::Focused(_)
+            | WindowEvent::KeyboardInput { .. }
+            | WindowEvent::MouseInput { .. }
+            | WindowEvent::MouseWheel { .. }
+            | WindowEvent::CursorMoved { .. }
+            | WindowEvent::Touch(_)
+            | WindowEvent::Ime(_)
+            | WindowEvent::DroppedFile(_)
+    ) {
+        clock.set(Some(Instant::now()));
+    }
+}
+
+pub(super) fn sends_message(command: &Command) -> bool {
+    #[cfg(feature = "discord")]
+    if matches!(command, Command::SendVoiceNote { .. }) {
+        return true;
+    }
+    matches!(
+        command,
+        Command::Send { .. }
+            | Command::SendPoll { .. }
+            | Command::ScheduledSend(_)
+            | Command::Discord(yapfast_core::chat::DiscordCommand::SendSticker { .. })
+    )
+}
+
+fn checks(layout: &Layout) -> bool {
+    layout.harmony_release_checks.unwrap_or(true)
+}
+
+fn downloads(layout: &Layout) -> bool {
+    layout.harmony_release_downloads.unwrap_or(true)
+}
+
+fn has_work(a: &Adapter) -> bool {
+    let state = &a.app.state;
+    state.voice.active()
+        || a.call_window.is_some()
+        || state.has_unfinished_content()
+        || state
+            .video
+            .as_ref()
+            .is_some_and(|video| video.playing || video.loading)
+        || a.dialog.is_some()
+        || a.window.upgrade().is_some_and(|window| {
+            window.get_timezone_editor_open()
+                || window.global::<Scheduling>().get_open()
+                || window.global::<VoiceNotes>().get_open()
+        })
+}
+
+fn quiet_long_enough(
+    now: Instant,
+    since_input: Option<Instant>,
+    last_message: Option<Instant>,
+    delay: Duration,
+) -> bool {
+    !delay.is_zero()
+        && since_input.is_some_and(|last| now.saturating_duration_since(last) >= delay)
+        && last_message.is_none_or(|last| now.saturating_duration_since(last) >= delay * 2)
+}
+
+fn request_restart(a: &mut Adapter) {
+    a.updates.restarting = true;
+    if let Err(error) = slint::quit_event_loop() {
+        a.updates.restarting = false;
+        a.updates.status = format!("Could not restart Harmony. {error}");
+        refresh(a);
+    }
+}
+
+fn set_idle_timer(adapter: &Rc<RefCell<Adapter>>) {
+    let a = adapter.borrow();
+    a.updates.idle_timer.stop();
+    if !a.layout.harmony_idle_restart
+        || a.layout.harmony_idle_minutes == 0
+        || !a.updates.can_restart()
+    {
+        return;
+    }
+    let weak = Rc::downgrade(adapter);
+    a.updates.idle_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_secs(5),
+        move || {
+            let Some(adapter) = weak.upgrade() else {
+                return;
+            };
+            let mut a = adapter.borrow_mut();
+            let focused = a.window.upgrade().is_some_and(|window| {
+                window
+                    .window()
+                    .with_winit_window(|native| native.has_focus())
+                    .unwrap_or(false)
+            });
+            let delay = Duration::from_secs(u64::from(a.layout.harmony_idle_minutes) * 60);
+            if !focused
+                && !a.updates.restarting
+                && a.layout.harmony_idle_restart
+                && quiet_long_enough(
+                    Instant::now(),
+                    a.updates.last_input.get(),
+                    a.updates.last_message,
+                    delay,
+                )
+                && !has_work(&a)
+                && a.updates.can_restart()
+            {
+                request_restart(&mut a);
+            }
+        },
+    );
+}
+
 fn show(a: &Adapter, window: &YapfastWindow) {
     let view = window.global::<HarmonyAbout>();
     let state = &a.updates;
-    view.set_check_automatically(a.layout.harmony_release_checks);
-    view.set_download_automatically(a.layout.harmony_release_downloads);
+    view.set_check_automatically(checks(&a.layout));
+    view.set_download_automatically(downloads(&a.layout));
+    view.set_idle_restart(a.layout.harmony_idle_restart);
+    view.set_idle_minutes(a.layout.harmony_idle_minutes.to_string().into());
+    view.set_can_restart(harmony_updates::can_restart());
+    view.set_update_restart_ready(state.staged.is_some() && harmony_updates::can_restart());
     view.set_interval_index(match a.layout.harmony_check_hours {
         Some(1) => 0,
         Some(24) => 2,
@@ -113,9 +261,13 @@ fn refresh(a: &Adapter) {
 }
 
 pub(super) fn start(adapter: &Rc<RefCell<Adapter>>) {
-    adapter.borrow_mut().updates.active = true;
+    {
+        let mut a = adapter.borrow_mut();
+        a.updates.active = true;
+        a.updates.user_interacted();
+    }
     set_timer(adapter);
-    if adapter.borrow().layout.harmony_release_checks {
+    if checks(&adapter.borrow().layout) {
         check(adapter);
     }
 }
@@ -123,7 +275,7 @@ pub(super) fn start(adapter: &Rc<RefCell<Adapter>>) {
 fn set_timer(adapter: &Rc<RefCell<Adapter>>) {
     let a = adapter.borrow();
     a.updates.timer.stop();
-    if a.updates.active && a.layout.harmony_release_checks {
+    if a.updates.active && checks(&a.layout) {
         let hours = match a.layout.harmony_check_hours {
             Some(1) => 1,
             Some(24) => 24,
@@ -169,7 +321,7 @@ fn check(adapter: &Rc<RefCell<Adapter>>) {
                         .status
                         .push_str(" This release has no signed package for this installation.");
                 }
-                if a.layout.harmony_release_checks {
+                if checks(&a.layout) && !downloads(&a.layout) {
                     let message = format!(
                         "A Harmony update is available in Settings → About ({})",
                         release.tag
@@ -185,7 +337,7 @@ fn check(adapter: &Rc<RefCell<Adapter>>) {
             Ok(Err(error)) => a.updates.status = format!("Update check failed. {error}"),
             Err(_) => a.updates.status = "Update check interrupted.".into(),
         }
-        let automatic = a.layout.harmony_release_downloads
+        let automatic = downloads(&a.layout)
             && a.updates
                 .offered
                 .as_ref()
@@ -229,12 +381,19 @@ fn download(adapter: &Rc<RefCell<Adapter>>) {
         match result {
             Ok(Ok(staged)) => {
                 a.updates.staged = Some(staged);
-                a.updates.status = "Signature verified. The update is ready to install.".into();
+                a.updates.armed = downloads(&a.layout);
+                a.updates.status = if a.updates.armed {
+                    "Update ready. It will install on your next full quit.".into()
+                } else {
+                    "Update ready to install.".into()
+                };
             }
             Ok(Err(error)) => a.updates.status = format!("Could not prepare this update. {error}"),
             Err(_) => a.updates.status = "Download interrupted.".into(),
         }
         refresh(&a);
+        drop(a);
+        set_idle_timer(&adapter);
     });
     refresh(&a);
 }
@@ -265,13 +424,54 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
     let weak = Rc::downgrade(adapter);
     view.on_arm_install(move |arm| {
         if let Some(a) = weak.upgrade() {
-            let mut a = a.borrow_mut();
-            a.updates.armed = a.updates.active && arm && a.updates.staged.is_some();
-            refresh(&a);
+            {
+                let mut adapter = a.borrow_mut();
+                adapter.updates.armed =
+                    adapter.updates.active && arm && adapter.updates.staged.is_some();
+                refresh(&adapter);
+            }
+            set_idle_timer(&a);
         }
     });
     let weak = Rc::downgrade(adapter);
-    view.on_save_update_options(move |checks, downloads, interval| {
+    view.on_save_idle_options(move |enabled, minutes| {
+        let Some(adapter) = weak.upgrade() else {
+            return "".into();
+        };
+        let Ok(minutes) = minutes.trim().parse::<u32>() else {
+            return "Enter a whole number of minutes, or 0 to wait for a manual restart.".into();
+        };
+        let mut a = adapter.borrow_mut();
+        if !a.updates.active {
+            return "".into();
+        }
+        a.layout.harmony_idle_restart = enabled;
+        a.layout.harmony_idle_minutes = minutes;
+        a.layout.write(&a.root);
+        refresh(&a);
+        drop(a);
+        set_idle_timer(&adapter);
+        "".into()
+    });
+    let weak = Rc::downgrade(adapter);
+    view.on_restart_update(move || {
+        if let Some(adapter) = weak.upgrade() {
+            let mut a = adapter.borrow_mut();
+            if a.updates.staged.is_none() || !harmony_updates::can_restart() {
+                return;
+            }
+            if has_work(&a) {
+                a.updates.status =
+                    "Finish any drafts, calls and open tasks before restarting.".into();
+                refresh(&a);
+                return;
+            }
+            a.updates.armed = true;
+            request_restart(&mut a);
+        }
+    });
+    let weak = Rc::downgrade(adapter);
+    view.on_save_update_options(move |check_auto, download_auto, interval| {
         let Some(adapter) = weak.upgrade() else {
             return;
         };
@@ -279,23 +479,27 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
         if !a.updates.active {
             return;
         }
-        let start_now = checks && !a.layout.harmony_release_checks;
-        let was_auto = a.layout.harmony_release_downloads;
-        let download_now = downloads && !was_auto;
-        a.layout.harmony_release_checks = checks;
-        a.layout.harmony_release_downloads = downloads;
+        let start_now = check_auto && !checks(&a.layout);
+        let was_auto = downloads(&a.layout);
+        let download_now = download_auto && !was_auto;
+        a.layout.harmony_release_checks = Some(check_auto);
+        a.layout.harmony_release_downloads = Some(download_auto);
         a.layout.harmony_check_hours = Some(match interval {
             0 => 1,
             2 => 24,
             _ => 6,
         });
-        if was_auto && !downloads && a.updates.downloading {
+        if was_auto && !download_auto && a.updates.downloading {
             a.updates.cancel();
+        }
+        if a.updates.staged.is_some() && was_auto != download_auto {
+            a.updates.armed = download_auto;
         }
         a.layout.write(&a.root);
         refresh(&a);
         drop(a);
         set_timer(&adapter);
+        set_idle_timer(&adapter);
         if start_now {
             check(&adapter);
         } else if download_now {
@@ -307,6 +511,18 @@ pub(super) fn bind(window: &YapfastWindow, adapter: &Rc<RefCell<Adapter>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_restarts_wait_twice_as_long_after_sending_and_zero_waits_forever() {
+        let now = Instant::now();
+        let delay = Duration::from_secs(300);
+        let ago = |seconds| now.checked_sub(Duration::from_secs(seconds));
+        assert!(!quiet_long_enough(now, ago(900), ago(900), Duration::ZERO));
+        assert!(!quiet_long_enough(now, ago(299), None, delay));
+        assert!(!quiet_long_enough(now, ago(300), ago(599), delay));
+        assert!(quiet_long_enough(now, ago(300), ago(600), delay));
+        assert!(quiet_long_enough(now, ago(300), None, delay));
+    }
 
     #[test]
     fn cancellation_stops_the_observed_worker_and_ignores_its_late_result() {
@@ -355,17 +571,21 @@ mod tests {
         bind(&window, &adapter);
         let about = window.global::<HarmonyAbout>();
         about.invoke_save_update_options(true, true, 0);
-        assert!(!adapter.borrow().layout.harmony_release_checks);
-        assert!(!adapter.borrow().layout.harmony_release_downloads);
+        assert!(checks(&adapter.borrow().layout));
+        assert!(downloads(&adapter.borrow().layout));
         assert!(adapter.borrow().updates.pending.is_none());
-        adapter.borrow_mut().updates.active = true;
+        {
+            let mut a = adapter.borrow_mut();
+            a.updates.active = true;
+            a.updates.last_input.set(Some(Instant::now()));
+        }
         about.invoke_save_update_options(false, true, 2);
         about.invoke_arm_install(true);
         assert!(!adapter.borrow().updates.armed);
         let saved = Layout::read(root.path());
         assert_eq!(saved.harmony_check_hours, Some(24));
-        assert!(saved.harmony_release_downloads);
-        assert!(!saved.harmony_release_checks);
+        assert!(downloads(&saved));
+        assert!(!checks(&saved));
         let restored = YapfastWindow::new().unwrap();
         bind(&restored, &adapter);
         assert_eq!(restored.global::<HarmonyAbout>().get_interval_index(), 2);
