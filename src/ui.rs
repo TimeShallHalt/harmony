@@ -1258,7 +1258,9 @@ struct KeptStickerUse {
 #[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct Layout {
+    #[serde(skip_serializing_if = "Option::is_none")]
     harmony_release_checks: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     harmony_release_downloads: Option<bool>,
     harmony_check_hours: Option<u64>,
     harmony_idle_restart: bool,
