@@ -42,7 +42,8 @@ try {
     if ($Platform -eq 'windows-x64') {
         $metadata = $file.VersionInfo
         $embeddedVersion = '{0}.{1}.{2}.{3}' -f $metadata.FileMajorPart, $metadata.FileMinorPart, $metadata.FileBuildPart, $metadata.FilePrivatePart
-        if ($embeddedVersion -cne "$version.$build" -or $metadata.ProductName.Trim() -cne 'Harmony' -or $metadata.FileDescription.Trim() -cne 'Harmony Installer') {
+        $installerDescriptions = @('Harmony Installer', 'Harmony Installer with Repair')
+        if ($embeddedVersion -cne "$version.$build" -or $metadata.ProductName.Trim() -cne 'Harmony' -or $metadata.FileDescription.Trim() -cnotin $installerDescriptions) {
             throw 'Setup was not built for this Harmony release tag. Check the embedded product version and build number.'
         }
     } else {
