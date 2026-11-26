@@ -750,5 +750,55 @@
       "sha256": "5096967f408fab8da02f4b6dfac6b00ccc19ca17c635f9009ee74594ac275e18",
       "url": "https://raw.githubusercontent.com/robertknight/rten/96147920a58fd84057826dfd358a227c06d4447b/LICENSE-MIT.txt"
     }
+  ],
+  "accesskit_atspi_common-0.21.1": [
+    {
+      "path": "licenses/upstream-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "url": "https://raw.githubusercontent.com/AccessKit/accesskit/f3026222559c7f5f46d8f25cb7404de68eb149f0/LICENSE-MIT"
+    },
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/AccessKit/accesskit/f3026222559c7f5f46d8f25cb7404de68eb149f0/LICENSE-APACHE"
+    }
+  ],
+  "accesskit_unix-0.24.1": [
+    {
+      "path": "licenses/upstream-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "url": "https://raw.githubusercontent.com/AccessKit/accesskit/f3026222559c7f5f46d8f25cb7404de68eb149f0/LICENSE-MIT"
+    },
+    {
+      "path": "licenses/upstream-62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/AccessKit/accesskit/f3026222559c7f5f46d8f25cb7404de68eb149f0/LICENSE-APACHE"
+    }
+  ],
+  "gbm-sys-0.4.0": [
+    {
+      "path": "licenses/upstream-56ab09c42eb251646c1c00ba32f5db0e51e297cd379eccc5a1cb7808f2de4ce7.txt",
+      "sha256": "56ab09c42eb251646c1c00ba32f5db0e51e297cd379eccc5a1cb7808f2de4ce7",
+      "url": "https://raw.githubusercontent.com/Drakulix/gbm.rs/2b4047f8e5ab4d050d4ed88f5ee2515069478fac/LICENSE"
+    }
+  ],
+  "ksni-0.3.7": [
+    {
+      "path": "licenses/upstream-7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt",
+      "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+      "url": "https://raw.githubusercontent.com/iovxw/ksni/2397cc2ce535ba4e7ed77fecd94731c5239923e7/UNLICENSE"
+    }
+  ],
+  "drm-fourcc-2.2.0": [
+    {
+      "path": "licenses/drm-fourcc-2.2.0-Cargo.toml.orig",
+      "sha256": "0660e17d634e5b8c2a82cd0b0328c42fbc6e8b77a9f37b85f49bfeba1f4931ca",
+      "url": "https://crates.io/api/v1/crates/drm-fourcc/2.2.0/download"
+    },
+    {
+      "path": "licenses/SPDX-MIT.txt",
+      "sha256": "6d7c9e9d7d12c8d3753bdb24417b84819ba4d6c2f025c37948113d86dc81eef9",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.26.0/text/MIT.txt"
+    }
   ]
 }

@@ -8,8 +8,8 @@ Most supplements are unchanged license files fetched from the repository commit
 recorded by the exact published crate's `.cargo_vcs_info.json` (or the pinned
 Cargo Git dependency revision). The original author/copyright notices are kept.
 
-Eight published crates have no standalone license file at their recorded commit:
-from_variants 1.0.2, from_variants_impl 1.0.2, hpke-rs 0.6.1,
+The following crates have no standalone license file at their recorded commit:
+drm-fourcc 2.2.0, from_variants 1.0.2, from_variants_impl 1.0.2, hpke-rs 0.6.1,
 hpke-rs-crypto 0.6.1, hpke-rs-libcrux 0.6.1, hpke-rs-rust-crypto 0.6.1,
 realfft 3.5.0 and serenity-voice-model 0.3.0. Their unchanged published
 `Cargo.toml.orig` declarations/authorship are included, alongside the appropriate
